@@ -411,7 +411,7 @@ function AIAnalyzeSheet({ onClose, onSave }) {
   const removeFile = idx => setFiles(prev => prev.filter((_, i) => i !== idx));
   const clearAll   = () => { setFiles([]); setResult(null); setError(null); setChunks([]); setSavePinned(false); };
 
-  /* 묶음 1개(5~6장) → 텍스트 요약 */
+  /* 묶음 1개(5~6장) → 텍스트 요약 (재시도 3회) */
   const analyzeChunk = async (chunkFiles, chunkIdx) => {
     setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"analyzing" } : c));
 
@@ -430,24 +430,29 @@ JSON만 반환하고 다른 텍스트는 절대 포함하지 마세요.
 {"text": "이미지에서 추출한 모든 내용 (생략 없이 전부)"}
 내용이 없으면: {"text": ""}`;
 
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: JSON.stringify({
-          model:"claude-haiku-4-5-20251001", max_tokens:4096,
-          messages:[{ role:"user", content:[...blocks, { type:"text", text:prompt }] }],
-        }),
-      });
-      const data   = await resp.json();
-      const raw    = data.content?.map(c => c.text || "").join("").trim();
-      const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-      const summary = parsed.text || "";
-      setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"done", summary } : c));
-      return summary;
-    } catch {
-      setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"error", summary:"" } : c));
-      return "";
+    const MAX_RETRY = 3;
+    for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+      try {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt)); // 재시도 대기
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body: JSON.stringify({
+            model:"claude-haiku-4-5-20251001", max_tokens:4096,
+            messages:[{ role:"user", content:[...blocks, { type:"text", text:prompt }] }],
+          }),
+        });
+        if (resp.status === 429) { continue; } // rate limit → 재시도
+        const data    = await resp.json();
+        if (data.error) { continue; } // API 에러 → 재시도
+        const raw     = data.content?.map(c => c.text || "").join("").trim();
+        const parsed  = JSON.parse(raw.replace(/```json|```/g, "").trim());
+        const summary = parsed.text || "";
+        setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"done", summary } : c));
+        return summary;
+      } catch { /* 재시도 */ }
     }
+    setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"error", summary:"" } : c));
+    return "";
   };
 
   /* 수집된 텍스트 → 공지 1개로 합치기 */
@@ -498,7 +503,7 @@ ${combined}
       for (let idx = 0; idx < grouped.length; idx++) {
         const text = await analyzeChunk(grouped[idx], idx);
         texts.push(text);
-        if (idx < grouped.length - 1) await new Promise(r => setTimeout(r, 500));
+        if (idx < grouped.length - 1) await new Promise(r => setTimeout(r, 2000));
       }
 
       // 마지막 합치기
