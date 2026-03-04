@@ -80,6 +80,10 @@ const BASE_CAT = {
   제상품:  { color:"#5AC8FA", dim:"rgba(90,200,250,0.13)",  border:"rgba(90,200,250,0.2)"  },
   기타:    { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)", border:"rgba(207,159,255,0.2)" },
 };
+
+// 모듈 레벨 CAT - App에서 동적으로 업데이트됨, 모든 컴포넌트에서 참조 가능
+let CAT = { ...BASE_CAT };
+
 const PRIO = {
   높음:{ color:T.red,    dim:T.redDim    },
   보통:{ color:T.orange, dim:T.orangeDim },
@@ -402,8 +406,9 @@ function App() {
   const [noticeCat,   setNoticeCat]   = useState("전체");
   const [showCatMgr,  setShowCatMgr]  = useState(false);
 
-  // 동적 CAT 맵
-  const CAT = { ...BASE_CAT };
+  // 모듈 레벨 CAT을 동적으로 업데이트 (NRow/ERow 등 모든 컴포넌트에서 참조)
+  Object.keys(CAT).forEach(k => { if (!BASE_CAT[k]) delete CAT[k]; });
+  Object.assign(CAT, BASE_CAT);
   (categories||DEFAULT_CATS).forEach((name, i) => {
     if (!CAT[name]) {
       const ci = CAT_COLORS[i % CAT_COLORS.length];
