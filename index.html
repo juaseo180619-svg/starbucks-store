@@ -21,7 +21,8 @@
 <body>
   <div id="root"></div>
   <script>
-    window.ANTHROPIC_API_KEY = "";
+    // 페이지 로드 즉시 저장된 키를 window에 세팅
+    window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
     window.storage = {
       get: async (key, shared) => {
         const k = (shared ? "sh_" : "pr_") + key;
@@ -730,6 +731,7 @@ function ApiKeySetup({ onComplete }) {
       if (data.error) { setError("키가 유효하지 않아요: " + data.error.message); setTesting(false); return; }
       window.ANTHROPIC_API_KEY = k;
       try { localStorage.setItem("sbx_apikey", k); } catch {}
+      window.ANTHROPIC_API_KEY = k; // 재확인
       onComplete();
     } catch { setError("연결에 실패했어요. 키를 다시 확인해주세요."); setTesting(false); }
   };
@@ -804,6 +806,7 @@ function App() {
   }, []);
 
   const handleApiKeyComplete = () => {
+    window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
     setApiKeyReady(true);
   };
 
