@@ -21,7 +21,6 @@
 <body>
   <div id="root"></div>
   <script>
-    // 페이지 로드 즉시 저장된 키를 window에 세팅
     window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
     window.storage = {
       get: async (key, shared) => {
@@ -368,11 +367,33 @@ function AIAnalyzeSheet({ onClose, onSave }) {
   const [savePinned, setSavePinned] = useState(false);
   const fileRef = useRef();
 
-  const toBase64 = f => new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload  = () => res(r.result.split(",")[1]);
-    r.onerror = () => rej();
-    r.readAsDataURL(f);
+  // 이미지 자동 압축 후 base64 변환 (최대 1280px, 품질 0.7)
+  const toBase64 = (f) => new Promise((res, rej) => {
+    if (f.type === "application/pdf") {
+      const r = new FileReader();
+      r.onload  = () => res(r.result.split(",")[1]);
+      r.onerror = () => rej();
+      r.readAsDataURL(f);
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      const MAX = 1280;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else       { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      const data = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+      res(data);
+    };
+    img.onerror = () => rej();
+    img.src = url;
   });
 
   const handleFiles = (incoming) => {
