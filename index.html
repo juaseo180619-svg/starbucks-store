@@ -19,6 +19,8 @@
     [contenteditable]:empty:before{content:attr(data-placeholder);color:#555;pointer-events:none;position:absolute}
     .rich-editor{outline:none;position:relative}
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
+    .rich-editor mark{padding:1px 3px;border-radius:3px}
+    blockquote,.rich-editor blockquote{border-left:3px solid #3DDC84;margin-left:0;padding-left:12px;color:rgba(255,255,255,0.6)}
     @keyframes spin{to{transform:rotate(360deg)}}
     @keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}
   </style>
@@ -61,11 +63,23 @@ const T = {
   purple:"#CF9FFF", purpleDim:"rgba(207,159,255,0.13)",
 };
 
-const CAT = {
-  이벤트:{ color:T.green,  dim:T.greenDim,  border:"rgba(61,220,132,0.2)"  },
-  운영:  { color:T.orange, dim:T.orangeDim, border:"rgba(255,179,71,0.2)"  },
-  인사:  { color:T.blue,   dim:T.blueDim,   border:"rgba(90,200,250,0.2)"  },
-  기타:  { color:T.purple, dim:T.purpleDim, border:"rgba(207,159,255,0.2)" },
+const CAT_COLORS = [
+  { color:"#3DDC84", dim:"rgba(61,220,132,0.13)"  },
+  { color:"#FFB347", dim:"rgba(255,179,71,0.13)"  },
+  { color:"#5AC8FA", dim:"rgba(90,200,250,0.13)"  },
+  { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)" },
+  { color:"#FF6B6B", dim:"rgba(255,107,107,0.13)" },
+  { color:"#FFD60A", dim:"rgba(255,214,10,0.13)"  },
+  { color:"#FF9ECD", dim:"rgba(255,158,205,0.13)" },
+  { color:"#64D8CB", dim:"rgba(100,216,203,0.13)" },
+];
+const DEFAULT_CATS = ["프로모션","이벤트","제상품"];
+// CAT은 App 내부에서 동적으로 만들어짐
+const BASE_CAT = {
+  프로모션:{ color:"#3DDC84", dim:"rgba(61,220,132,0.13)",  border:"rgba(61,220,132,0.2)"  },
+  이벤트:  { color:"#FFB347", dim:"rgba(255,179,71,0.13)",  border:"rgba(255,179,71,0.2)"  },
+  제상품:  { color:"#5AC8FA", dim:"rgba(90,200,250,0.13)",  border:"rgba(90,200,250,0.2)"  },
+  기타:    { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)", border:"rgba(207,159,255,0.2)" },
 };
 const PRIO = {
   높음:{ color:T.red,    dim:T.redDim    },
@@ -372,6 +386,7 @@ function App() {
 
   /* 공유 데이터 */
   const [notices,   saveNotices,   nL] = useShared("sbx6_notices", SEED_NOTICES);
+  const [categories,  saveCategories] = useShared("sbx6_categories", DEFAULT_CATS);
   const [events,    saveEvents,    eL] = useShared("sbx6_events",  SEED_EVENTS);
   const [roleTasks, saveRoleTasks, rL] = useShared(roleTaskKey, []);
   /* 개인 할일 */
@@ -386,6 +401,16 @@ function App() {
   const [addEvent,    setAddEvent]    = useState(false);
   const [addTask,     setAddTask]     = useState(false);
   const [noticeCat,   setNoticeCat]   = useState("전체");
+  const [showCatMgr,  setShowCatMgr]  = useState(false);
+
+  // 동적 CAT 맵
+  const CAT = { ...BASE_CAT };
+  (categories||DEFAULT_CATS).forEach((name, i) => {
+    if (!CAT[name]) {
+      const ci = CAT_COLORS[i % CAT_COLORS.length];
+      CAT[name] = { color:ci.color, dim:ci.dim, border:ci.color+"33" };
+    }
+  });
 
   const [calDate, setCalDate] = useState(new Date());
   const [selDay,  setSelDay]  = useState(todayStr());
@@ -684,15 +709,21 @@ function App() {
               <span style={{ color:T.green, fontSize:18 }}>›</span>
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, gap:8 }}>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                {["전체","이벤트","운영","인사","기타"].map(c=>(
-                  <button key={c} onClick={()=>setNoticeCat(c)} style={{
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                {["전체",...(categories||DEFAULT_CATS)].map(cat=>(
+                  <button key={cat} onClick={()=>setNoticeCat(cat)} style={{
                     padding:"6px 13px", borderRadius:20, fontSize:13, fontWeight:600,
-                    border:`1px solid ${noticeCat===c?T.green:T.border0}`, cursor:"pointer", fontFamily:F,
-                    background:noticeCat===c?T.greenDim:T.glass1,
-                    backdropFilter:"blur(16px)", color:noticeCat===c?T.green:T.l2,
-                  }}>{c}</button>
+                    border:"1px solid "+(noticeCat===cat?(CAT[cat]||{color:T.green}).color:T.border0),
+                    cursor:"pointer", fontFamily:F,
+                    background:noticeCat===cat?(CAT[cat]||{dim:T.greenDim}).dim:T.glass1,
+                    backdropFilter:"blur(16px)",
+                    color:noticeCat===cat?(CAT[cat]||{color:T.green}).color:T.l2,
+                  }}>{cat}</button>
                 ))}
+                <button onClick={()=>setShowCatMgr(true)} style={{
+                  padding:"5px 10px", borderRadius:20, fontSize:12, fontWeight:600,
+                  border:"1px solid "+T.border1, cursor:"pointer", fontFamily:F,
+                  background:T.glass1, color:T.l3 }}>⚙</button>
               </div>
               <ActionBtn onClick={()=>setAddNotice(true)}>+ 작성</ActionBtn>
             </div>
@@ -711,151 +742,152 @@ function App() {
 
         {/* ── CALENDAR ── */}
         {tab==="calendar"&&(()=>{
+          const mStr = cY+"-"+String(cM+1).padStart(2,"0");
           const monthEvents = (events||[]).filter(e => {
-            const start = e.date;
-            const end   = e.endDate || e.date;
-            const mStr  = cY+"-"+String(cM+1).padStart(2,"0");
-            return start.slice(0,7)===mStr || end.slice(0,7)===mStr ||
-                   (start < mStr+"-01" && end > mStr+"-31");
+            const s = e.date, en = e.endDate||e.date;
+            return s.slice(0,7)===mStr||en.slice(0,7)===mStr||(s<mStr+"-01"&&en>mStr+"-31");
           });
 
+          // 주(행) 배열 만들기
           const weeks = [];
-          let day = 1, weekStart = firstDow;
-          while (day <= daysInMo) {
+          let d = 1, blanks = firstDow;
+          while (d <= daysInMo) {
             const row = [];
             for (let col = 0; col < 7; col++) {
-              if (weekStart > 0) { row.push(null); weekStart--; }
-              else if (day <= daysInMo) { row.push(day); day++; }
+              if (blanks > 0) { row.push(null); blanks--; }
+              else if (d <= daysInMo) { row.push(d); d++; }
               else row.push(null);
             }
             weeks.push(row);
           }
 
-          const getEventBars = (weekDays) => {
-            const valid = weekDays.filter(d => d !== null);
-            if (!valid.length) return [];
-            const wStart = valid[0], wEnd = valid[valid.length-1];
+          // 이 주에 해당하는 이벤트 바 계산
+          // 각 셀은 gap 포함 정확히 1/7 너비. position:absolute로 렌더.
+          // colW = (containerW - 6*GAP) / 7 → CSS로: calc((100% - 12px)/7)
+          // col i 시작 x = i * (colW + GAP) = calc(i*(100%-12px)/7 + i*2px)
+          const getEventBars = (weekRow) => {
+            const validDays = weekRow.filter(x=>x!==null);
+            if (!validDays.length) return [];
+            const wStart = validDays[0], wEnd = validDays[validDays.length-1];
             const bars = [];
             monthEvents.forEach(ev => {
-              const evStart = parseInt((ev.date||"").slice(8,10));
-              const evEnd   = parseInt((ev.endDate||ev.date||"").slice(8,10));
-              if (evStart > wEnd || evEnd < wStart) return;
-              const barStart = Math.max(evStart, wStart);
-              const barEnd   = Math.min(evEnd, wEnd);
-              const colStart = weekDays.indexOf(barStart);
-              const colEnd   = weekDays.indexOf(barEnd);
-              const span     = (colEnd>=0?colEnd:6) - (colStart>=0?colStart:0) + 1;
-              bars.push({ ev, startCol:colStart>=0?colStart:0, span,
-                startsHere: evStart>=wStart, endsHere: evEnd<=wEnd });
+              const evS = parseInt((ev.date||"").slice(8,10)||"0");
+              const evE = parseInt((ev.endDate||ev.date||"").slice(8,10)||"0");
+              if (evS > wEnd || evE < wStart) return;
+              const clampS = Math.max(evS, wStart);
+              const clampE = Math.min(evE, wEnd);
+              // 열 인덱스: weekRow에서 실제 날짜 위치
+              const colS = weekRow.findIndex(x => x===clampS);
+              const colE = weekRow.findIndex(x => x===clampE);
+              if (colS < 0 || colE < 0) return;
+              bars.push({
+                ev, colS, colE,
+                startsHere: evS >= wStart,
+                endsHere:   evE <= wEnd,
+              });
             });
-            // 슬롯 배치
-            const used = [];
+            // 슬롯 배치 (겹침 방지)
             bars.forEach(bar => {
               let slot = 0;
-              while (used[slot]&&used[slot].some(b=>
-                b.startCol < bar.startCol+bar.span && b.startCol+b.span > bar.startCol)) slot++;
-              if (!used[slot]) used[slot]=[];
-              used[slot].push(bar);
+              const busy = [];
+              bars.forEach(b => {
+                if (b===bar) return;
+                if (b.slot!=null && b.colS <= bar.colE && b.colE >= bar.colS) busy.push(b.slot);
+              });
+              while (busy.includes(slot)) slot++;
               bar.slot = slot;
             });
             return bars;
           };
 
           const selDayEvents = (events||[]).filter(e => {
-            const start = e.date, end = e.endDate||e.date;
-            return selDay >= start && selDay <= end;
+            return selDay >= e.date && selDay <= (e.endDate||e.date);
           });
 
           const GAP = 2;
-          const maxSlots = 3;
+          const MAX_SLOTS = 3;
 
           return (
             <div style={{ padding:"16px" }} className="fi">
               {/* 월 네비 */}
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
                 <button onClick={()=>setCalDate(new Date(cY,cM-1,1))} style={{
-                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",
-                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
+                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
                   cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1}}>‹</button>
                 <span style={{fontSize:18,fontWeight:700,color:T.l1,fontFamily:F}}>
                   {calDate.toLocaleDateString("ko-KR",{year:"numeric",month:"long"})}
                 </span>
                 <button onClick={()=>setCalDate(new Date(cY,cM+1,1))} style={{
-                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",
-                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
+                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
                   cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1}}>›</button>
               </div>
 
               {/* 요일 헤더 */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
-                {WDAYS.map((d,i)=>(
-                  <div key={d} style={{textAlign:"center",fontSize:11,fontWeight:600,
-                    fontFamily:F,padding:"2px 0",
-                    color:i===0?T.red:i===6?T.blue:T.l3}}>{d}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:GAP,marginBottom:GAP}}>
+                {WDAYS.map((wd,i)=>(
+                  <div key={wd} style={{textAlign:"center",fontSize:11,fontWeight:600,fontFamily:F,padding:"2px 0",
+                    color:i===0?T.red:i===6?T.blue:T.l3}}>{wd}</div>
                 ))}
               </div>
 
-              {/* 주 단위 */}
-              {weeks.map((weekDays,wi)=>{
-                const bars = getEventBars(weekDays);
-                const slotCount = bars.length>0 ? Math.min(bars.reduce((m,b)=>Math.max(m,b.slot+1),0),maxSlots) : 0;
-                const cellH = 30 + slotCount*20;
+              {/* 주 단위 렌더 */}
+              {weeks.map((weekRow, wi) => {
+                const bars = getEventBars(weekRow);
+                const slotCount = bars.reduce((m,b)=>Math.max(m,b.slot+1),0);
+                const visSlots  = Math.min(slotCount, MAX_SLOTS);
+                const cellH = 28 + visSlots * 19;
+
                 return (
-                  <div key={wi} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",
-                    gap:GAP,marginBottom:GAP,position:"relative"}}>
+                  <div key={wi} style={{
+                    display:"grid", gridTemplateColumns:"repeat(7,1fr)",
+                    gap:GAP, marginBottom:GAP,
+                    position:"relative",
+                  }}>
                     {/* 날짜 셀 */}
-                    {weekDays.map((d,ci)=>{
-                      if(d===null) return <div key={"e"+ci} style={{height:cellH}}/>;
-                      const dStr = cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+                    {weekRow.map((day, ci) => {
+                      if (day===null) return <div key={"n"+ci} style={{height:cellH,borderRadius:8}}/>;
+                      const dStr = cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
                       const isTod = dStr===todayStr();
-                      const isSel = dStr===selDay;
-                      const isSun=ci===0, isSat=ci===6;
+                      const isSel = dStr===selDay && !isTod;
                       return (
-                        <div key={d} onClick={()=>setSelDay(dStr)} style={{
-                          height:cellH,
-                          background:isTod
+                        <div key={day} onClick={()=>setSelDay(dStr)} style={{
+                          height:cellH, borderRadius:8, cursor:"pointer",
+                          background: isTod
                             ? "linear-gradient(145deg,"+T.green+",#28a864)"
-                            : isSel
-                              ? T.glass3
-                              : T.glass1,
-                          backdropFilter:"blur(20px) saturate(180%)",
-                          WebkitBackdropFilter:"blur(20px) saturate(180%)",
-                          border:"2px solid "+(isSel&&!isTod?"rgba(255,255,255,0.35)":isTod?"rgba(61,220,132,0.6)":T.border0),
-                          borderRadius:8,
-                          display:"flex",alignItems:"flex-start",justifyContent:"center",
-                          paddingTop:5,
-                          boxShadow:isTod?"0 4px 20px rgba(61,220,132,0.35)":"none",
-                          cursor:"pointer",
+                            : isSel ? T.glass3 : T.glass1,
+                          border:"1.5px solid "+(isTod?"rgba(61,220,132,0.6)":isSel?"rgba(255,255,255,0.3)":T.border0),
+                          boxShadow:isTod?"0 4px 20px rgba(61,220,132,0.3)":"none",
+                          display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:5,
                           position:"relative", zIndex:1,
                         }}>
                           <span style={{fontSize:12,fontWeight:isTod?800:500,lineHeight:1,fontFamily:F,
-                            color:isTod?"#001808":isSun?T.red:isSat?T.blue:T.l1}}>{d}</span>
+                            color:isTod?"#001808":ci===0?T.red:ci===6?T.blue:T.l1,pointerEvents:"none"}}>{day}</span>
                         </div>
                       );
                     })}
 
-                    {/* 이벤트 바 오버레이 (z-index 높게) */}
-                    {bars.filter(b=>b.slot<maxSlots).map((bar,bi)=>{
-                      const meta=CAT[bar.ev.category]||CAT["기타"];
-                      const topOff = 26 + bar.slot*20;
-                      const leftFrac = bar.startCol/7*100;
-                      const wFrac = bar.span/7*100;
-                      const gapAdjust = (bar.span-1)*GAP;
+                    {/* 이벤트 바 오버레이 - z-index 높게, 정확한 열 위치 */}
+                    {bars.filter(b=>b.slot<MAX_SLOTS).map((bar,bi) => {
+                      const meta = CAT[bar.ev.category] || { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)" };
+                      const top = 24 + bar.slot * 19;
+                      const span = bar.colE - bar.colS + 1;
+                      // CSS calc: 각 셀 너비 = (100% - 6*GAP) / 7
+                      // col i 시작 = i * (셀너비 + GAP)
+                      const leftCalc = "calc("+bar.colS+" * ((100% - "+(6*GAP)+"px) / 7 + "+GAP+"px))";
+                      const widthCalc = "calc("+span+" * (100% - "+(6*GAP)+"px) / 7 + "+(span-1)*GAP+"px"
+                        +(bar.startsHere?" - 2px":"")+(bar.endsHere?" - 2px":"")+")"
                       return (
-                        <div key={bar.ev.id+"_"+wi+"_"+bi} style={{
+                        <div key={bar.ev.id+"_"+bi} style={{
                           position:"absolute",
-                          top:topOff,
-                          left:"calc("+leftFrac+"% + "+(bar.startCol*GAP)+"px"+(bar.startsHere?"+1px":"")+")",
-                          width:"calc("+wFrac+"% - "+(bar.startCol*GAP)+"px - "+((7-bar.startCol-bar.span)*GAP)+"px"+(bar.startsHere?"-2px":"")+(bar.endsHere?"-2px":"")+")",
+                          top, left:leftCalc, width:widthCalc,
                           height:15,
-                          background:meta.color+"55",
-                          borderLeft:bar.startsHere?"3px solid "+meta.color:"none",
-                          borderRadius:bar.startsHere?(bar.endsHere?"5px":"5px 0 0 5px"):(bar.endsHere?"0 5px 5px 0":"0"),
-                          display:"flex",alignItems:"center",
-                          paddingLeft:bar.startsHere?4:2,
+                          background:meta.color+"44",
+                          borderLeft: bar.startsHere ? "3px solid "+meta.color : "none",
+                          borderRadius: bar.startsHere ? (bar.endsHere?"5px":"5px 0 0 5px") : (bar.endsHere?"0 5px 5px 0":"0"),
+                          display:"flex", alignItems:"center",
+                          paddingLeft: bar.startsHere ? 4 : 2,
                           overflow:"hidden",
-                          zIndex:10,
-                          pointerEvents:"none",
+                          zIndex:5, pointerEvents:"none",
                         }}>
                           {bar.startsHere&&(
                             <span style={{fontSize:9,fontWeight:700,color:meta.color,
@@ -871,20 +903,18 @@ function App() {
               })}
 
               {/* 선택 날짜 일정 */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                marginBottom:10,marginTop:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,marginTop:16}}>
                 <div>
                   <span style={{fontSize:15,fontWeight:600,color:T.l1,fontFamily:F}}>
                     {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
                   </span>
                   <span style={{fontSize:13,color:T.l3,fontFamily:F,marginLeft:6}}>
-                    {selDayEvents.length>0?selDayEvents.length+"개 일정":"일정 없음"}
+                    {selDayEvents.length>0?selDayEvents.length+"개":"없음"}
                   </span>
                 </div>
                 <ActionBtn onClick={()=>setAddEvent(true)}>+ 추가</ActionBtn>
               </div>
-              <div style={{...glassBox({overflow:"hidden",
-                boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)"})}}>
+              <div style={{...glassBox({overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)"})}}>
                 {selDayEvents.length===0
                   ? <EmptyRow text="이 날에 일정이 없어요"/>
                   : selDayEvents.map((e,i,arr)=>(
@@ -1065,6 +1095,7 @@ function App() {
 
       {addNotice&&(
         <RichNoticeSheet
+          categories={categories}
           onClose={()=>setAddNotice(false)}
           onSave={(data)=>{ submitNoticeRich(data); setAddNotice(false); }}
         />
@@ -1127,8 +1158,10 @@ function App() {
       )}
 
       {aiChat&&<AIChatSheet onClose={()=>setAiChat(false)} notices={notices||[]}/>}
+      {showCatMgr&&<CatManagerSheet onClose={()=>setShowCatMgr(false)} categories={categories} onSave={saveCategories}/>}
       {editNotice&&(
         <RichNoticeSheet
+          categories={categories}
           initial={editNotice}
           onClose={()=>setEditNotice(null)}
           onSave={(data)=>{
@@ -1143,14 +1176,14 @@ function App() {
 
 
 /* ══════════════════ 리치텍스트 공지 작성 ══════════════════ */
-function RichNoticeSheet({ onClose, onSave, initial }) {
+function RichNoticeSheet({ onClose, onSave, initial, categories }) {
+  const cats = categories && categories.length ? categories : DEFAULT_CATS;
   const [title, setTitle]       = useState(initial ? initial.title : "");
-  const [category, setCategory] = useState(initial ? initial.category : "이벤트");
+  const [category, setCategory] = useState(initial ? initial.category : cats[0]);
   const [pinned, setPinned]     = useState(initial ? !!initial.pinned : false);
   const editorRef = useRef();
   const imgRef = useRef();
 
-  // 수정 모드일 때 에디터 초기 내용 설정
   useEffect(() => {
     if (initial && editorRef.current) {
       editorRef.current.innerHTML = initial.content || "";
@@ -1170,8 +1203,9 @@ function RichNoticeSheet({ onClose, onSave, initial }) {
       img.style.maxWidth = "100%";
       img.style.borderRadius = "10px";
       img.style.margin = "6px 0";
+      editorRef.current.focus();
       const sel = window.getSelection();
-      if (sel.rangeCount) {
+      if (sel && sel.rangeCount) {
         const range = sel.getRangeAt(0);
         range.insertNode(img);
         range.collapse(false);
@@ -1189,28 +1223,23 @@ function RichNoticeSheet({ onClose, onSave, initial }) {
   };
 
   const tools = [
-    { icon: "B", cmd: "bold",   style: { fontWeight:800 }, title: "굵게" },
-    { icon: "I", cmd: "italic", style: { fontStyle:"italic" }, title: "기울임" },
-    { icon: "U", cmd: "underline", style: { textDecoration:"underline" }, title: "밑줄" },
+    { icon:"B",  cmd:"bold",        style:{ fontWeight:800 },              tip:"굵게"    },
+    { icon:"I",  cmd:"italic",      style:{ fontStyle:"italic" },          tip:"기울임"  },
+    { icon:"U",  cmd:"underline",   style:{ textDecoration:"underline" },  tip:"밑줄"    },
   ];
 
+  // 형광펜: 어두운 배경에서 잘 보이는 진한 색 사용
   const highlights = [
-    { color: "#FFE066", label: "노랑" },
-    { color: "#A8FFB0", label: "초록" },
-    { color: "#FFB3B3", label: "빨강" },
-    { color: "#B3D4FF", label: "파랑" },
-    { color: "transparent", label: "없음" },
+    { bg:"#FFE066", text:"#1a1a00", label:"노랑" },
+    { bg:"#5DDE74", text:"#003010", label:"초록" },
+    { bg:"#FF7B7B", text:"#2a0000", label:"빨강" },
+    { bg:"#5BA8FF", text:"#001835", label:"파랑" },
   ];
 
   return (
     <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} tall>
-      <style>{`
-        .rich-editor { outline: none; min-height: 180px; }
-        .rich-editor img { max-width: 100%; border-radius: 10px; margin: 4px 0; }
-        .rich-editor b, .rich-editor strong { font-weight: 800; }
-      `}</style>
+      <style>{`.rich-editor b,.rich-editor strong{font-weight:800}.rich-editor mark{padding:1px 2px;border-radius:3px}`}</style>
 
-      {/* 제목 */}
       <input
         value={title}
         onChange={e => setTitle(e.target.value)}
@@ -1219,45 +1248,89 @@ function RichNoticeSheet({ onClose, onSave, initial }) {
         style={{ ...fBase, marginBottom:10, fontSize:17, fontWeight:600 }}
       />
 
-      {/* 카테고리 */}
+      {/* 카테고리 - 동적 */}
       <div style={{ marginBottom:10 }}>
         <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
-        <Seg value={category} onChange={setCategory} options={["이벤트","운영","인사","기타"]}/>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {cats.map(cat => (
+            <button key={cat} onMouseDown={e => { e.preventDefault(); setCategory(cat); }}
+              style={{ padding:"7px 14px", borderRadius:20, fontSize:13, fontWeight:600,
+                border:"1px solid "+(category===cat?T.green:T.border1),
+                background:category===cat?T.greenDim:T.glass1,
+                color:category===cat?T.green:T.l2,
+                cursor:"pointer", fontFamily:F }}>
+              {cat}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 서식 툴바 */}
-      <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
+      <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap", alignItems:"center",
+        padding:"8px 10px", background:T.glass1, borderRadius:12, border:"1px solid "+T.border0 }}>
+        {/* B / I / U */}
         {tools.map(t => (
           <button key={t.cmd} onMouseDown={e => { e.preventDefault(); execCmd(t.cmd); }}
-            title={t.title}
-            style={{ ...t.style, padding:"5px 12px", borderRadius:8, border:"1px solid " + T.border1,
-              background:T.glass2, color:T.l1, fontSize:13, cursor:"pointer", fontFamily:F }}>
+            title={t.tip}
+            style={{ ...t.style, width:30, height:30, borderRadius:7,
+              border:"1px solid "+T.border1, background:T.glass2,
+              color:T.l1, fontSize:13, cursor:"pointer", fontFamily:F,
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
             {t.icon}
           </button>
         ))}
-        <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+
+        <div style={{ width:1, height:22, background:T.border1 }}/>
+
+        {/* 들여쓰기 */}
+        <button onMouseDown={e => { e.preventDefault(); execCmd("indent"); }}
+          title="들여쓰기"
+          style={{ width:30, height:30, borderRadius:7, border:"1px solid "+T.border1,
+            background:T.glass2, color:T.l1, fontSize:13, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>→</button>
+        <button onMouseDown={e => { e.preventDefault(); execCmd("outdent"); }}
+          title="내어쓰기"
+          style={{ width:30, height:30, borderRadius:7, border:"1px solid "+T.border1,
+            background:T.glass2, color:T.l1, fontSize:13, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>
+
+        <div style={{ width:1, height:22, background:T.border1 }}/>
+
         {/* 형광펜 */}
         {highlights.map(h => (
-          <button key={h.color} onMouseDown={e => {
-            e.preventDefault();
-            if (h.color === "transparent") execCmd("removeFormat");
-            else execCmd("hiliteColor", h.color);
-          }}
-            title={"형광펜 " + h.label}
-            style={{ width:22, height:22, borderRadius:5, border:"1px solid " + T.border1,
-              background: h.color === "transparent" ? T.glass2 : h.color,
-              cursor:"pointer", fontSize:h.color === "transparent" ? 11 : 0 }}>
-            {h.color === "transparent" ? "✕" : ""}
-          </button>
+          <button key={h.bg} onMouseDown={e => {
+              e.preventDefault();
+              // mark 태그로 감싸기
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && !sel.isCollapsed) {
+                const range = sel.getRangeAt(0);
+                const mark = document.createElement("mark");
+                mark.style.background = h.bg;
+                mark.style.color = h.text;
+                mark.style.borderRadius = "3px";
+                mark.style.padding = "1px 2px";
+                range.surroundContents(mark);
+              }
+            }}
+            title={"형광펜 "+h.label}
+            style={{ width:22, height:22, borderRadius:5,
+              border:"1px solid rgba(255,255,255,0.15)",
+              background:h.bg, cursor:"pointer" }}/>
         ))}
-        <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
-        {/* 이미지 삽입 */}
+        <button onMouseDown={e => { e.preventDefault(); execCmd("removeFormat"); }}
+          title="서식 제거"
+          style={{ width:22, height:22, borderRadius:5, border:"1px solid "+T.border1,
+            background:T.glass2, color:T.l2, fontSize:11, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+
+        <div style={{ width:1, height:22, background:T.border1 }}/>
+
+        {/* 이미지 */}
         <button onMouseDown={e => { e.preventDefault(); imgRef.current.click(); }}
           title="이미지 삽입"
-          style={{ padding:"5px 10px", borderRadius:8, border:"1px solid " + T.border1,
-            background:T.glass2, color:T.l2, fontSize:13, cursor:"pointer", fontFamily:F }}>
-          🖼
-        </button>
+          style={{ width:30, height:30, borderRadius:7, border:"1px solid "+T.border1,
+            background:T.glass2, color:T.l2, fontSize:14, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>🖼</button>
         <input ref={imgRef} type="file" accept="image/*" style={{ display:"none" }}
           onChange={e => e.target.files[0] && insertImage(e.target.files[0])} />
       </div>
@@ -1269,21 +1342,90 @@ function RichNoticeSheet({ onClose, onSave, initial }) {
         suppressContentEditableWarning
         className="rich-editor"
         data-placeholder="공지 내용을 입력하세요..."
-        style={{ ...fBase, minHeight:180, fontSize:15, lineHeight:1.8, padding:"12px 14px",
+        style={{ ...fBase, minHeight:160, fontSize:15, lineHeight:1.8, padding:"12px 14px",
           whiteSpace:"pre-wrap", overflowY:"auto", marginBottom:10 }}
       />
 
       {/* 고정 */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16,
-        padding:"12px 14px", background:T.glass1, border:"1px solid " + T.border0, borderRadius:12 }}>
-        <input type="checkbox" id="richpin" checked={pinned} onChange={e => setPinned(e.target.checked)}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14,
+        padding:"12px 14px", background:T.glass1, border:"1px solid "+T.border0, borderRadius:12 }}>
+        <input type="checkbox" id="richpin" checked={pinned}
+          onChange={e => setPinned(e.target.checked)}
           style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }}/>
         <label htmlFor="richpin" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>
           상단 고정
         </label>
       </div>
 
-      <GreenBtn full onClick={handleSave} disabled={!title.trim()}>등록하기</GreenBtn>
+      <GreenBtn full onClick={handleSave} disabled={!title.trim()}>
+        {initial ? "수정 완료" : "등록하기"}
+      </GreenBtn>
+    </Sheet>
+  );
+}
+
+
+/* ══════════════════ 카테고리 관리 ══════════════════ */
+function CatManagerSheet({ onClose, categories, onSave }) {
+  const cats = categories && categories.length ? [...categories] : [...DEFAULT_CATS];
+  const [list, setList] = useState(cats);
+  const [input, setInput] = useState("");
+
+  const add = () => {
+    const v = input.trim();
+    if (!v || list.includes(v)) return;
+    setList(prev => [...prev, v]);
+    setInput("");
+  };
+
+  const remove = (name) => {
+    if (list.length <= 1) return;
+    setList(prev => prev.filter(c => c !== name));
+  };
+
+  return (
+    <Sheet title="카테고리 관리" onClose={onClose}>
+      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14, lineHeight:1.6 }}>
+        공지 카테고리를 자유롭게 추가하거나 삭제할 수 있어요.
+      </p>
+
+      {/* 현재 카테고리 목록 */}
+      <div style={{ ...glassBox({ overflow:"hidden", marginBottom:14 }) }}>
+        {list.map((cat, i) => {
+          const ci = CAT_COLORS[i % CAT_COLORS.length];
+          return (
+            <div key={cat} style={{ padding:"12px 16px", display:"flex",
+              alignItems:"center", gap:12,
+              borderBottom: i < list.length-1 ? "1px solid "+T.border0 : "none" }}>
+              <div style={{ width:10, height:10, borderRadius:"50%",
+                background:ci.color, flexShrink:0 }}/>
+              <span style={{ flex:1, fontSize:15, color:T.l1, fontFamily:F }}>{cat}</span>
+              {list.length > 1 && (
+                <button onClick={() => remove(cat)}
+                  style={{ background:"none", border:"none", color:T.l4,
+                    fontSize:17, cursor:"pointer", padding:"0 4px" }}>✕</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 새 카테고리 추가 */}
+      <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if(e.key==="Enter") add(); }}
+          placeholder="새 카테고리 이름"
+          style={{ ...fBase, flex:1, marginBottom:0 }}
+        />
+        <button onClick={add}
+          style={{ padding:"0 18px", borderRadius:14, border:"1px solid "+T.green,
+            background:T.greenDim, color:T.green, fontSize:14, fontWeight:700,
+            cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>추가</button>
+      </div>
+
+      <GreenBtn full onClick={() => { onSave(list); onClose(); }}>저장하기</GreenBtn>
     </Sheet>
   );
 }
