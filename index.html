@@ -413,7 +413,7 @@ JSON만 반환하고 다른 텍스트는 절대 포함하지 마세요.
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body: JSON.stringify({
-          model:"claude-haiku-4-5-20251001", max_tokens:1000,
+          model: "claude-3-5-haiku-20241022", max_tokens:4096,
           messages:[{ role:"user", content:[...blocks, { type:"text", text:prompt }] }],
         }),
       });
@@ -452,7 +452,7 @@ ${combined}
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
       body: JSON.stringify({
-        model:"claude-sonnet-4-20250514", max_tokens:2000,
+        model: "claude-3-5-sonnet-20241022", max_tokens:2000,
         messages:[{ role:"user", content:[{ type:"text", text:prompt }] }],
       }),
     });
