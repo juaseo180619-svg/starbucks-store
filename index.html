@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-  <meta name="theme-color" content="#04060A"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="theme-color" content="#F1F8F4"/>
   <title>Starbucks Store</title>
   <link rel="manifest" href="manifest.json"/>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -14,14 +14,36 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;background:#04060A;overflow-x:hidden}
+    html,body{height:100%;background:#F1F8F4;overflow-x:hidden}
     #root{min-height:100vh}
-    [contenteditable]:empty:before{content:attr(data-placeholder);color:#555;pointer-events:none;position:absolute}
+    [contenteditable]:empty:before{content:attr(data-placeholder);color:#9FB8A8;pointer-events:none;position:absolute}
     .rich-editor{outline:none;position:relative}
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
     .rich-editor mark{padding:1px 3px;border-radius:3px}
+    /* 페이드인 애니메이션 */
+    @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes scaleIn{from{opacity:0;transform:scale(0.94)}to{opacity:1;transform:scale(1)}}
+    @keyframes slideRight{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
     @keyframes spin{to{transform:rotate(360deg)}}
     @keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}
+    /* 탭 콘텐츠 애니메이션 */
+    .fi{animation:fadeUp .32s cubic-bezier(.22,1,.36,1) both}
+    /* 카드 호버 */
+    .card-hover{transition:transform .18s,box-shadow .18s}
+    .card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,112,74,0.14)!important}
+    /* 버튼 프레스 */
+    button:active{transform:scale(0.97)}
+    /* 스크롤바 */
+    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.2);border-radius:4px}
+    /* input focus */
+    input:focus,textarea:focus,[contenteditable]:focus{
+      border-color:rgba(0,112,74,0.5)!important;
+      box-shadow:0 0 0 3px rgba(0,112,74,0.10)!important
+    }
   </style>
 </head>
 <body>
@@ -50,35 +72,41 @@ const F = "'Noto Sans KR', -apple-system, sans-serif";
 
 /* ─── Tokens ─── */
 const T = {
-  bg:"#04060A", glass0:"rgba(255,255,255,0.03)", glass1:"rgba(255,255,255,0.07)",
-  glass2:"rgba(255,255,255,0.11)", glass3:"rgba(255,255,255,0.17)", glassHover:"rgba(255,255,255,0.05)",
-  border0:"rgba(255,255,255,0.08)", border1:"rgba(255,255,255,0.14)", border2:"rgba(255,255,255,0.22)",
-  l1:"#FFFFFF", l2:"rgba(255,255,255,0.62)", l3:"rgba(255,255,255,0.35)", l4:"rgba(255,255,255,0.14)",
-  green:"#3DDC84", greenDim:"rgba(61,220,132,0.13)", greenBorder:"rgba(61,220,132,0.30)",
-  gold:"#FFD60A", goldDim:"rgba(255,214,10,0.12)",
-  red:"#FF6B6B", redDim:"rgba(255,107,107,0.13)",
-  blue:"#5AC8FA", blueDim:"rgba(90,200,250,0.13)",
-  orange:"#FFB347", orangeDim:"rgba(255,179,71,0.13)",
-  purple:"#CF9FFF", purpleDim:"rgba(207,159,255,0.13)",
+  // Starbucks Light Mode
+  bg:"#F1F8F4",
+  card:"#FFFFFF",
+  glass0:"rgba(255,255,255,0.6)", glass1:"#FFFFFF", glass2:"#F7FBF8", glass3:"#EAF4EE",
+  glassHover:"rgba(0,112,74,0.04)",
+  border0:"rgba(0,0,0,0.06)", border1:"rgba(0,0,0,0.10)", border2:"rgba(0,112,74,0.25)",
+  l1:"#1E3932", l2:"#4A6741", l3:"#7A9E7E", l4:"rgba(30,57,50,0.3)",
+  // Starbucks green family
+  green:"#00704A", greenDim:"rgba(0,112,74,0.10)", greenBorder:"rgba(0,112,74,0.30)",
+  greenLight:"#D4EDDA", greenDeep:"#1E3932",
+  // Accents
+  gold:"#CBA135", goldDim:"rgba(203,161,53,0.12)",
+  red:"#D4351C",  redDim:"rgba(212,53,28,0.10)",
+  blue:"#2563EB", blueDim:"rgba(37,99,235,0.10)",
+  orange:"#C07020", orangeDim:"rgba(192,112,32,0.10)",
+  purple:"#7C3AED", purpleDim:"rgba(124,58,237,0.10)",
 };
 
 const CAT_COLORS = [
-  { color:"#3DDC84", dim:"rgba(61,220,132,0.13)"  },
-  { color:"#FFB347", dim:"rgba(255,179,71,0.13)"  },
-  { color:"#5AC8FA", dim:"rgba(90,200,250,0.13)"  },
-  { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)" },
-  { color:"#FF6B6B", dim:"rgba(255,107,107,0.13)" },
-  { color:"#FFD60A", dim:"rgba(255,214,10,0.13)"  },
-  { color:"#FF9ECD", dim:"rgba(255,158,205,0.13)" },
-  { color:"#64D8CB", dim:"rgba(100,216,203,0.13)" },
+  { color:"#00704A", dim:"rgba(0,112,74,0.10)"    },
+  { color:"#C07020", dim:"rgba(192,112,32,0.10)"  },
+  { color:"#2563EB", dim:"rgba(37,99,235,0.10)"   },
+  { color:"#7C3AED", dim:"rgba(124,58,237,0.10)"  },
+  { color:"#D4351C", dim:"rgba(212,53,28,0.10)"   },
+  { color:"#CBA135", dim:"rgba(203,161,53,0.10)"  },
+  { color:"#0891B2", dim:"rgba(8,145,178,0.10)"   },
+  { color:"#BE185D", dim:"rgba(190,24,93,0.10)"   },
 ];
 const DEFAULT_CATS = ["프로모션","이벤트","제상품"];
 // CAT은 App 내부에서 동적으로 만들어짐
 const BASE_CAT = {
-  프로모션:{ color:"#3DDC84", dim:"rgba(61,220,132,0.13)",  border:"rgba(61,220,132,0.2)"  },
-  이벤트:  { color:"#FFB347", dim:"rgba(255,179,71,0.13)",  border:"rgba(255,179,71,0.2)"  },
-  제상품:  { color:"#5AC8FA", dim:"rgba(90,200,250,0.13)",  border:"rgba(90,200,250,0.2)"  },
-  기타:    { color:"#CF9FFF", dim:"rgba(207,159,255,0.13)", border:"rgba(207,159,255,0.2)" },
+  프로모션:{ color:"#00704A", dim:"rgba(0,112,74,0.10)",   border:"rgba(0,112,74,0.20)"   },
+  이벤트:  { color:"#C07020", dim:"rgba(192,112,32,0.10)", border:"rgba(192,112,32,0.20)" },
+  제상품:  { color:"#2563EB", dim:"rgba(37,99,235,0.10)",  border:"rgba(37,99,235,0.20)"  },
+  기타:    { color:"#7C3AED", dim:"rgba(124,58,237,0.10)", border:"rgba(124,58,237,0.20)" },
 };
 
 // 모듈 레벨 CAT - App에서 동적으로 업데이트됨, 모든 컴포넌트에서 참조 가능
@@ -167,17 +195,18 @@ const todayStr = () => new Date().toISOString().slice(0,10);
 const fmtShort = d => new Date(d).toLocaleDateString("ko-KR",{month:"short",day:"numeric"});
 const WDAYS = ["일","월","화","수","목","금","토"];
 const glassBox = (extra={}) => ({
-  background:T.glass1, backdropFilter:"blur(32px) saturate(180%)",
-  WebkitBackdropFilter:"blur(32px) saturate(180%)",
-  border:`1px solid ${T.border1}`, borderRadius:20, ...extra,
+  background:T.card, borderRadius:16,
+  border:"1px solid "+T.border0,
+  boxShadow:"0 2px 16px rgba(30,57,50,0.07)",
+  ...extra,
 });
 
 /* ─── Micro UI ─── */
 const Pill = ({label,color,dim}) => (
-  <span style={{ fontSize:11, fontWeight:600, padding:"3px 9px", borderRadius:20,
-    background:dim, color, fontFamily:F, letterSpacing:0.2, whiteSpace:"nowrap" }}>{label}</span>
+  <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
+    background:dim||color+"18", color, fontFamily:F, letterSpacing:0.2, whiteSpace:"nowrap" }}>{label}</span>
 );
-const Sep = () => <div style={{ height:1, background:T.border0, margin:"0 16px" }}/>;
+const Sep = () => <div style={{ height:1, background:"rgba(0,0,0,0.06)", margin:"0 16px" }}/>;
 
 function Sheet({ onClose, title, children, tall, full }) {
   const [expanded, setExpanded] = useState(!!full);
@@ -210,10 +239,10 @@ function Sheet({ onClose, title, children, tall, full }) {
       display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div ref={sheetRef}
-        style={{ background:"rgba(10,14,20,0.95)",
-          backdropFilter:"blur(40px) saturate(200%)", WebkitBackdropFilter:"blur(40px) saturate(200%)",
-          borderTop:"1px solid "+T.border2,
-          borderLeft:"1px solid "+T.border1, borderRight:"1px solid "+T.border1,
+        style={{ background:"rgba(245,250,247,0.98)",
+          backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
+          borderTop:"2px solid "+T.green,
+          borderLeft:"1px solid "+T.border0, borderRight:"1px solid "+T.border0,
           borderRadius: expanded ? "0" : "26px 26px 0 0",
           width:"100%", maxWidth:430,
           height: maxH,
@@ -250,9 +279,10 @@ function Sheet({ onClose, title, children, tall, full }) {
 }
 
 const fBase = {
-  width:"100%", padding:"13px 15px", borderRadius:14, border:`1px solid ${T.border1}`,
-  background:T.glass1, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)",
-  fontSize:15, fontFamily:F, color:T.l1, outline:"none", boxSizing:"border-box", caretColor:T.green,
+  width:"100%", padding:"13px 15px", borderRadius:12, border:"1px solid "+T.border1,
+  background:"#F7FAF8", fontSize:15, fontFamily:F, color:T.l1, outline:"none",
+  boxSizing:"border-box", caretColor:T.green, transition:"border-color .15s",
+  marginBottom:12,
 };
 function Field({ label, value, onChange, placeholder, type="text", multiline }) {
   return (
@@ -282,21 +312,26 @@ function Seg({ value, onChange, options }) {
 function GreenBtn({ onClick, children, full, disabled }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      background:disabled?T.glass2:`linear-gradient(135deg,${T.green} 0%,#28a864 100%)`,
-      color:disabled?T.l3:"#001808", border:"none", borderRadius:14,
-      padding:"14px 22px", fontSize:15, fontWeight:700, fontFamily:F,
+      background:disabled?"#E8F0EB":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+      color:disabled?"#7A9E7E":"#FFFFFF", border:"none", borderRadius:14,
+      padding:"15px 24px", fontSize:15, fontWeight:700, fontFamily:F,
       cursor:disabled?"not-allowed":"pointer", width:full?"100%":"auto",
-      boxShadow:disabled?"none":`0 4px 28px rgba(61,220,132,0.28),inset 0 1px 0 rgba(255,255,255,0.2)`,
+      boxShadow:disabled?"none":"0 4px 20px rgba(0,112,74,0.30)",
+      letterSpacing:"0.3px", transition:"all .2s",
     }}>{children}</button>
   );
 }
 function ActionBtn({ onClick, children }) {
   return (
     <button onClick={onClick} style={{
-      background:T.greenDim, color:T.green, border:`1px solid ${T.greenBorder}`,
-      borderRadius:10, padding:"7px 15px", fontSize:13, fontWeight:600,
-      cursor:"pointer", fontFamily:F, backdropFilter:"blur(10px)",
-    }}>{children}</button>
+      background:T.green, color:"#fff", border:"none",
+      borderRadius:10, padding:"8px 16px", fontSize:13, fontWeight:700,
+      cursor:"pointer", fontFamily:F, letterSpacing:"0.2px",
+      boxShadow:"0 2px 10px rgba(0,112,74,0.22)", transition:"all .15s",
+    }}
+    onMouseEnter={e=>{e.currentTarget.style.background="#1E3932";}}
+    onMouseLeave={e=>{e.currentTarget.style.background=T.green;}}
+    >{children}</button>
   );
 }
 
@@ -476,6 +511,22 @@ function App() {
   const pending         = pendingPersonal + pendingRole;
   const upcoming = (events||[]).filter(e=>e.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4);
   const pinnedN  = (notices||[]).filter(n=>n.pinned);
+  // 홈 브리핑용 계산
+  const todayEvents = (events||[]).filter(e=>todayStr()>=e.date&&todayStr()<=(e.endDate||e.date));
+  const unreadCount = (notices||[]).filter(n=>!n._read).length;
+  // 홈 미니캘린더용
+  const cY2=calDate.getFullYear(), cM2=calDate.getMonth();
+  const fd2=new Date(cY2,cM2,1).getDay(), dm2=new Date(cY2,cM2+1,0).getDate();
+  const mStr2=cY2+"-"+String(cM2+1).padStart(2,"0");
+  const mEvs=(events||[]).filter(e=>{
+    const s=e.date,en=e.endDate||e.date;
+    return s.slice(0,7)===mStr2||en.slice(0,7)===mStr2;
+  });
+  const miniDays=[];
+  for(let i=0;i<fd2;i++) miniDays.push(null);
+  for(let i=1;i<=dm2;i++) miniDays.push(i);
+  while(miniDays.length%7!==0) miniDays.push(null);
+  const selDayEventsHome=(events||[]).filter(e=>selDay>=e.date&&selDay<=(e.endDate||e.date));
   const rc = ROLE_COLOR[profile?.role] || ROLE_COLOR["바리스타"];
 
   const readNotice = id => saveNotices(p=>p.map(n=>n.id===id?{...n,_read:true}:n));
@@ -565,9 +616,9 @@ function App() {
 
       {/* ══ HEADER ══ */}
       <div style={{ position:"sticky", top:0, zIndex:200,
-        background:"rgba(4,6,10,0.82)", backdropFilter:"blur(40px) saturate(200%)",
-        WebkitBackdropFilter:"blur(40px) saturate(200%)",
-        borderBottom:"1px solid "+T.border1 }}>
+        background:"rgba(241,248,244,0.95)", backdropFilter:"blur(20px)",
+        WebkitBackdropFilter:"blur(20px)",
+        borderBottom:"1px solid rgba(0,112,74,0.12)" }}>
 
         {/* 상단 바 */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
@@ -613,12 +664,11 @@ function App() {
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
               flex:1, padding:"9px 4px", borderRadius:12, border:"none", cursor:"pointer",
               position:"relative", fontFamily:F,
-              background:tab===t.id?"rgba(255,255,255,0.13)":"transparent",
-              backdropFilter:tab===t.id?"blur(20px)":"none",
-              WebkitBackdropFilter:tab===t.id?"blur(20px)":"none",
-              color:tab===t.id?T.l1:T.l3, fontSize:14, fontWeight:tab===t.id?700:400,
+              background:tab===t.id?"rgba(0,112,74,0.10)":"transparent",
+              backdropFilter:"none", WebkitBackdropFilter:"none",
+              color:tab===t.id?T.green:T.l3, fontSize:14, fontWeight:tab===t.id?700:500,
               transition:"all .18s",
-              boxShadow:tab===t.id?"inset 0 0 0 1px "+T.border2+",0 2px 16px rgba(0,0,0,0.25)":"none",
+              boxShadow:tab===t.id?"0 2px 8px rgba(0,112,74,0.15)":"none",
             }}>
               {t.label}
               {t.badge>0&&(
@@ -639,75 +689,122 @@ function App() {
         {tab==="home"&&(
           <div style={{ padding:"16px" }} className="fi">
 
-            {/* 개인 + 직급 할일 카드 */}
-            <div style={{ ...glassBox({ marginBottom:16,
-              boxShadow:"0 8px 40px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)" }), overflow:"hidden" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px 0" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ width:26, height:26, borderRadius:"50%", background:rc.bg,
-                    display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                    <span style={{ fontSize:12, fontWeight:800, color:rc.color }}>{profile.name[0]}</span>
+            {/* ── 오늘 브리핑 카드 ── */}
+            <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+              borderRadius:20, padding:"22px 20px", marginBottom:16, position:"relative", overflow:"hidden" }}>
+              {/* 배경 원 장식 */}
+              <div style={{ position:"absolute", right:-30, top:-30, width:140, height:140,
+                borderRadius:"50%", background:"rgba(255,255,255,0.06)" }}/>
+              <div style={{ position:"absolute", right:30, bottom:-40, width:100, height:100,
+                borderRadius:"50%", background:"rgba(255,255,255,0.04)" }}/>
+              <div style={{ position:"relative", zIndex:1 }}>
+                <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", fontFamily:F,
+                  letterSpacing:1, marginBottom:6 }}>
+                  {now.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
+                </div>
+                <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:14 }}>
+                  안녕하세요, {profile.name}님 👋
+                </div>
+                {/* 오늘 일정 요약 */}
+                <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                  {[
+                    { val:todayEvents.length, label:"오늘 일정" },
+                    { val:(tasks||[]).filter(t=>!t.done).length, label:"미완료 할일" },
+                    { val:unreadCount, label:"읽지않은공지" },
+                  ].map(function(item){ return (
+                    <div key={item.label} style={{ background:"rgba(255,255,255,0.15)", borderRadius:12,
+                      padding:"10px 14px", flex:1, minWidth:80 }}>
+                      <div style={{ fontSize:24, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
+                        {item.val}
+                      </div>
+                      <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:3 }}>
+                        {item.label}
+                      </div>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            </div>
+
+            {/* ── 미니 캘린더 ── */}
+            <div style={{ ...glassBox({ marginBottom:16, padding:"16px", overflow:"hidden" }) }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>
+                  {calDate.toLocaleDateString("ko-KR",{month:"long"})} 일정
+                </span>
+                <button onClick={()=>setTab("calendar")} style={{ background:"none", border:"none",
+                  color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+                  전체보기 →
+                </button>
+              </div>
+              {/* 미니 캘린더 그리드 */}
+              <div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:4 }}>
+                  {["일","월","화","수","목","금","토"].map(function(w,i){
+                    return (
+                      <div key={w} style={{ textAlign:"center", fontSize:10, fontWeight:600,
+                        color:i===0?T.red:i===6?T.blue:T.l3, fontFamily:F, padding:"2px 0" }}>{w}</div>
+                    );
+                  })}
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+                  {miniDays.map(function(day,i){
+                    if(!day) return <div key={"e"+i}/>;
+                    const dStr=cY2+"-"+String(cM2+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+                    const isTod=dStr===todayStr();
+                    const isSel=dStr===selDay;
+                    const hasEv=mEvs.some(function(e){ return dStr>=e.date&&dStr<=(e.endDate||e.date); });
+                    const isWeekend=i%7===0||i%7===6;
+                    const dayCol=isTod?"#fff":isSel?T.green:i%7===0?T.red:i%7===6?T.blue:T.l1;
+                    return (
+                      <div key={day} onClick={function(){setSelDay(dStr);setTab("calendar");}}
+                        style={{ textAlign:"center", padding:"5px 0", borderRadius:8, cursor:"pointer",
+                          background:isTod?"#00704A":isSel?T.greenLight:"transparent",
+                          transition:"background .15s" }}>
+                        <span style={{ fontSize:12, fontWeight:isTod||isSel?700:400,
+                          color:dayCol, fontFamily:F }}>{day}</span>
+                        {hasEv&&!isTod&&(
+                          <div style={{ width:4, height:4, borderRadius:"50%", background:T.green,
+                            margin:"1px auto 0" }}/>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* 선택날짜 이벤트 */}
+              {selDayEventsHome.length===0 ? (
+                <div style={{ marginTop:12, padding:"10px 0", textAlign:"center",
+                  color:T.l3, fontSize:13, fontFamily:F }}>
+                  {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})} · 일정 없음
+                </div>
+              ) : (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:6 }}>
+                    {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
                   </div>
-                  <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>할일</span>
+                  {selDayEventsHome.slice(0,3).map(function(e){
+                    const meta=CAT[e.category]||{color:T.green};
+                    return (
+                      <div key={e.id} style={{ display:"flex", alignItems:"center", gap:8,
+                        padding:"6px 0", borderTop:"1px solid "+T.border0 }}>
+                        <div style={{ width:8, height:8, borderRadius:"50%",
+                          background:meta.color, flexShrink:0 }}/>
+                        <span style={{ fontSize:13, color:T.l1, fontFamily:F, flex:1,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {e.title}
+                        </span>
+                        <span style={{ fontSize:11, color:T.l3, fontFamily:F }}>{e.category}</span>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
-                  <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
-                    color:T.green, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:F }}>전체보기</button>
-                </div>
-              </div>
-              {/* 개인 / 직급 세그먼트 */}
-              <div style={{ display:"flex", gap:4, padding:"10px 16px 0" }}>
-                {[
-                  { id:"personal", label:"내 할일",            badge:pendingPersonal },
-                  { id:"role",     label:"팀 공유", badge:pendingRole },
-                ].map(seg=>(
-                  <button key={seg.id} onClick={()=>setTaskMode(seg.id)} style={{
-                    flex:1, padding:"7px 4px", borderRadius:10, border:"none", cursor:"pointer",
-                    fontFamily:F, fontSize:13, fontWeight:taskMode===seg.id?700:400,
-                    background:taskMode===seg.id?T.glass3:"transparent",
-                    color:taskMode===seg.id?T.l1:T.l3, transition:"all .15s",
-                    boxShadow:taskMode===seg.id?`inset 0 0 0 1px ${T.border2}`:"none",
-                  }}>
-                    {seg.label}
-                    {seg.badge>0&&<span style={{ marginLeft:5, background:T.redDim, color:T.red,
-                      borderRadius:8, fontSize:10, fontWeight:700, padding:"1px 6px" }}>{seg.badge}</span>}
-                  </button>
-                ))}
-              </div>
-              <div style={{ height:1, background:T.border0, margin:"10px 16px 0" }}/>
-              {taskMode==="personal"&&(
-                (tasks||[]).filter(t=>!t.done).length===0
-                  ? <EmptyRow text="오늘 할일을 추가해보세요"/>
-                  : (tasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
-                    <div key={t.id}><TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
-                  ))
-              )}
-              {taskMode==="role"&&(
-                (roleTasks||[]).filter(t=>!t.done).length===0
-                  ? <EmptyRow text={`팀 공유 할일이 없어요`}/>
-                  : (roleTasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
-                    <div key={t.id}><TRow t={t} showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
-                  ))
-              )}
-              {taskMode==="personal"&&(tasks||[]).filter(t=>t.done).length>0&&(
-                <><div style={{ height:1, background:T.border0, margin:"0 16px" }}/>
-                {(tasks||[]).filter(t=>t.done).slice(0,2).map((t,i,arr)=>(
-                  <div key={t.id}><TRow t={t} done onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
-                ))}</>
-              )}
-              {taskMode==="role"&&(roleTasks||[]).filter(t=>t.done).length>0&&(
-                <><div style={{ height:1, background:T.border0, margin:"0 16px" }}/>
-                {(roleTasks||[]).filter(t=>t.done).slice(0,2).map((t,i,arr)=>(
-                  <div key={t.id}><TRow t={t} done showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
-                ))}</>
               )}
             </div>
 
-            {/* 고정 공지 */}
-            <SecHead title="고정 공지" onMore={()=>setTab("notices")}/>
-            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16,
-              boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
+            {/* ── 고정 공지 ── */}
+            <SecHead title="📌 고정 공지" onMore={()=>setTab("notices")}/>
+            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16 }) }}>
               {pinnedN.length===0 ? <EmptyRow text="고정 공지 없음"/>
                 : pinnedN.map((n,i)=>(
                   <div key={n.id}>
@@ -717,19 +814,37 @@ function App() {
                 ))}
             </div>
 
-            {/* 다가오는 일정 */}
-            <SecHead title="다가오는 일정" onMore={()=>setTab("calendar")}/>
-            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20,
-              boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {upcoming.length===0 ? <EmptyRow text="예정 일정 없음"/>
-                : upcoming.map((e,i)=>(
-                  <div key={e.id}><ERow e={e}/>{i<upcoming.length-1&&<Sep/>}</div>
-                ))}
+            {/* ── 오늘 할일 ── */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>✅ 오늘 할일</span>
+              <div style={{ display:"flex", gap:8 }}>
+                <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
+                <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
+                  color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>전체보기</button>
+              </div>
+            </div>
+            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20 }) }}>
+              {(tasks||[]).filter(t=>!t.done).length===0&&(roleTasks||[]).filter(t=>!t.done).length===0
+                ? <EmptyRow text="오늘 할일을 추가해보세요"/>
+                : <>
+                    {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
+                      <div key={t.id}>
+                        <TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>
+                        {i<arr.length-1&&<Sep/>}
+                      </div>
+                    ))}
+                    {(roleTasks||[]).filter(t=>!t.done).slice(0,2).map((t,i,arr)=>(
+                      <div key={t.id}>
+                        <Sep/>
+                        <TRow t={t} showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
+                      </div>
+                    ))}
+                  </>
+              }
             </div>
           </div>
         )}
 
-        {/* ── NOTICES ── */}
         {tab==="notices"&&(
           <div style={{ padding:"16px" }} className="fi">
             <div onClick={()=>setAiChat(true)} style={{
@@ -1530,7 +1645,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
     .toLocaleDateString("ko-KR", { month:"long", day:"numeric" });
 
   // 표 스타일 색상
-  var LINE = "rgba(255,255,255,0.08)";
+  var LINE = "rgba(0,0,0,0.08)";
 
   return (
     <div style={{ padding:"16px" }} className="fi">
@@ -1593,8 +1708,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
                         background: isSel ? "rgba(255,255,255,0.06)" : "transparent",
                         cursor: isEmpty ? "default" : "pointer",
                         position:"relative",
-                        // 오늘 날짜: 좌우 1px 초록 테두리만
-                        boxShadow: isTod ? "inset 1px 0 0 rgba(61,220,132,0.4), inset -1px 0 0 rgba(61,220,132,0.4)" : "none",
+                          boxShadow: "none",
                       }}>
                       {/* 날짜 숫자 + 오늘 초록원 */}
                       {!isEmpty && (
