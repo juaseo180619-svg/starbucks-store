@@ -16,6 +16,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #04060A; overflow-x: hidden; }
     #root { min-height: 100vh; }
+    @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
   </style>
 </head>
 <body>
@@ -354,310 +355,115 @@ function ProfileSetup({ onComplete, existing }) {
 }
 
 /* ══════════════════ AI ANALYZE SHEET ══════════════════ */
-function AIAnalyzeSheet({ onClose, onSave }) {
-  const [step, setStep]         = useState("upload");
-  const [files, setFiles]       = useState([]);
-  const [dragOver, setDragOver] = useState(false);
-  const [current, setCurrent]   = useState(0);
-  const [statusMsg, setStatusMsg] = useState("");
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState(null);
-  const [savePinned, setSavePinned] = useState(false);
-  const fileRef = useRef();
+function AIChatSheet({ onClose, notices }) {
+  const [msgs, setMsgs]   = useState([
+    { role:"ai", text:"안녕하세요! 공지 내용에 대해 무엇이든 물어보세요. 예: '이번 달 이벤트 알려줘', '음료 관련 공지 요약해줘'" }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef();
 
-  const toBase64 = (f) => new Promise((res, rej) => {
-    if (f.type === "application/pdf") {
-      const r = new FileReader();
-      r.onload  = () => res({ data: r.result.split(",")[1], isPDF: true });
-      r.onerror = rej;
-      r.readAsDataURL(f);
-      return;
-    }
-    const img = new Image();
-    const url = URL.createObjectURL(f);
-    img.onload = () => {
-      const MAX = 1024;
-      let w = img.width, h = img.height;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-        else       { w = Math.round(w * MAX / h); h = MAX; }
-      }
-      const cv = document.createElement("canvas");
-      cv.width = w; cv.height = h;
-      cv.getContext("2d").drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      res({ data: cv.toDataURL("image/jpeg", 0.65).split(",")[1], isPDF: false });
-    };
-    img.onerror = rej;
-    img.src = url;
-  });
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
+  }, [msgs]);
 
-  const callAPI = async (body) => {
-    for (let i = 0; i < 5; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 3000 * i));
-      try {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": window.ANTHROPIC_API_KEY || "",
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify(body)
-        });
-        if (resp.status === 429 || resp.status >= 500) continue;
-        const data = await resp.json();
-        if (data.error) continue;
-        return data.content?.map(b => b.text || "").join("").trim();
-      } catch(e) { /* retry */ }
-    }
-    return null;
-  };
+  const send = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+    setInput("");
+    setMsgs(prev => [...prev, { role:"user", text:q }]);
+    setLoading(true);
 
-  const handleFiles = (incoming) => {
-    setError(null);
-    const valid = Array.from(incoming).filter(f => f.type.startsWith("image/") || f.type === "application/pdf");
-    if (!valid.length) { setError("이미지(PNG, JPG) 또는 PDF만 가능해요."); return; }
-    setFiles(prev => [...prev, ...valid.map(f => ({
-      file: f,
-      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null
-    }))]);
-  };
+    const noticeContext = (notices||[]).slice(0,30).map(n =>
+      "[" + n.date + "] [" + n.category + "] " + n.title + "\n" + n.content
+    ).join("\n\n---\n\n");
 
-  const removeFile = idx => setFiles(prev => prev.filter((_, i) => i !== idx));
-  const clearAll = () => { setFiles([]); setResult(null); setError(null); };
-
-  const analyze = async () => {
-    if (!files.length) return;
-    setStep("analyzing");
-    setError(null);
-    const texts = [];
-
-    for (let i = 0; i < files.length; i++) {
-      setCurrent(i + 1);
-      setStatusMsg((i + 1) + "/" + files.length + "번 파일 분석 중...");
-      try {
-        const { data, isPDF } = await toBase64(files[i].file);
-        const block = isPDF
-          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: data } }
-          : { type: "image",    source: { type: "base64", media_type: "image/jpeg",       data: data } };
-        const prompt = "이 이미지는 스타벅스 파트너넷 공지사항입니다. 보이는 모든 텍스트를 빠짐없이 추출하세요. JSON만 반환: {\"text\": \"전체 내용\"}";
-        const raw = await callAPI({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1500,
-          messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }]
-        });
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-            if (parsed.text) texts.push(parsed.text);
-          } catch(e) {
-            texts.push(raw);
-          }
-        }
-      } catch(e) { /* skip file */ }
-      if (i < files.length - 1) await new Promise(r => setTimeout(r, 1500));
-    }
-
-    if (texts.length === 0) {
-      setError("모든 파일 분석에 실패했어요. 다시 시도해주세요.");
-      setStep("upload");
-      return;
-    }
-
-    setStatusMsg("최종 공지 정리 중...");
-    setCurrent(files.length);
+    const systemPrompt = "당신은 스타벅스 매장 파트너를 돕는 AI 어시스턴트입니다.\n"
+      + "아래는 매장의 공지사항 목록입니다. 이 내용을 바탕으로 질문에 답하세요.\n"
+      + "공지에 없는 내용은 '공지에서 찾을 수 없어요'라고 말하세요.\n"
+      + "답변은 한국어로, 친근하고 간결하게 해주세요.\n\n"
+      + "=== 공지 목록 ===\n" + noticeContext;
 
     try {
-      const combined = texts.join("\n\n---\n\n");
-      const mergePrompt = "당신은 스타벅스 매장 운영 전문 AI입니다.\n"
-        + "아래 내용을 중복만 제거하고 전부 유지해서 정리하세요.\n"
-        + "날짜, 수치, 조건 모두 유지. JSON만 반환하세요:\n"
-        + "{\"title\":\"공지 제목\",\"category\":\"이벤트 or 운영 or 인사 or 기타\",\"summary\":\"전체 내용\"}\n\n"
-        + "추출 내용:\n" + combined;
-
-      const raw = await callAPI({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        messages: [{ role: "user", content: mergePrompt }]
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": window.ANTHROPIC_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages: [{ role:"user", content: q }]
+        })
       });
-
-      if (!raw) throw new Error("no response");
-      const merged = JSON.parse(raw.replace(/```json|```/g, "").trim());
-      setResult(merged);
-      setStep("result");
+      const data = await resp.json();
+      const answer = data.content?.map(b => b.text||"").join("").trim() || "답변을 가져오지 못했어요.";
+      setMsgs(prev => [...prev, { role:"ai", text:answer }]);
     } catch(e) {
-      setError("최종 정리 중 오류가 발생했어요. 다시 시도해주세요.");
-      setStep("upload");
+      setMsgs(prev => [...prev, { role:"ai", text:"오류가 발생했어요. 다시 시도해주세요." }]);
     }
+    setLoading(false);
   };
-
-  const handleSave = () => {
-    if (!result) return;
-    onSave({
-      notice: {
-        id: "n" + Date.now(), title: result.title, category: result.category,
-        content: result.summary, date: todayStr(), pinned: savePinned, author: "AI 분석", _read: false
-      },
-      tasks: []
-    });
-    onClose();
-  };
-
-  const pct = files.length > 0 ? Math.round((current / files.length) * 100) : 0;
 
   return (
-    <Sheet title="AI 공지 분석" onClose={onClose} tall>
-
-      {step === "upload" && (
-        <>
-          <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14, lineHeight:1.6 }}>
-            파트너넷 공지 캡처 이미지 또는 PDF를 올려주세요.<br/>
-            <span style={{ color:T.green }}>여러 파일을 한꺼번에</span> 올리면 하나의 공지로 통합 정리해드려요.
-          </p>
-          <div
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileRef.current.click()}
-            style={{ ...glassBox({ borderRadius:18, padding:"22px 20px",
-              border:"2px dashed " + (dragOver ? T.green : T.border2),
-              background: dragOver ? T.greenDim : T.glass0, transition:"all .2s" }),
-              textAlign:"center", cursor:"pointer", marginBottom:14 }}>
-            <div style={{ fontSize:30, marginBottom:8 }}>📎</div>
-            <div style={{ fontSize:14, fontWeight:600, color:T.l2, fontFamily:F, marginBottom:4 }}>파일 추가하기</div>
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>탭하거나 드래그 · 여러 파일 동시 선택 가능</div>
-            <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginTop:6 }}>PNG · JPG · PDF 지원</div>
-          </div>
-          <input ref={fileRef} type="file" accept="image/*,.pdf" multiple style={{ display:"none" }}
-            onChange={e => handleFiles(e.target.files)} />
-
-          {files.length > 0 && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                <span style={{ fontSize:13, fontWeight:600, color:T.l2, fontFamily:F }}>{files.length}개 파일</span>
-                <button onClick={clearAll} style={{ background:"none", border:"none", color:T.red, fontSize:12, cursor:"pointer", fontFamily:F }}>전체 삭제</button>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, maxHeight:220, overflowY:"auto" }}>
-                {files.map((f, i) => (
-                  <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden",
-                    border:"1px solid " + T.border1, background:T.glass1, aspectRatio:"1" }}>
-                    {f.preview
-                      ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
-                      : <div style={{ width:"100%", height:"100%", display:"flex", flexDirection:"column",
-                          alignItems:"center", justifyContent:"center", gap:3 }}>
-                          <span style={{ fontSize:18 }}>📄</span>
-                          <span style={{ fontSize:9, color:T.l3, fontFamily:F, padding:"0 4px",
-                            textAlign:"center", overflow:"hidden", textOverflow:"ellipsis",
-                            whiteSpace:"nowrap", width:"100%" }}>{f.file.name}</span>
-                        </div>
-                    }
-                    <button onClick={e => { e.stopPropagation(); removeFile(i); }} style={{
-                      position:"absolute", top:3, right:3, width:18, height:18, borderRadius:"50%",
-                      background:"rgba(0,0,0,0.75)", border:"none", color:"#fff",
-                      fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center"
-                    }}>✕</button>
-                  </div>
+    <Sheet title="AI 공지 검색" onClose={onClose} tall>
+      <div style={{ display:"flex", flexDirection:"column", height:"60vh" }}>
+        {/* 메시지 목록 */}
+        <div style={{ flex:1, overflowY:"auto", marginBottom:12, display:"flex", flexDirection:"column", gap:10 }}>
+          {msgs.map((m, i) => (
+            <div key={i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start" }}>
+              {m.role==="ai" && (
+                <div style={{ width:28, height:28, borderRadius:"50%", background:T.greenDim,
+                  border:"1px solid " + T.green, display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:14, flexShrink:0, marginRight:8, marginTop:2 }}>✨</div>
+              )}
+              <div style={{
+                maxWidth:"78%", padding:"10px 14px", borderRadius: m.role==="user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                background: m.role==="user" ? "linear-gradient(135deg," + T.green + ",#28a864)" : T.glass2,
+                color: m.role==="user" ? "#001808" : T.l1,
+                fontSize:14, fontFamily:F, lineHeight:1.6, whiteSpace:"pre-wrap",
+                border: m.role==="user" ? "none" : "1px solid " + T.border1
+              }}>{m.text}</div>
+            </div>
+          ))}
+          {loading && (
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:T.greenDim,
+                border:"1px solid " + T.green, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>✨</div>
+              <div style={{ padding:"10px 14px", borderRadius:"18px 18px 18px 4px",
+                background:T.glass2, border:"1px solid " + T.border1, display:"flex", gap:5, alignItems:"center" }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.l3,
+                    animation:"pulse 1.2s ease-in-out " + (i*0.2) + "s infinite" }}/>
                 ))}
               </div>
             </div>
           )}
-
-          {error && (
-            <div style={{ background:T.redDim, border:"1px solid rgba(255,107,107,0.3)", borderRadius:12,
-              padding:"10px 14px", marginBottom:14, fontSize:13, color:T.red, fontFamily:F }}>
-              ⚠️ {error}
-            </div>
-          )}
-          <GreenBtn full onClick={analyze} disabled={!files.length}>
-            {files.length > 0 ? files.length + "개 파일 분석 시작" : "파일을 추가해주세요"}
-          </GreenBtn>
-        </>
-      )}
-
-      {step === "analyzing" && (
-        <div style={{ padding:"20px 0", textAlign:"center" }}>
-          <div style={{ position:"relative", width:64, height:64, margin:"0 auto 20px" }}>
-            <div style={{ width:64, height:64, borderRadius:"50%", border:"3px solid " + T.glass2,
-              borderTopColor:T.green, animation:"spin .8s linear infinite", position:"absolute" }} />
-            <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
-              justifyContent:"center", fontSize:22 }}>✨</div>
-          </div>
-          <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:4 }}>
-            {statusMsg || "분석 중..."}
-          </div>
-          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:16 }}>
-            {current < files.length ? "1장씩 순차 분석 (안정적)" : "하나의 공지로 합치는 중..."}
-          </div>
-          <div style={{ background:T.glass2, borderRadius:6, height:8, margin:"0 auto 12px", width:"85%", overflow:"hidden" }}>
-            <div style={{ height:"100%", borderRadius:6, background:"linear-gradient(90deg," + T.green + ",#28a864)",
-              width: current >= files.length ? "95%" : Math.max(pct, 3) + "%", transition:"width .5s ease" }} />
-          </div>
-          <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F, marginBottom:20 }}>
-            {current >= files.length ? "마무리 중..." : pct + "%"}
-          </div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:4, justifyContent:"center", maxWidth:300, margin:"0 auto" }}>
-            {files.map((f, i) => (
-              <div key={i} style={{ width:26, height:26, borderRadius:6, overflow:"hidden",
-                border:"1.5px solid " + (i < current ? T.green : T.border1),
-                background:T.glass1, transition:"border .3s", flexShrink:0 }}>
-                {f.preview
-                  ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                  : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
-                      justifyContent:"center", fontSize:11 }}>📄</div>
-                }
-              </div>
-            ))}
-          </div>
+          <div ref={bottomRef}/>
         </div>
-      )}
-
-      {step === "result" && result && (
-        <>
-          <div style={{ ...glassBox({ padding:"18px", marginBottom:16,
-            background:"linear-gradient(135deg,rgba(61,220,132,0.08),rgba(90,200,250,0.05))",
-            border:"1px solid rgba(61,220,132,0.22)" }) }}>
-            <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
-              <Pill label={result.category}
-                color={(CAT[result.category] || CAT["기타"]).color}
-                dim={(CAT[result.category] || CAT["기타"]).dim} />
-              <Pill label={"✨ " + files.length + "개 파일 통합"} color={T.gold} dim={T.goldDim} />
-            </div>
-            <div style={{ fontSize:17, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:10, lineHeight:1.4 }}>
-              {result.title}
-            </div>
-            <div style={{ fontSize:14, color:T.l2, fontFamily:F, lineHeight:1.85, whiteSpace:"pre-line" }}>
-              {result.summary}
-            </div>
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16,
-            padding:"12px 14px", background:T.glass1, border:"1px solid " + T.border0, borderRadius:12 }}>
-            <input type="checkbox" id="aipin" checked={savePinned}
-              onChange={e => setSavePinned(e.target.checked)}
-              style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }} />
-            <label htmlFor="aipin" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>
-              상단 고정
-            </label>
-          </div>
-          <div style={{ ...glassBox({ padding:"12px 14px", marginBottom:16,
-            background:"rgba(255,255,255,0.03)", border:"1px solid " + T.border0 }),
-            display:"flex", gap:10, alignItems:"center" }}>
-            <span style={{ fontSize:15, flexShrink:0 }}>💡</span>
-            <span style={{ fontSize:12, color:T.l3, fontFamily:F, lineHeight:1.6 }}>
-              할일은 공지 저장 후 할일 탭에서 직접 추가할 수 있어요.
-            </span>
-          </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <button onClick={() => { setStep("upload"); setResult(null); }}
-              style={{ flex:1, padding:"13px", borderRadius:14, border:"1px solid " + T.border1,
-                background:T.glass1, color:T.l2, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:F }}>
-              다시 업로드
-            </button>
-            <GreenBtn onClick={handleSave}>공지 저장하기</GreenBtn>
-          </div>
-        </>
-      )}
+        {/* 입력창 */}
+        <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="공지 내용에 대해 질문하세요..."
+            rows={2}
+            style={{ flex:1, padding:"12px 14px", borderRadius:14, background:T.glass2,
+              border:"1px solid " + T.border1, color:T.l1, fontSize:14, fontFamily:F,
+              resize:"none", outline:"none", lineHeight:1.5 }}
+          />
+          <button onClick={send} disabled={!input.trim() || loading}
+            style={{ width:44, height:44, borderRadius:14, background: input.trim() ? T.green : T.glass2,
+              border:"none", cursor: input.trim() ? "pointer" : "default",
+              color: input.trim() ? "#001808" : T.l3, fontSize:18, display:"flex",
+              alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all .2s" }}>↑</button>
+        </div>
+      </div>
     </Sheet>
   );
 }
@@ -702,7 +508,7 @@ function App() {
   const [addNotice,   setAddNotice]   = useState(false);
   const [addEvent,    setAddEvent]    = useState(false);
   const [addTask,     setAddTask]     = useState(false);
-  const [aiAnalyze,   setAiAnalyze]   = useState(false);
+  const [aiChat,      setAiChat]      = useState(false);
   const [noticeCat,   setNoticeCat]   = useState("전체");
 
   const [calDate, setCalDate] = useState(new Date("2026-03-01"));
@@ -991,15 +797,15 @@ function App() {
         {/* ── NOTICES ── */}
         {tab==="notices"&&(
           <div style={{ padding:"16px" }} className="fi">
-            <div onClick={()=>setAiAnalyze(true)} style={{
+            <div onClick={()=>setAiChat(true)} style={{
               ...glassBox({ padding:"14px 16px", marginBottom:14, cursor:"pointer",
                 background:"linear-gradient(135deg,rgba(61,220,132,0.10),rgba(90,200,250,0.08))",
                 border:`1px solid rgba(61,220,132,0.25)` }),
               display:"flex", alignItems:"center", gap:12 }}>
               <div style={{ fontSize:28, flexShrink:0 }}>✨</div>
               <div style={{ flex:1 }}>
-                <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:2 }}>AI 공지 분석</div>
-                <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>캡처 이미지나 PDF → 요약 + 할일 자동 생성</div>
+                <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:2 }}>AI 공지 검색</div>
+                <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>공지 내용 질문 · 검색 · 요약 요청</div>
               </div>
               <span style={{ color:T.green, fontSize:18 }}>›</span>
             </div>
@@ -1058,18 +864,27 @@ function App() {
                 const ev=eventsOnDay(d);
                 const dStr=`${cY}-${String(cM+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
                 const isTod=dStr===todayStr();
+                const dow=(firstDow+i)%7;
                 return (
                   <div key={d} style={{
                     background:isTod?`linear-gradient(145deg,${T.green},#28a864)`:T.glass1,
                     backdropFilter:"blur(20px) saturate(180%)", WebkitBackdropFilter:"blur(20px) saturate(180%)",
                     border:`1px solid ${isTod?"rgba(61,220,132,0.5)":T.border0}`,
-                    borderRadius:12, padding:"6px 3px", minHeight:54,
+                    borderRadius:10, padding:"5px 4px",
+                    minHeight: ev.length>0 ? (56 + ev.length*18) : 48,
                     boxShadow:isTod?`0 4px 20px rgba(61,220,132,0.35)`:"none" }}>
-                    <div style={{ textAlign:"center", fontSize:14, fontWeight:isTod?800:400,
-                      color:isTod?"#001808":T.l1, fontFamily:F, marginBottom:3 }}>{d}</div>
-                    {ev.slice(0,2).map(e=>(
-                      <div key={e.id} style={{ height:3, borderRadius:2, marginBottom:2,
-                        background:(CAT[e.category]||CAT["기타"]).color }}/>
+                    <div style={{ textAlign:"center", fontSize:13, fontWeight:isTod?800:500,
+                      color:isTod?"#001808":dow===0?T.red:dow===6?T.blue:T.l1,
+                      fontFamily:F, marginBottom:ev.length>0?3:0, lineHeight:1.3 }}>{d}</div>
+                    {ev.map(e=>(
+                      <div key={e.id} style={{
+                        fontSize:9, borderRadius:4, padding:"1px 4px", marginBottom:2,
+                        background:(CAT[e.category]||CAT["기타"]).color+"33",
+                        borderLeft:"2px solid "+(CAT[e.category]||CAT["기타"]).color,
+                        color:isTod?"#001808":T.l1, fontFamily:F,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        lineHeight:1.4
+                      }}>{e.title}</div>
                     ))}
                   </div>
                 );
@@ -1250,20 +1065,54 @@ function App() {
       )}
 
       {addNotice&&(
-        <Sheet title="공지 작성" onClose={()=>setAddNotice(false)}>
+        <Sheet title="공지 작성" onClose={()=>setAddNotice(false)} tall>
           <Field label="제목" value={nf.title} onChange={v=>setNf({...nf,title:v})} placeholder="공지 제목"/>
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
             <Seg value={nf.category} onChange={v=>setNf({...nf,category:v})} options={["이벤트","운영","인사","기타"]}/>
           </div>
-          <Field label="내용" value={nf.content} onChange={v=>setNf({...nf,content:v})} placeholder="공지 내용" multiline/>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:20,
-            padding:"12px 14px", background:T.glass1, border:`1px solid ${T.border0}`, borderRadius:12 }}>
-            <input type="checkbox" id="pin4" checked={nf.pinned} onChange={e=>setNf({...nf,pinned:e.target.checked})}
-              style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }}/>
-            <label htmlFor="pin4" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>상단 고정</label>
+          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:6 }}>내용</div>
+          <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
+            {[["bold","B",{fontWeight:700}],["italic","I",{fontStyle:"italic"}],["underline","U",{textDecoration:"underline"}]].map(([cmd,icon,st])=>(
+              <button key={cmd} onMouseDown={e=>{e.preventDefault();document.execCommand(cmd);}}
+                style={{ width:32,height:32,borderRadius:8,border:"1px solid "+T.border1,background:T.glass2,color:T.l1,cursor:"pointer",fontFamily:F,fontSize:13,...st }}>{icon}</button>
+            ))}
+            <div style={{ width:1,height:24,background:T.border1,margin:"0 2px" }}/>
+            {[["#FFE066","노"],["#80FF9E","초"],["#80CFFF","파"],["#FF9E9E","빨"]].map(([col,lbl])=>(
+              <button key={col} onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,col);}}
+                style={{ width:32,height:32,borderRadius:8,border:"2px solid rgba(255,255,255,0.15)",background:col,cursor:"pointer",fontSize:10,color:"#333",fontWeight:700 }}>{lbl}</button>
+            ))}
+            <div style={{ width:1,height:24,background:T.border1,margin:"0 2px" }}/>
+            <label style={{ width:32,height:32,borderRadius:8,border:"1px solid "+T.border1,background:T.glass2,color:T.l1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>
+              🖼<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+                const f=e.target.files[0];if(!f)return;
+                const r=new FileReader();
+                r.onload=ev=>{document.execCommand("insertImage",false,ev.target.result);};
+                r.readAsDataURL(f);e.target.value="";
+              }}/>
+            </label>
           </div>
-          <GreenBtn full onClick={submitNotice}>등록하기</GreenBtn>
+          <div id="notice-editor" contentEditable suppressContentEditableWarning
+            onInput={e=>setNf(prev=>({...prev,content:e.currentTarget.innerHTML}))}
+            style={{ minHeight:200,padding:"12px 14px",borderRadius:14,background:T.glass2,
+              border:"1px solid "+T.border1,color:T.l1,fontSize:14,fontFamily:F,lineHeight:1.7,
+              outline:"none",marginBottom:12,overflowY:"auto" }}
+          />
+          <style dangerouslySetInnerHTML={{__html:`
+            #notice-editor:empty:after{content:'공지 내용을 입력하세요...';color:`+T.l4+`;pointer-events:none;}
+            #notice-editor img{max-width:100%;border-radius:8px;margin:4px 0;display:block;}
+          `}}/>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"12px 14px",background:T.glass1,border:"1px solid "+T.border0,borderRadius:12 }}>
+            <input type="checkbox" id="pin4" checked={nf.pinned} onChange={e=>setNf({...nf,pinned:e.target.checked})} style={{ width:18,height:18,accentColor:T.green,cursor:"pointer" }}/>
+            <label htmlFor="pin4" style={{ fontSize:14,color:T.l1,cursor:"pointer",userSelect:"none",fontFamily:F }}>상단 고정</label>
+          </div>
+          <GreenBtn full onClick={()=>{
+            if(!nf.title.trim())return;
+            saveNotices(p=>[{id:"n"+Date.now(),...nf,date:todayStr(),_read:false,author:profile?.name||nf.author},...p]);
+            setNf({title:"",category:"이벤트",content:"",pinned:false,author:""});
+            const ed=document.getElementById("notice-editor");if(ed)ed.innerHTML="";
+            setAddNotice(false);
+          }} disabled={!nf.title.trim()}>저장하기</GreenBtn>
         </Sheet>
       )}
 
@@ -1312,7 +1161,7 @@ function App() {
         </Sheet>
       )}
 
-      {aiAnalyze&&<AIAnalyzeSheet onClose={()=>setAiAnalyze(false)} onSave={handleAISave}/>}
+      {aiChat&&<AIChatSheet onClose={()=>setAiChat(false)} notices={notices}/>}
     </div>
   );
 }
