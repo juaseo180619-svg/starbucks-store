@@ -22,19 +22,21 @@
     .rich-editor{outline:none;position:relative}
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
     .rich-editor mark{padding:1px 3px;border-radius:3px}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    @keyframes scaleIn{from{opacity:0;transform:scale(0.94)}to{opacity:1;transform:scale(1)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
     @keyframes spin{to{transform:rotate(360deg)}}
     @keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}
-    .fi{animation:fadeUp .30s cubic-bezier(.22,1,.36,1) both}
+    .fi{animation:fadeUp .28s cubic-bezier(.22,1,.36,1) both}
     button:active{transform:scale(0.96);transition:transform .1s}
-    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar{width:5px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.18);border-radius:4px}
     input:focus,textarea:focus,[contenteditable]:focus{
       border-color:rgba(0,112,74,0.45)!important;
       box-shadow:0 0 0 3px rgba(0,112,74,0.08)!important
+    }
+    /* PC 레이아웃 */
+    @media(min-width:768px){
+      html,body{background:#E8F2EC}
     }
   </style>
 </head>
@@ -319,6 +321,7 @@ function ActionBtn({ onClick, children }) {
       background:T.green, color:"#fff", border:"none",
       borderRadius:10, padding:"8px 16px", fontSize:13, fontWeight:700,
       cursor:"pointer", fontFamily:F, letterSpacing:"0.2px",
+      whiteSpace:"nowrap", flexShrink:0,
       boxShadow:"0 2px 10px rgba(0,112,74,0.22)", transition:"all .15s",
     }}
     onMouseEnter={e=>{e.currentTarget.style.background="#1E3932";}}
@@ -582,9 +585,18 @@ function App() {
   if (showProfileSetup) return <ProfileSetup onComplete={saveProfile} existing={profile}/>;
 
   /* ─── 메인 UI ─── */
+  // 반응형: 768px 이상이면 PC 레이아웃
+  const [isPC, setIsPC] = useState(window.innerWidth >= 768);
+  useEffect(()=>{
+    const fn = () => setIsPC(window.innerWidth >= 768);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+
   return (
-    <div style={{ minHeight:"100vh", background:T.bg, maxWidth:430, margin:"0 auto",
-      fontFamily:F, position:"relative", overflowX:"hidden" }}>
+    <div style={{ minHeight:"100vh", background:isPC?"#E8F2EC":T.bg,
+      fontFamily:F, position:"relative", overflowX:"hidden",
+      display:isPC?"flex":"block" }}>
       <style>{`
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
         ::placeholder{color:${T.l3};font-family:${F};}
@@ -596,18 +608,148 @@ function App() {
         .fi{animation:fadeIn .25s ease}
       `}</style>
 
-      {/* 배경 orbs */}
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0, overflow:"hidden" }}>
+      {/* 배경 orbs - 모바일만 */}
+      {!isPC && <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0, overflow:"hidden" }}>
         <div style={{ position:"absolute", top:"-20%", left:"-20%", width:500, height:500, borderRadius:"50%",
           background:"radial-gradient(circle,rgba(0,90,50,0.45) 0%,transparent 65%)", filter:"blur(50px)" }}/>
         <div style={{ position:"absolute", top:"25%", right:"-20%", width:380, height:380, borderRadius:"50%",
           background:"radial-gradient(circle,rgba(0,70,100,0.30) 0%,transparent 65%)", filter:"blur(50px)" }}/>
         <div style={{ position:"absolute", bottom:"5%", left:"10%", width:320, height:320, borderRadius:"50%",
           background:"radial-gradient(circle,rgba(20,70,40,0.28) 0%,transparent 65%)", filter:"blur(60px)" }}/>
-      </div>
+      </div>}
 
-      {/* ══ HEADER ══ */}
-      <div style={{ position:"sticky", top:0, zIndex:200,
+      {/* ══ PC 사이드바 ══ */}
+      {isPC && (
+        <aside style={{ width:240, minHeight:"100vh", background:"#FFFFFF",
+          borderRight:"1px solid rgba(0,112,74,0.10)",
+          display:"flex", flexDirection:"column",
+          position:"sticky", top:0, height:"100vh", flexShrink:0,
+          boxShadow:"2px 0 20px rgba(0,112,74,0.06)" }}>
+          {/* 브랜드 */}
+          <div style={{ padding:"28px 24px 20px", borderBottom:"1px solid rgba(0,112,74,0.08)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:10,
+                background:"linear-gradient(135deg,#00704A,#1E3932)",
+                display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                <span style={{ fontSize:16, color:"#fff" }}>☕</span>
+              </div>
+              <div>
+                <div style={{ fontSize:11, fontWeight:700, color:T.l3, letterSpacing:2, fontFamily:F }}>STARBUCKS</div>
+                <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F }}>Store Manager</div>
+              </div>
+            </div>
+          </div>
+          {/* 프로필 */}
+          <div onClick={()=>setShowProfileSetup(true)}
+            style={{ padding:"16px 20px", borderBottom:"1px solid rgba(0,112,74,0.08)",
+              cursor:"pointer", display:"flex", alignItems:"center", gap:10,
+              transition:"background .15s" }}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(0,112,74,0.04)"}
+            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <div style={{ width:40, height:40, borderRadius:12, background:rc.bg,
+              border:"1.5px solid "+rc.color+"44", flexShrink:0,
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ fontSize:16, fontWeight:800, color:rc.color, lineHeight:1 }}>{profile.name[0]}</div>
+              <div style={{ fontSize:8, color:rc.color, opacity:0.75, fontWeight:600 }}>{profile.role.slice(0,2)}</div>
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F }}>{profile.name}</div>
+              <div style={{ fontSize:11, color:rc.color, fontFamily:F }}>{profile.role}</div>
+            </div>
+            <span style={{ color:T.l3, fontSize:12 }}>›</span>
+          </div>
+          {/* 날짜 */}
+          <div style={{ padding:"12px 20px", borderBottom:"1px solid rgba(0,112,74,0.08)" }}>
+            <div style={{ fontSize:22, fontWeight:800, color:T.l1, fontFamily:F, letterSpacing:-0.5 }}>
+              {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
+            </div>
+            <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>
+              {["일","월","화","수","목","금","토"][now.getDay()]}요일
+            </div>
+          </div>
+          {/* 탭 네비 */}
+          <nav style={{ flex:1, padding:"12px 12px" }}>
+            {[
+              { id:"home",     icon:"🏠", label:"홈",     badge:0      },
+              { id:"notices",  icon:"📢", label:"공지",   badge:0      },
+              { id:"calendar", icon:"📅", label:"캘린더", badge:0      },
+              { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
+            ].map(t=>(
+              <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
+                display:"flex", alignItems:"center", gap:12, width:"100%",
+                padding:"11px 14px", borderRadius:12, border:"none", cursor:"pointer",
+                fontFamily:F, fontSize:14, fontWeight:tab===t.id?700:500,
+                background:tab===t.id?"rgba(0,112,74,0.10)":"transparent",
+                color:tab===t.id?T.green:T.l2,
+                marginBottom:2, textAlign:"left", position:"relative",
+                transition:"all .15s",
+              }}
+              onMouseEnter={e=>{if(tab!==t.id)e.currentTarget.style.background="rgba(0,112,74,0.05)";}}
+              onMouseLeave={e=>{if(tab!==t.id)e.currentTarget.style.background="transparent";}}>
+                <span style={{ fontSize:18, width:22, textAlign:"center" }}>{t.icon}</span>
+                {t.label}
+                {t.badge>0&&(
+                  <span style={{ marginLeft:"auto", background:T.red, color:"#fff",
+                    borderRadius:10, fontSize:11, minWidth:20, height:20,
+                    display:"inline-flex", alignItems:"center", justifyContent:"center",
+                    fontWeight:700, padding:"0 6px" }}>{t.badge}</span>
+                )}
+                {tab===t.id&&(
+                  <div style={{ position:"absolute", left:0, top:"20%", bottom:"20%",
+                    width:3, borderRadius:"0 2px 2px 0", background:T.green }}/>
+                )}
+              </button>
+            ))}
+          </nav>
+          {/* 하단 */}
+          <div style={{ padding:"16px 20px", borderTop:"1px solid rgba(0,112,74,0.08)",
+            fontSize:11, color:T.l3, fontFamily:F, lineHeight:1.8 }}>
+            <div style={{ fontWeight:600, marginBottom:2 }}>💾 데이터 동기화</div>
+            <div style={{ fontSize:10, color:T.l4 }}>localStorage 저장중</div>
+            <div style={{ display:"flex", gap:6, marginTop:8 }}>
+              <button onClick={()=>{
+                  const data={};
+                  Object.keys(localStorage).forEach(k=>{data[k]=localStorage.getItem(k);});
+                  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+                  const a=document.createElement("a");
+                  a.href=URL.createObjectURL(blob);
+                  a.download="sbx_backup_"+new Date().toISOString().slice(0,10)+".json";
+                  a.click();
+                }}
+                style={{ flex:1, padding:"6px 0", borderRadius:8, border:"1px solid "+T.border1,
+                  background:"transparent", color:T.l2, fontSize:11, cursor:"pointer", fontFamily:F }}>
+                내보내기
+              </button>
+              <label style={{ flex:1, padding:"6px 0", borderRadius:8, border:"1px solid "+T.border1,
+                background:"transparent", color:T.l2, fontSize:11, cursor:"pointer", fontFamily:F,
+                textAlign:"center" }}>
+                가져오기
+                <input type="file" accept=".json" style={{ display:"none" }} onChange={e=>{
+                  const f=e.target.files[0]; if(!f)return;
+                  const r=new FileReader();
+                  r.onload=ev=>{
+                    try{
+                      const data=JSON.parse(ev.target.result);
+                      Object.entries(data).forEach(([k,v])=>localStorage.setItem(k,v));
+                      window.location.reload();
+                    }catch(err){ alert("파일 형식이 올바르지 않아요"); }
+                  };
+                  r.readAsText(f);
+                }}/>
+              </label>
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {/* ══ 메인 콘텐츠 영역 ══ */}
+      <div style={{ flex:1, minWidth:0, maxWidth:isPC?740:430,
+        margin:isPC?"0":"0 auto", width:"100%",
+        background:T.bg, minHeight:"100vh",
+        boxShadow:isPC?"0 0 60px rgba(0,0,0,0.08)":"none" }}>
+
+      {/* ══ HEADER (모바일) ══ */}
+      {!isPC && <div style={{ position:"sticky", top:0, zIndex:200,
         background:"rgba(241,248,244,0.95)", backdropFilter:"blur(20px)",
         WebkitBackdropFilter:"blur(20px)",
         borderBottom:"1px solid rgba(0,112,74,0.12)" }}>
@@ -672,7 +814,7 @@ function App() {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
 {/* ══ CONTENT ══ */}
       <div style={{ position:"relative", zIndex:1 }}>
@@ -851,8 +993,8 @@ function App() {
               </div>
               <span style={{ color:T.green, fontSize:18 }}>›</span>
             </div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, gap:8 }}>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, gap:8, flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", flex:1, minWidth:0 }}>
                 {["전체",...(categories||DEFAULT_CATS)].map(cat=>(
                   <button key={cat} onClick={()=>setNoticeCat(cat)} style={{
                     padding:"6px 13px", borderRadius:20, fontSize:13, fontWeight:600,
@@ -1142,6 +1284,7 @@ function App() {
           }}
         />
       )}
+      </div>{/* 메인 콘텐츠 영역 끝 */}
     </div>
   );
 }
