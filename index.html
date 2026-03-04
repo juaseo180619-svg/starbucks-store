@@ -355,23 +355,20 @@ function ProfileSetup({ onComplete, existing }) {
 
 /* ══════════════════ AI ANALYZE SHEET ══════════════════ */
 function AIAnalyzeSheet({ onClose, onSave }) {
-  const CHUNK = 5; // 묶음 크기
-
   const [step, setStep]         = useState("upload");
   const [files, setFiles]       = useState([]);
   const [dragOver, setDragOver] = useState(false);
-  const [chunks, setChunks]     = useState([]); // [{ status:"pending"|"analyzing"|"done"|"error", summary:"" }]
-  const [merging, setMerging]   = useState(false);
+  const [progress, setProgress] = useState({ current:0, total:0, label:"" });
   const [result, setResult]     = useState(null);
   const [error, setError]       = useState(null);
   const [savePinned, setSavePinned] = useState(false);
   const fileRef = useRef();
 
-  // 이미지 자동 압축 후 base64 변환 (최대 1280px, 품질 0.7)
+  /* 이미지 압축 후 base64 변환 */
   const toBase64 = (f) => new Promise((res, rej) => {
     if (f.type === "application/pdf") {
       const r = new FileReader();
-      r.onload  = () => res(r.result.split(",")[1]);
+      r.onload  = () => res({ data: r.result.split(",")[1], isPDF: true });
       r.onerror = () => rej();
       r.readAsDataURL(f);
       return;
@@ -379,7 +376,7 @@ function AIAnalyzeSheet({ onClose, onSave }) {
     const img = new Image();
     const url = URL.createObjectURL(f);
     img.onload = () => {
-      const MAX = 1280;
+      const MAX = 1024;
       let w = img.width, h = img.height;
       if (w > MAX || h > MAX) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -389,12 +386,42 @@ function AIAnalyzeSheet({ onClose, onSave }) {
       canvas.width = w; canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
-      const data = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      res(data);
+      res({ data: canvas.toDataURL("image/jpeg", 0.65).split(",")[1], isPDF: false });
     };
     img.onerror = () => rej();
     img.src = url;
   });
+
+  /* API 호출 (재시도 최대 5회) */
+  const callAPI = async (messages, maxTokens = 1500) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        const wait = Math.min(4000 * attempt, 15000);
+        await new Promise(r => setTimeout(r, wait));
+      }
+      try {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": window.ANTHROPIC_API_KEY || "",
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true"
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: maxTokens,
+            messages,
+          }),
+        });
+        if (resp.status === 429 || resp.status >= 500) continue; // 재시도
+        const data = await resp.json();
+        if (data.error) continue;
+        return data.content?.map(b => b.text || "").join("").trim();
+      } catch { /* 재시도 */ }
+    }
+    return null;
+  };
 
   const handleFiles = (incoming) => {
     setError(null);
@@ -409,65 +436,64 @@ function AIAnalyzeSheet({ onClose, onSave }) {
   };
 
   const removeFile = idx => setFiles(prev => prev.filter((_, i) => i !== idx));
-  const clearAll   = () => { setFiles([]); setResult(null); setError(null); setChunks([]); setSavePinned(false); };
+  const clearAll   = () => { setFiles([]); setResult(null); setError(null); setSavePinned(false); };
 
-  /* 묶음 1개(5~6장) → 텍스트 요약 (재시도 3회) */
-  const analyzeChunk = async (chunkFiles, chunkIdx) => {
-    setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"analyzing" } : c));
+  const analyze = async () => {
+    if (!files.length) return;
+    setStep("analyzing");
 
-    const blocks = await Promise.all(chunkFiles.map(async ({ file }) => {
-      const base64 = await toBase64(file);
-      const isPDF  = file.type === "application/pdf";
-      return isPDF
-        ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }
-        : { type:"image",    source:{ type:"base64", media_type:"image/jpeg", data:base64 } };
-    }));
+    const texts = [];
 
-    const prompt = `이 ${chunkFiles.length}개의 이미지/문서는 스타벅스 파트너넷 공지사항의 일부 페이지입니다.
-이미지에 있는 모든 텍스트와 내용을 빠짐없이 추출해주세요.
-내용을 삭제하거나 줄이지 말고, 보이는 그대로 전부 옮겨주세요.
-JSON만 반환하고 다른 텍스트는 절대 포함하지 마세요.
-{"text": "이미지에서 추출한 모든 내용 (생략 없이 전부)"}
+    // 1단계: 파일 1장씩 순차 분석
+    for (let i = 0; i < files.length; i++) {
+      setProgress({ current: i + 1, total: files.length, label: `${i + 1}/${files.length}번 파일 분석 중...` });
+
+      try {
+        const { data, isPDF } = await toBase64(files[i].file);
+        const block = isPDF
+          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
+          : { type: "image",    source: { type: "base64", media_type: "image/jpeg", data } };
+
+        const prompt = `이 이미지는 스타벅스 파트너넷 공지사항의 일부입니다.
+보이는 모든 텍스트와 내용을 빠짐없이 추출해주세요. 생략하지 마세요.
+JSON만 반환하세요: {"text": "추출한 전체 내용"}
 내용이 없으면: {"text": ""}`;
 
-    const MAX_RETRY = 3;
-    for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
-      try {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt)); // 재시도 대기
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-          body: JSON.stringify({
-            model:"claude-haiku-4-5-20251001", max_tokens:4096,
-            messages:[{ role:"user", content:[...blocks, { type:"text", text:prompt }] }],
-          }),
-        });
-        if (resp.status === 429) { continue; } // rate limit → 재시도
-        const data    = await resp.json();
-        if (data.error) { continue; } // API 에러 → 재시도
-        const raw     = data.content?.map(c => c.text || "").join("").trim();
-        const parsed  = JSON.parse(raw.replace(/```json|```/g, "").trim());
-        const summary = parsed.text || "";
-        setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"done", summary } : c));
-        return summary;
-      } catch { /* 재시도 */ }
+        const raw = await callAPI([{ role: "user", content: [block, { type: "text", text: prompt }] }], 1500);
+        if (raw) {
+          const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+          if (parsed.text) texts.push(parsed.text);
+        }
+      } catch { /* 이 파일 건너뜀 */ }
+
+      // 파일 간 1.5초 대기 (rate limit 방지)
+      if (i < files.length - 1) await new Promise(r => setTimeout(r, 1500));
     }
-    setChunks(prev => prev.map((c, i) => i === chunkIdx ? { ...c, status:"error", summary:"" } : c));
-    return "";
-  };
 
-  /* 수집된 텍스트 → 공지 1개로 합치기 */
-  const mergeTexts = async (texts) => {
-    const combined = texts.filter(Boolean).join("\n\n---\n\n");
-    const prompt = `당신은 스타벅스 매장 운영 전문 AI입니다.
+    // 2단계: 전체 텍스트 합치기
+    setProgress({ current: files.length, total: files.length, label: "최종 공지 정리 중..." });
+
+    if (texts.length === 0) {
+      setError("모든 파일 분석에 실패했어요. 다시 시도해주세요.");
+      setStep("upload");
+      return;
+    }
+
+    try {
+      const combined = texts.join("
+
+---
+
+");
+      const mergePrompt = `당신은 스타벅스 매장 운영 전문 AI입니다.
 아래는 파트너넷 공지사항에서 추출한 내용입니다.
-내용을 삭제하거나 줄이지 말고, 중복된 내용만 하나로 합쳐서 읽기 좋게 정리해주세요.
+중복된 내용만 하나로 합치고, 나머지는 전부 유지해서 읽기 좋게 정리해주세요.
 날짜, 수치, 세부 조건 등 모든 정보를 유지해야 합니다.
-JSON만 반환하고 다른 텍스트는 절대 포함하지 마세요.
-
+JSON만 반환하세요:
 {
   "title": "공지 제목 (30자 이내)",
   "category": "이벤트 or 운영 or 인사 or 기타",
-  "summary": "공지 전체 내용을 보기 좋게 정리 (내용 삭제 금지, 항목별 개행은 \\n, 중요 항목은 • 로 시작)"
+  "summary": "공지 전체 내용 정리 (내용 삭제 금지, 항목별 개행은 \n, 중요 항목은 • 로 시작)"
 }
 
 추출 내용:
@@ -475,44 +501,28 @@ ${combined}
 
 오늘 날짜: ${todayStr()}`;
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body: JSON.stringify({
-        model:"claude-sonnet-4-6", max_tokens:4096,
-        messages:[{ role:"user", content:[{ type:"text", text:prompt }] }],
-      }),
-    });
-    const data   = await resp.json();
-    const raw    = data.content?.map(c => c.text || "").join("").trim();
-    return JSON.parse(raw.replace(/```json|```/g, "").trim());
-  };
-
-  const analyze = async () => {
-    if (!files.length) return;
-    setStep("analyzing");
-    setMerging(false);
-
-    // 파일을 CHUNK 크기로 분할
-    const grouped = [];
-    for (let i = 0; i < files.length; i += CHUNK) grouped.push(files.slice(i, i + CHUNK));
-    setChunks(grouped.map(() => ({ status:"pending", summary:"" })));
-
-    try {
-      // 묶음들을 순차 처리 (rate limit 방지)
-      const texts = [];
-      for (let idx = 0; idx < grouped.length; idx++) {
-        const text = await analyzeChunk(grouped[idx], idx);
-        texts.push(text);
-        if (idx < grouped.length - 1) await new Promise(r => setTimeout(r, 2000));
-      }
-
-      // 마지막 합치기
-      setMerging(true);
-      const merged = await mergeTexts(texts);
+      // mergeTexts는 Sonnet 사용
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": window.ANTHROPIC_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 4096,
+          messages: [{ role: "user", content: mergePrompt }],
+        }),
+      });
+      const data   = await resp.json();
+      const raw    = data.content?.map(b => b.text || "").join("").trim();
+      const merged = JSON.parse(raw.replace(/```json|```/g, "").trim());
       setResult(merged);
       setStep("result");
     } catch {
-      setError("분석 중 오류가 발생했어요. 다시 시도해주세요.");
+      setError("최종 정리 중 오류가 발생했어요. 다시 시도해주세요.");
       setStep("upload");
     }
   };
@@ -520,15 +530,14 @@ ${combined}
   const handleSave = () => {
     if (!result) return;
     onSave({
-      notice:{ id:"n"+Date.now(), title:result.title, category:result.category,
+      notice: { id:"n"+Date.now(), title:result.title, category:result.category,
         content:result.summary, date:todayStr(), pinned:savePinned, author:"AI 분석", _read:false },
-      tasks:[],
+      tasks: [],
     });
     onClose();
   };
 
-  const chunkCount = Math.ceil(files.length / CHUNK);
-  const doneCount  = chunks.filter(c => c.status === "done" || c.status === "error").length;
+  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
   return (
     <Sheet title="AI 공지 분석" onClose={onClose} tall>
@@ -540,8 +549,6 @@ ${combined}
             파트너넷 공지 캡처 이미지 또는 PDF를 올려주세요.<br/>
             <span style={{ color:T.green }}>여러 파일을 한꺼번에</span> 올리면 하나의 공지로 통합 정리해드려요.
           </p>
-
-          {/* 드롭존 */}
           <div
             onDragOver={e=>{e.preventDefault();setDragOver(true);}}
             onDragLeave={()=>setDragOver(false)}
@@ -595,96 +602,52 @@ ${combined}
             padding:"10px 14px", marginBottom:14, fontSize:13, color:T.red, fontFamily:F }}>⚠️ {error}</div>}
 
           <GreenBtn full onClick={analyze} disabled={!files.length}>
-            {files.length > 0
-              ? `${files.length}개 파일 · ${chunkCount}묶음 병렬 분석`
-              : "파일을 추가해주세요"}
+            {files.length > 0 ? `${files.length}개 파일 분석 시작` : "파일을 추가해주세요"}
           </GreenBtn>
         </>
       )}
 
       {/* ── ANALYZING ── */}
       {step==="analyzing"&&(
-        <div style={{ padding:"20px 0" }}>
-          {/* 스피너 + 상태 */}
-          <div style={{ textAlign:"center", marginBottom:24 }}>
-            <div style={{ position:"relative", width:60, height:60, margin:"0 auto 16px" }}>
-              <div style={{ width:60, height:60, borderRadius:"50%", border:`3px solid ${T.glass2}`,
-                borderTopColor:T.green, animation:"spin .8s linear infinite", position:"absolute" }}/>
-              <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
-                justifyContent:"center", fontSize:20 }}>✨</div>
-            </div>
-            {merging
-              ? <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:4 }}>
-                  최종 공지 정리 중...
-                </div>
-              : <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:4 }}>
-                  {doneCount}/{chunks.length} 묶음 완료
-                </div>
-            }
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:14 }}>
-              {merging ? "추출된 내용을 하나의 공지로 합치고 있어요" : `${files.length}개 파일을 ${chunks.length}묶음으로 동시 분석 중`}
-            </div>
-            {/* 프로그레스 바 */}
-            <div style={{ background:T.glass2, borderRadius:6, height:7,
-              margin:"0 auto", width:"85%", overflow:"hidden" }}>
-              <div style={{ height:"100%", borderRadius:6,
-                background:`linear-gradient(90deg,${T.green},#28a864)`,
-                width: merging ? "95%" : chunks.length > 0 ? `${Math.max((doneCount/chunks.length)*88, 4)}%` : "4%",
-                transition:"width .4s ease" }}/>
-            </div>
+        <div style={{ padding:"20px 0", textAlign:"center" }}>
+          <div style={{ position:"relative", width:64, height:64, margin:"0 auto 20px" }}>
+            <div style={{ width:64, height:64, borderRadius:"50%", border:`3px solid ${T.glass2}`,
+              borderTopColor:T.green, animation:"spin .8s linear infinite", position:"absolute" }}/>
+            <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
+              justifyContent:"center", fontSize:22 }}>✨</div>
           </div>
-
-          {/* 묶음별 상태 카드 */}
-          <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-            {chunks.map((chunk, ci) => {
-              const start = ci * CHUNK;
-              const end   = Math.min(start + CHUNK, files.length);
-              const thumbs = files.slice(start, end);
-              const statusColor = chunk.status==="done" ? T.green : chunk.status==="error" ? T.red : chunk.status==="analyzing" ? T.orange : T.l4;
-              const statusLabel = chunk.status==="done" ? "✓ 완료" : chunk.status==="error" ? "✕ 실패" : chunk.status==="analyzing" ? "분석 중..." : "대기 중";
-              return (
-                <div key={ci}>
-                  <div style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12 }}>
-                    {/* 썸네일 묶음 */}
-                    <div style={{ display:"flex", gap:3, flexShrink:0 }}>
-                      {thumbs.map((f, ti) => (
-                        <div key={ti} style={{ width:32, height:32, borderRadius:7, overflow:"hidden",
-                          border:`1.5px solid ${chunk.status==="done"?T.green:T.border1}`,
-                          background:T.glass2, transition:"border .3s", flexShrink:0 }}>
-                          {f.preview
-                            ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
-                            : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
-                                justifyContent:"center", fontSize:13 }}>📄</div>
-                          }
-                        </div>
-                      ))}
-                    </div>
-                    {/* 상태 */}
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:13, color:T.l2, fontFamily:F, marginBottom:2 }}>
-                        {start+1}~{end}번 파일
-                      </div>
-                      <div style={{ fontSize:12, color:statusColor, fontFamily:F, fontWeight:600 }}>
-                        {statusLabel}
-                      </div>
-                    </div>
-                    {/* 애니메이션 도트 */}
-                    {chunk.status==="analyzing"&&(
-                      <div style={{ display:"flex", gap:3 }}>
-                        {[0,1,2].map(d=>(
-                          <div key={d} style={{ width:5, height:5, borderRadius:"50%",
-                            background:T.orange, opacity:0.7,
-                            animation:`pulse 1s ease ${d*0.2}s infinite` }}/>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {ci < chunks.length-1 && <Sep/>}
-                </div>
-              );
-            })}
+          <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:4 }}>
+            {progress.label || "분석 중..."}
           </div>
-          <style>{`@keyframes pulse{0%,100%{transform:scale(0.8);opacity:0.4}50%{transform:scale(1.2);opacity:1}}`}</style>
+          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:16 }}>
+            {progress.current < progress.total
+              ? "1장씩 순차 분석 중이에요 (실패 없이 안정적)"
+              : "모든 내용을 하나의 공지로 합치고 있어요"}
+          </div>
+          <div style={{ background:T.glass2, borderRadius:6, height:8,
+            margin:"0 auto 12px", width:"85%", overflow:"hidden" }}>
+            <div style={{ height:"100%", borderRadius:6,
+              background:`linear-gradient(90deg,${T.green},#28a864)`,
+              width: progress.current >= progress.total ? "95%" : `${Math.max(pct, 3)}%`,
+              transition:"width .5s ease" }}/>
+          </div>
+          <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F, marginBottom:20 }}>
+            {progress.current >= progress.total ? "마무리 중..." : `${pct}%`}
+          </div>
+          {/* 썸네일 */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:4, justifyContent:"center", maxWidth:300, margin:"0 auto" }}>
+            {files.map((f,i)=>(
+              <div key={i} style={{ width:26, height:26, borderRadius:6, overflow:"hidden",
+                border:`1.5px solid ${i < progress.current ? T.green : T.border1}`,
+                background:T.glass1, transition:"border .3s", flexShrink:0 }}>
+                {f.preview
+                  ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                  : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+                      justifyContent:"center", fontSize:11 }}>📄</div>
+                }
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -725,7 +688,7 @@ ${combined}
           </div>
 
           <div style={{ display:"flex", gap:10 }}>
-            <button onClick={()=>{setStep("upload");setResult(null);setChunks([]);}}
+            <button onClick={()=>{setStep("upload");setResult(null);}}
               style={{ flex:1, padding:"13px", borderRadius:14, border:`1px solid ${T.border1}`,
                 background:T.glass1, color:T.l2, fontSize:14, fontWeight:600,
                 cursor:"pointer", fontFamily:F }}>다시 업로드</button>
@@ -737,92 +700,6 @@ ${combined}
   );
 }
 
-
-/* ══════════════════ API 키 설정 화면 ══════════════════ */
-function ApiKeySetup({ onComplete }) {
-  const [key, setKey] = useState("");
-  const [error, setError] = useState("");
-  const [testing, setTesting] = useState(false);
-
-  const submit = async () => {
-    const k = key.trim();
-    if (!k.startsWith("sk-ant-")) { setError("올바른 API 키를 입력해주세요 (sk-ant- 로 시작)"); return; }
-    setTesting(true); setError("");
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json", "x-api-key":k,
-          "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:10,
-          messages:[{ role:"user", content:"hi" }] }),
-      });
-      const data = await resp.json();
-      if (data.error) { setError("키가 유효하지 않아요: " + data.error.message); setTesting(false); return; }
-      window.ANTHROPIC_API_KEY = k;
-      try { localStorage.setItem("sbx_apikey", k); } catch {}
-      window.ANTHROPIC_API_KEY = k; // 재확인
-      onComplete();
-    } catch { setError("연결에 실패했어요. 키를 다시 확인해주세요."); setTesting(false); }
-  };
-
-  return (
-    <div style={{ minHeight:"100vh", background:T.bg, maxWidth:430, margin:"0 auto",
-      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-      padding:"40px 24px", fontFamily:F, position:"relative", overflow:"hidden" }}>
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:"-20%", left:"-20%", width:500, height:500, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,90,50,0.45) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-        <div style={{ position:"absolute", bottom:"10%", right:"-15%", width:380, height:380, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,70,100,0.30) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-      </div>
-      <div style={{ position:"relative", zIndex:1, width:"100%" }}>
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:36 }}>
-          <div style={{ width:64, height:64, borderRadius:20,
-            background:"linear-gradient(145deg,#1a5c38,#00704A)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow:"0 8px 32px rgba(0,112,74,0.5)", marginBottom:14 }}>
-            <svg width="36" height="36" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="44" stroke="white" strokeWidth="5"/>
-              <ellipse cx="50" cy="36" rx="15" ry="18" fill="white"/>
-              <path d="M27 57 Q50 78 73 57 Q70 92 50 96 Q30 92 27 57Z" fill="white"/>
-              <path d="M35 57 Q50 50 65 57" stroke="#1a5c38" strokeWidth="4" fill="none" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <div style={{ fontSize:11, fontWeight:700, color:T.l3, letterSpacing:4, marginBottom:6 }}>STARBUCKS</div>
-          <div style={{ fontSize:22, fontWeight:700, color:T.l1 }}>API 키 설정</div>
-          <div style={{ fontSize:13, color:T.l3, marginTop:8, textAlign:"center", lineHeight:1.6 }}>
-            처음 한 번만 입력하면 저장돼요
-          </div>
-        </div>
-
-        <div style={{ ...glassBox({ padding:"22px 20px",
-          boxShadow:"0 8px 40px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)" }) }}>
-          <div style={{ fontSize:12, color:T.l3, marginBottom:5, paddingLeft:2 }}>Anthropic API 키</div>
-          <input
-            type="password"
-            value={key}
-            onChange={e=>setKey(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&submit()}
-            placeholder="sk-ant-api03-..."
-            style={{ ...fBase, marginBottom:12 }}
-          />
-          {error && <div style={{ background:T.redDim, border:`1px solid rgba(255,107,107,0.3)`,
-            borderRadius:10, padding:"10px 14px", marginBottom:12, fontSize:13, color:T.red }}>
-            ⚠️ {error}
-          </div>}
-          <div style={{ fontSize:12, color:T.l3, lineHeight:1.7, marginBottom:16,
-            background:T.glass0, borderRadius:10, padding:"10px 14px" }}>
-            💡 console.anthropic.com → API Keys에서 발급<br/>
-            키는 이 기기에만 저장되고 외부로 전송되지 않아요
-          </div>
-          <GreenBtn full onClick={submit} disabled={!key.trim()||testing}>
-            {testing ? "확인 중..." : "시작하기"}
-          </GreenBtn>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ════════════════════════ MAIN APP ════════════════════════ */
 function App() {
