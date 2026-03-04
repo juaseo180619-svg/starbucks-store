@@ -358,18 +358,18 @@ function AIAnalyzeSheet({ onClose, onSave }) {
   const [step, setStep]         = useState("upload");
   const [files, setFiles]       = useState([]);
   const [dragOver, setDragOver] = useState(false);
-  const [progress, setProgress] = useState({ current:0, total:0, label:"" });
+  const [current, setCurrent]   = useState(0);
+  const [statusMsg, setStatusMsg] = useState("");
   const [result, setResult]     = useState(null);
   const [error, setError]       = useState(null);
   const [savePinned, setSavePinned] = useState(false);
   const fileRef = useRef();
 
-  /* 이미지 압축 후 base64 변환 */
   const toBase64 = (f) => new Promise((res, rej) => {
     if (f.type === "application/pdf") {
       const r = new FileReader();
       r.onload  = () => res({ data: r.result.split(",")[1], isPDF: true });
-      r.onerror = () => rej();
+      r.onerror = rej;
       r.readAsDataURL(f);
       return;
     }
@@ -382,23 +382,19 @@ function AIAnalyzeSheet({ onClose, onSave }) {
         if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
         else       { w = Math.round(w * MAX / h); h = MAX; }
       }
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
-      res({ data: canvas.toDataURL("image/jpeg", 0.65).split(",")[1], isPDF: false });
+      res({ data: cv.toDataURL("image/jpeg", 0.65).split(",")[1], isPDF: false });
     };
-    img.onerror = () => rej();
+    img.onerror = rej;
     img.src = url;
   });
 
-  /* API 호출 (재시도 최대 5회) */
-  const callAPI = async (messages, maxTokens = 1500) => {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) {
-        const wait = Math.min(4000 * attempt, 15000);
-        await new Promise(r => setTimeout(r, wait));
-      }
+  const callAPI = async (body) => {
+    for (let i = 0; i < 5; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 3000 * i));
       try {
         const resp = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -408,562 +404,90 @@ function AIAnalyzeSheet({ onClose, onSave }) {
             "anthropic-version": "2023-06-01",
             "anthropic-dangerous-direct-browser-access": "true"
           },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: maxTokens,
-            messages,
-          }),
+          body: JSON.stringify(body)
         });
-        if (resp.status === 429 || resp.status >= 500) continue; // 재시도
+        if (resp.status === 429 || resp.status >= 500) continue;
         const data = await resp.json();
         if (data.error) continue;
         return data.content?.map(b => b.text || "").join("").trim();
-      } catch { /* 재시도 */ }
+      } catch(e) { /* retry */ }
     }
     return null;
   };
 
   const handleFiles = (incoming) => {
     setError(null);
-    const valid = Array.from(incoming).filter(f =>
-      f.type.startsWith("image/") || f.type === "application/pdf"
-    );
+    const valid = Array.from(incoming).filter(f => f.type.startsWith("image/") || f.type === "application/pdf");
     if (!valid.length) { setError("이미지(PNG, JPG) 또는 PDF만 가능해요."); return; }
     setFiles(prev => [...prev, ...valid.map(f => ({
       file: f,
-      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null
     }))]);
   };
 
   const removeFile = idx => setFiles(prev => prev.filter((_, i) => i !== idx));
-  const clearAll   = () => { setFiles([]); setResult(null); setError(null); setSavePinned(false); };
+  const clearAll = () => { setFiles([]); setResult(null); setError(null); };
 
   const analyze = async () => {
     if (!files.length) return;
     setStep("analyzing");
-
+    setError(null);
     const texts = [];
 
-    // 1단계: 파일 1장씩 순차 분석
     for (let i = 0; i < files.length; i++) {
-      setProgress({ current: i + 1, total: files.length, label: `${i + 1}/${files.length}번 파일 분석 중...` });
-
+      setCurrent(i + 1);
+      setStatusMsg((i + 1) + "/" + files.length + "번 파일 분석 중...");
       try {
         const { data, isPDF } = await toBase64(files[i].file);
         const block = isPDF
-          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
-          : { type: "image",    source: { type: "base64", media_type: "image/jpeg", data } };
-
-        const prompt = `이 이미지는 스타벅스 파트너넷 공지사항의 일부입니다.
-보이는 모든 텍스트와 내용을 빠짐없이 추출해주세요. 생략하지 마세요.
-JSON만 반환하세요: {"text": "추출한 전체 내용"}
-내용이 없으면: {"text": ""}`;
-
-        const raw = await callAPI([{ role: "user", content: [block, { type: "text", text: prompt }] }], 1500);
+          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: data } }
+          : { type: "image",    source: { type: "base64", media_type: "image/jpeg",       data: data } };
+        const prompt = "이 이미지는 스타벅스 파트너넷 공지사항입니다. 보이는 모든 텍스트를 빠짐없이 추출하세요. JSON만 반환: {\"text\": \"전체 내용\"}";
+        const raw = await callAPI({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1500,
+          messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }]
+        });
         if (raw) {
-          const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-          if (parsed.text) texts.push(parsed.text);
+          try {
+            const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+            if (parsed.text) texts.push(parsed.text);
+          } catch(e) {
+            texts.push(raw);
+          }
         }
-      } catch { /* 이 파일 건너뜀 */ }
-
-      // 파일 간 1.5초 대기 (rate limit 방지)
+      } catch(e) { /* skip file */ }
       if (i < files.length - 1) await new Promise(r => setTimeout(r, 1500));
     }
-
-    // 2단계: 전체 텍스트 합치기
-    setProgress({ current: files.length, total: files.length, label: "최종 공지 정리 중..." });
 
     if (texts.length === 0) {
       setError("모든 파일 분석에 실패했어요. 다시 시도해주세요.");
       setStep("upload");
       return;
     }
+
+    setStatusMsg("최종 공지 정리 중...");
+    setCurrent(files.length);
 
     try {
       const combined = texts.join("\n\n---\n\n");
-      const mergePrompt = "당신은 스타벅스 매장 운영 전문 AI입니다.\n" +
-        "아래는 파트너넷 공지사항에서 추출한 내용입니다.\n" +
-        "중복된 내용만 하나로 합치고, 나머지는 전부 유지해서 읽기 좋게 정리해주세요.\n" +
-        "날짜, 수치, 세부 조건 등 모든 정보를 유지해야 합니다.\n" +
-        "JSON만 반환하세요:\n" +
-        "{\n  \"title\": \"공지 제목 (30자 이내)\",\n" +
-        "  \"category\": \"이벤트 or 운영 or 인사 or 기타\",\n" +
-        "  \"summary\": \"공지 전체 내용 정리 (내용 삭제 금지, 항목별 개행은 \\n, 중요 항목은 • 로 시작)\"\n}\n\n" +
-        "추출 내용:\n" + combined + "\n\n오늘 날짜: " + todayStr();eEffect, useCallback, useRef } from "react";
+      const mergePrompt = "당신은 스타벅스 매장 운영 전문 AI입니다.\n"
+        + "아래 내용을 중복만 제거하고 전부 유지해서 정리하세요.\n"
+        + "날짜, 수치, 조건 모두 유지. JSON만 반환하세요:\n"
+        + "{\"title\":\"공지 제목\",\"category\":\"이벤트 or 운영 or 인사 or 기타\",\"summary\":\"전체 내용\"}\n\n"
+        + "추출 내용:\n" + combined;
 
-/* ─── Font ─── */
-(() => {
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap";
-  document.head.appendChild(l);
-})();
-const F = "'Noto Sans KR', -apple-system, sans-serif";
-
-/* ─── Tokens ─── */
-const T = {
-  bg:"#04060A", glass0:"rgba(255,255,255,0.03)", glass1:"rgba(255,255,255,0.07)",
-  glass2:"rgba(255,255,255,0.11)", glass3:"rgba(255,255,255,0.17)", glassHover:"rgba(255,255,255,0.05)",
-  border0:"rgba(255,255,255,0.08)", border1:"rgba(255,255,255,0.14)", border2:"rgba(255,255,255,0.22)",
-  l1:"#FFFFFF", l2:"rgba(255,255,255,0.62)", l3:"rgba(255,255,255,0.35)", l4:"rgba(255,255,255,0.14)",
-  green:"#3DDC84", greenDim:"rgba(61,220,132,0.13)", greenBorder:"rgba(61,220,132,0.30)",
-  gold:"#FFD60A", goldDim:"rgba(255,214,10,0.12)",
-  red:"#FF6B6B", redDim:"rgba(255,107,107,0.13)",
-  blue:"#5AC8FA", blueDim:"rgba(90,200,250,0.13)",
-  orange:"#FFB347", orangeDim:"rgba(255,179,71,0.13)",
-  purple:"#CF9FFF", purpleDim:"rgba(207,159,255,0.13)",
-};
-
-const CAT = {
-  이벤트:{ color:T.green,  dim:T.greenDim,  border:"rgba(61,220,132,0.2)"  },
-  운영:  { color:T.orange, dim:T.orangeDim, border:"rgba(255,179,71,0.2)"  },
-  인사:  { color:T.blue,   dim:T.blueDim,   border:"rgba(90,200,250,0.2)"  },
-  기타:  { color:T.purple, dim:T.purpleDim, border:"rgba(207,159,255,0.2)" },
-};
-const PRIO = {
-  높음:{ color:T.red,    dim:T.redDim    },
-  보통:{ color:T.orange, dim:T.orangeDim },
-  낮음:{ color:T.green,  dim:T.greenDim  },
-};
-
-/* 직급 목록 */
-const ROLES = ["바리스타","수퍼바이저","부점장","점장"];
-
-/* 직급별 아바타 색 */
-const ROLE_COLOR = {
-  바리스타:   { bg:"rgba(90,200,250,0.18)",  color:T.blue   },
-  수퍼바이저: { bg:"rgba(61,220,132,0.18)",  color:T.green  },
-  부점장:     { bg:"rgba(255,179,71,0.18)",  color:T.orange },
-  점장:       { bg:"rgba(207,159,255,0.18)", color:T.purple },
-};
-
-/* ─── Seeds ─── */
-const SEED_NOTICES = [
-  { id:"n1", title:"스프링 뉴 아라이벌 출시", category:"이벤트", date:"2026-03-01",
-    content:"3월 10일(화)부터 스프링 한정 음료 4종 및 푸드 2종 출시 예정입니다.\nPOP 자재는 3월 8일(일) 도착 예정이며, 당일 오픈 전 세팅을 완료해 주세요.\n음료 레시피 교육 자료는 파트너넷 공지사항에 업로드되어 있습니다.",
-    pinned:true, author:"김지수" },
-  { id:"n2", title:"리저브 원두 신규 입고", category:"운영", date:"2026-03-02",
-    content:"에티오피아 예가체프 리저브 원두가 3월 3일(월) 오전 입고됩니다.\n입고 후 바로 진열 세팅 부탁드립니다.",
-    pinned:false, author:"이민준" },
-  { id:"n3", title:"3월 파트너 정기 평가 일정", category:"인사", date:"2026-03-01",
-    content:"3월 15일 ~ 3월 20일 파트너 정기 평가 진행 예정.\n평가 기준표 및 체크리스트는 파트너넷에서 확인 가능합니다.",
-    pinned:false, author:"김지수" },
-];
-const SEED_EVENTS = [
-  { id:"e1", title:"스프링 음료 출시",  date:"2026-03-10", category:"이벤트", memo:"POP 세팅 당일 완료" },
-  { id:"e2", title:"POP 자재 도착",    date:"2026-03-08", category:"운영",   memo:"오픈 전 세팅" },
-  { id:"e3", title:"파트너 평가 시작",  date:"2026-03-15", category:"인사",   memo:"개인 면담 사전 공지" },
-  { id:"e4", title:"파트너 평가 마감",  date:"2026-03-20", category:"인사",   memo:"" },
-  { id:"e5", title:"월간 재고 점검",   date:"2026-03-25", category:"운영",   memo:"전체 재고 카운트" },
-];
-
-/* ─── Storage hooks ─── */
-/* 공유 데이터 (팀 전체) */
-function useShared(key, seed) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      try { const r = await window.storage.get(key, true); setData(r ? JSON.parse(r.value) : seed); }
-      catch { setData(seed); }
-      finally { setLoading(false); }
-    })();
-  }, [key]);
-  const save = useCallback(async (next) => {
-    const val = typeof next === "function" ? next(data) : next;
-    setData(val);
-    try { await window.storage.set(key, JSON.stringify(val), true); } catch {}
-  }, [key, data]);
-  return [data, save, loading];
-}
-
-/* 개인 데이터 (본인만) */
-function usePersonal(key, seed) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!key) { setData(seed); setLoading(false); return; }
-    (async () => {
-      try { const r = await window.storage.get(key, false); setData(r ? JSON.parse(r.value) : seed); }
-      catch { setData(seed); }
-      finally { setLoading(false); }
-    })();
-  }, [key]);
-  const save = useCallback(async (next) => {
-    if (!key) return;
-    const val = typeof next === "function" ? next(data) : next;
-    setData(val);
-    try { await window.storage.set(key, JSON.stringify(val), false); } catch {}
-  }, [key, data]);
-  return [data, save, loading];
-}
-
-/* ─── Utils ─── */
-const todayStr = () => new Date().toISOString().slice(0,10);
-const fmtShort = d => new Date(d).toLocaleDateString("ko-KR",{month:"short",day:"numeric"});
-const WDAYS = ["일","월","화","수","목","금","토"];
-const glassBox = (extra={}) => ({
-  background:T.glass1, backdropFilter:"blur(32px) saturate(180%)",
-  WebkitBackdropFilter:"blur(32px) saturate(180%)",
-  border:`1px solid ${T.border1}`, borderRadius:20, ...extra,
-});
-
-/* ─── Micro UI ─── */
-const Pill = ({label,color,dim}) => (
-  <span style={{ fontSize:11, fontWeight:600, padding:"3px 9px", borderRadius:20,
-    background:dim, color, fontFamily:F, letterSpacing:0.2, whiteSpace:"nowrap" }}>{label}</span>
-);
-const Sep = () => <div style={{ height:1, background:T.border0, margin:"0 16px" }}/>;
-
-function Sheet({ onClose, title, children, tall }) {
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,0.55)",
-      backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-      display:"flex", alignItems:"flex-end", justifyContent:"center" }}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:"rgba(10,14,20,0.92)",
-        backdropFilter:"blur(40px) saturate(200%)", WebkitBackdropFilter:"blur(40px) saturate(200%)",
-        borderTop:`1px solid ${T.border2}`, borderLeft:`1px solid ${T.border1}`,
-        borderRight:`1px solid ${T.border1}`, borderRadius:"26px 26px 0 0",
-        width:"100%", maxWidth:430, maxHeight:tall?"96vh":"88vh", overflowY:"auto", paddingBottom:44,
-        boxShadow:"0 -20px 60px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.08)" }}>
-        <div style={{ display:"flex", justifyContent:"center", padding:"14px 0 0" }}>
-          <div style={{ width:44, height:5, borderRadius:3, background:T.glass3 }}/>
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 22px 20px" }}>
-          <span style={{ fontSize:20, fontWeight:700, color:T.l1, fontFamily:F }}>{title}</span>
-          <button onClick={onClose} style={{ background:T.glass2, border:`1px solid ${T.border1}`,
-            borderRadius:"50%", width:30, height:30, cursor:"pointer", color:T.l2,
-            fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
-        </div>
-        <div style={{ padding:"0 22px" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-const fBase = {
-  width:"100%", padding:"13px 15px", borderRadius:14, border:`1px solid ${T.border1}`,
-  background:T.glass1, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)",
-  fontSize:15, fontFamily:F, color:T.l1, outline:"none", boxSizing:"border-box", caretColor:T.green,
-};
-function Field({ label, value, onChange, placeholder, type="text", multiline }) {
-  return (
-    <div style={{ marginBottom:12 }}>
-      {label && <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5, paddingLeft:2 }}>{label}</div>}
-      {multiline
-        ? <textarea rows={4} style={{...fBase,resize:"vertical"}} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
-        : <input type={type} style={fBase} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>}
-    </div>
-  );
-}
-function Seg({ value, onChange, options }) {
-  return (
-    <div style={{ display:"flex", background:T.glass0, border:`1px solid ${T.border0}`,
-      borderRadius:14, padding:4, gap:3, marginBottom:12 }}>
-      {options.map(o=>(
-        <button key={o} onClick={()=>onChange(o)} style={{
-          flex:1, padding:"8px 2px", borderRadius:10, border:"none", cursor:"pointer",
-          background:value===o?T.glass3:"transparent", color:value===o?T.l1:T.l3,
-          fontSize:13, fontWeight:600, fontFamily:F, transition:"all .15s",
-          boxShadow:value===o?`0 2px 8px rgba(0,0,0,0.4),inset 0 0 0 1px ${T.border1}`:"none",
-        }}>{o}</button>
-      ))}
-    </div>
-  );
-}
-function GreenBtn({ onClick, children, full, disabled }) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      background:disabled?T.glass2:`linear-gradient(135deg,${T.green} 0%,#28a864 100%)`,
-      color:disabled?T.l3:"#001808", border:"none", borderRadius:14,
-      padding:"14px 22px", fontSize:15, fontWeight:700, fontFamily:F,
-      cursor:disabled?"not-allowed":"pointer", width:full?"100%":"auto",
-      boxShadow:disabled?"none":`0 4px 28px rgba(61,220,132,0.28),inset 0 1px 0 rgba(255,255,255,0.2)`,
-    }}>{children}</button>
-  );
-}
-function ActionBtn({ onClick, children }) {
-  return (
-    <button onClick={onClick} style={{
-      background:T.greenDim, color:T.green, border:`1px solid ${T.greenBorder}`,
-      borderRadius:10, padding:"7px 15px", fontSize:13, fontWeight:600,
-      cursor:"pointer", fontFamily:F, backdropFilter:"blur(10px)",
-    }}>{children}</button>
-  );
-}
-
-/* ══════════════════ 프로필 설정 화면 ══════════════════ */
-function ProfileSetup({ onComplete, existing }) {
-  const [name, setName] = useState(existing?.name || "");
-  const [role, setRole] = useState(existing?.role || "바리스타");
-  const isEdit = !!existing;
-
-  const submit = () => {
-    if (!name.trim()) return;
-    onComplete({ name: name.trim(), role });
-  };
-
-  const rc = ROLE_COLOR[role] || ROLE_COLOR["바리스타"];
-
-  return (
-    <div style={{ minHeight:"100vh", background:T.bg, maxWidth:430, margin:"0 auto",
-      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-      padding:"40px 24px", fontFamily:F, position:"relative", overflow:"hidden" }}>
-
-      {/* 배경 orbs */}
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:"-20%", left:"-20%", width:500, height:500, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,90,50,0.45) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-        <div style={{ position:"absolute", bottom:"10%", right:"-15%", width:380, height:380, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,70,100,0.30) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-      </div>
-
-      <div style={{ position:"relative", zIndex:1, width:"100%" }}>
-        {/* 로고 */}
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:40 }}>
-          <div style={{ width:64, height:64, borderRadius:20,
-            background:"linear-gradient(145deg,#1a5c38,#00704A)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow:"0 8px 32px rgba(0,112,74,0.5),inset 0 1px 0 rgba(255,255,255,0.2)",
-            marginBottom:14 }}>
-            <svg width="36" height="36" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="44" stroke="white" strokeWidth="5"/>
-              <ellipse cx="50" cy="36" rx="15" ry="18" fill="white"/>
-              <path d="M27 57 Q50 78 73 57 Q70 92 50 96 Q30 92 27 57Z" fill="white"/>
-              <path d="M35 57 Q50 50 65 57" stroke="#1a5c38" strokeWidth="4" fill="none" strokeLinecap="round"/>
-              <rect x="22" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(-18 27 63)"/>
-              <rect x="69" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(18 73 63)"/>
-            </svg>
-          </div>
-          <div style={{ fontSize:11, fontWeight:700, color:T.l3, letterSpacing:4, marginBottom:6 }}>STARBUCKS</div>
-          <div style={{ fontSize:24, fontWeight:700, color:T.l1, letterSpacing:-0.5 }}>
-            {isEdit ? "프로필 수정" : "프로필 설정"}
-          </div>
-          {!isEdit && (
-            <div style={{ fontSize:13, color:T.l3, marginTop:8, textAlign:"center", lineHeight:1.6 }}>
-              처음 한 번만 설정하면 돼요
-            </div>
-          )}
-        </div>
-
-        {/* 아바타 미리보기 */}
-        <div style={{ display:"flex", justifyContent:"center", marginBottom:28 }}>
-          <div style={{ width:72, height:72, borderRadius:"50%",
-            background:rc.bg, border:`2px solid ${rc.color}44`,
-            display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-            boxShadow:`0 4px 20px ${rc.color}22` }}>
-            <div style={{ fontSize:22, fontWeight:800, color:rc.color, lineHeight:1 }}>
-              {name.trim() ? name.trim()[0] : "?"}
-            </div>
-            <div style={{ fontSize:9, color:rc.color, opacity:0.7, marginTop:2, fontWeight:600 }}>{role}</div>
-          </div>
-        </div>
-
-        {/* 폼 */}
-        <div style={{ ...glassBox({ padding:"22px 20px",
-          boxShadow:"0 8px 40px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)" }) }}>
-          <Field label="이름" value={name} onChange={setName} placeholder="이름을 입력하세요"/>
-
-          <div style={{ marginBottom:8 }}>
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:10, paddingLeft:2 }}>직급</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              {ROLES.map(r => {
-                const rc2 = ROLE_COLOR[r];
-                const sel = role === r;
-                return (
-                  <button key={r} onClick={()=>setRole(r)} style={{
-                    padding:"12px 8px", borderRadius:14, border:`1px solid ${sel?rc2.color+"55":T.border0}`,
-                    background:sel?rc2.bg:T.glass0, cursor:"pointer", fontFamily:F,
-                    color:sel?rc2.color:T.l3, fontSize:14, fontWeight:sel?700:400,
-                    transition:"all .15s",
-                    boxShadow:sel?`0 2px 12px ${rc2.color}22`:"none",
-                  }}>{r}</button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginTop:16 }}>
-          <GreenBtn full onClick={submit} disabled={!name.trim()}>
-            {isEdit ? "저장하기" : "시작하기"}
-          </GreenBtn>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════ AI ANALYZE SHEET ══════════════════ */
-function AIAnalyzeSheet({ onClose, onSave }) {
-  const [step, setStep]         = useState("upload");
-  const [files, setFiles]       = useState([]);
-  const [dragOver, setDragOver] = useState(false);
-  const [progress, setProgress] = useState({ current:0, total:0, label:"" });
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState(null);
-  const [savePinned, setSavePinned] = useState(false);
-  const fileRef = useRef();
-
-  /* 이미지 압축 후 base64 변환 */
-  const toBase64 = (f) => new Promise((res, rej) => {
-    if (f.type === "application/pdf") {
-      const r = new FileReader();
-      r.onload  = () => res({ data: r.result.split(",")[1], isPDF: true });
-      r.onerror = () => rej();
-      r.readAsDataURL(f);
-      return;
-    }
-    const img = new Image();
-    const url = URL.createObjectURL(f);
-    img.onload = () => {
-      const MAX = 1024;
-      let w = img.width, h = img.height;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-        else       { w = Math.round(w * MAX / h); h = MAX; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      res({ data: canvas.toDataURL("image/jpeg", 0.65).split(",")[1], isPDF: false });
-    };
-    img.onerror = () => rej();
-    img.src = url;
-  });
-
-  /* API 호출 (재시도 최대 5회) */
-  const callAPI = async (messages, maxTokens = 1500) => {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) {
-        const wait = Math.min(4000 * attempt, 15000);
-        await new Promise(r => setTimeout(r, wait));
-      }
-      try {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": window.ANTHROPIC_API_KEY || "",
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: maxTokens,
-            messages,
-          }),
-        });
-        if (resp.status === 429 || resp.status >= 500) continue; // 재시도
-        const data = await resp.json();
-        if (data.error) continue;
-        return data.content?.map(b => b.text || "").join("").trim();
-      } catch { /* 재시도 */ }
-    }
-    return null;
-  };
-
-  const handleFiles = (incoming) => {
-    setError(null);
-    const valid = Array.from(incoming).filter(f =>
-      f.type.startsWith("image/") || f.type === "application/pdf"
-    );
-    if (!valid.length) { setError("이미지(PNG, JPG) 또는 PDF만 가능해요."); return; }
-    setFiles(prev => [...prev, ...valid.map(f => ({
-      file: f,
-      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
-    }))]);
-  };
-
-  const removeFile = idx => setFiles(prev => prev.filter((_, i) => i !== idx));
-  const clearAll   = () => { setFiles([]); setResult(null); setError(null); setSavePinned(false); };
-
-  const analyze = async () => {
-    if (!files.length) return;
-    setStep("analyzing");
-
-    const texts = [];
-
-    // 1단계: 파일 1장씩 순차 분석
-    for (let i = 0; i < files.length; i++) {
-      setProgress({ current: i + 1, total: files.length, label: `${i + 1}/${files.length}번 파일 분석 중...` });
-
-      try {
-        const { data, isPDF } = await toBase64(files[i].file);
-        const block = isPDF
-          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
-          : { type: "image",    source: { type: "base64", media_type: "image/jpeg", data } };
-
-        const prompt = `이 이미지는 스타벅스 파트너넷 공지사항의 일부입니다.
-보이는 모든 텍스트와 내용을 빠짐없이 추출해주세요. 생략하지 마세요.
-JSON만 반환하세요: {"text": "추출한 전체 내용"}
-내용이 없으면: {"text": ""}`;
-
-        const raw = await callAPI([{ role: "user", content: [block, { type: "text", text: prompt }] }], 1500);
-        if (raw) {
-          const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-          if (parsed.text) texts.push(parsed.text);
-        }
-      } catch { /* 이 파일 건너뜀 */ }
-
-      // 파일 간 1.5초 대기 (rate limit 방지)
-      if (i < files.length - 1) await new Promise(r => setTimeout(r, 1500));
-    }
-
-    // 2단계: 전체 텍스트 합치기
-    setProgress({ current: files.length, total: files.length, label: "최종 공지 정리 중..." });
-
-    if (texts.length === 0) {
-      setError("모든 파일 분석에 실패했어요. 다시 시도해주세요.");
-      setStep("upload");
-      return;
-    }
-
-    try {
-      const combined = texts.join("
-
----
-
-");
-      const mergePrompt = `당신은 스타벅스 매장 운영 전문 AI입니다.
-아래는 파트너넷 공지사항에서 추출한 내용입니다.
-중복된 내용만 하나로 합치고, 나머지는 전부 유지해서 읽기 좋게 정리해주세요.
-날짜, 수치, 세부 조건 등 모든 정보를 유지해야 합니다.
-JSON만 반환하세요:
-{
-  "title": "공지 제목 (30자 이내)",
-  "category": "이벤트 or 운영 or 인사 or 기타",
-  "summary": "공지 전체 내용 정리 (내용 삭제 금지, 항목별 개행은 \n, 중요 항목은 • 로 시작)"
-}
-
-추출 내용:
-${combined}
-
-오늘 날짜: ${todayStr()}`;
-
-      // mergeTexts는 Sonnet 사용
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": window.ANTHROPIC_API_KEY || "",
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 4096,
-          messages: [{ role: "user", content: mergePrompt }],
-        }),
+      const raw = await callAPI({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        messages: [{ role: "user", content: mergePrompt }]
       });
-      const data   = await resp.json();
-      const raw    = data.content?.map(b => b.text || "").join("").trim();
+
+      if (!raw) throw new Error("no response");
       const merged = JSON.parse(raw.replace(/```json|```/g, "").trim());
       setResult(merged);
       setStep("result");
-    } catch {
+    } catch(e) {
       setError("최종 정리 중 오류가 발생했어요. 다시 시도해주세요.");
       setStep("upload");
     }
@@ -972,33 +496,34 @@ ${combined}
   const handleSave = () => {
     if (!result) return;
     onSave({
-      notice: { id:"n"+Date.now(), title:result.title, category:result.category,
-        content:result.summary, date:todayStr(), pinned:savePinned, author:"AI 분석", _read:false },
-      tasks: [],
+      notice: {
+        id: "n" + Date.now(), title: result.title, category: result.category,
+        content: result.summary, date: todayStr(), pinned: savePinned, author: "AI 분석", _read: false
+      },
+      tasks: []
     });
     onClose();
   };
 
-  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const pct = files.length > 0 ? Math.round((current / files.length) * 100) : 0;
 
   return (
     <Sheet title="AI 공지 분석" onClose={onClose} tall>
 
-      {/* ── UPLOAD ── */}
-      {step==="upload"&&(
+      {step === "upload" && (
         <>
           <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14, lineHeight:1.6 }}>
             파트너넷 공지 캡처 이미지 또는 PDF를 올려주세요.<br/>
             <span style={{ color:T.green }}>여러 파일을 한꺼번에</span> 올리면 하나의 공지로 통합 정리해드려요.
           </p>
           <div
-            onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-            onDragLeave={()=>setDragOver(false)}
-            onDrop={e=>{e.preventDefault();setDragOver(false);handleFiles(e.dataTransfer.files);}}
-            onClick={()=>fileRef.current.click()}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+            onClick={() => fileRef.current.click()}
             style={{ ...glassBox({ borderRadius:18, padding:"22px 20px",
-              border:`2px dashed ${dragOver?T.green:T.border2}`,
-              background:dragOver?T.greenDim:T.glass0, transition:"all .2s" }),
+              border:"2px dashed " + (dragOver ? T.green : T.border2),
+              background: dragOver ? T.greenDim : T.glass0, transition:"all .2s" }),
               textAlign:"center", cursor:"pointer", marginBottom:14 }}>
             <div style={{ fontSize:30, marginBottom:8 }}>📎</div>
             <div style={{ fontSize:14, fontWeight:600, color:T.l2, fontFamily:F, marginBottom:4 }}>파일 추가하기</div>
@@ -1006,21 +531,20 @@ ${combined}
             <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginTop:6 }}>PNG · JPG · PDF 지원</div>
           </div>
           <input ref={fileRef} type="file" accept="image/*,.pdf" multiple style={{ display:"none" }}
-            onChange={e=>handleFiles(e.target.files)}/>
+            onChange={e => handleFiles(e.target.files)} />
 
           {files.length > 0 && (
             <div style={{ marginBottom:14 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
                 <span style={{ fontSize:13, fontWeight:600, color:T.l2, fontFamily:F }}>{files.length}개 파일</span>
-                <button onClick={clearAll} style={{ background:"none", border:"none",
-                  color:T.red, fontSize:12, cursor:"pointer", fontFamily:F }}>전체 삭제</button>
+                <button onClick={clearAll} style={{ background:"none", border:"none", color:T.red, fontSize:12, cursor:"pointer", fontFamily:F }}>전체 삭제</button>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, maxHeight:220, overflowY:"auto" }}>
-                {files.map((f,i)=>(
+                {files.map((f, i) => (
                   <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden",
-                    border:`1px solid ${T.border1}`, background:T.glass1, aspectRatio:"1" }}>
+                    border:"1px solid " + T.border1, background:T.glass1, aspectRatio:"1" }}>
                     {f.preview
-                      ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}/>
+                      ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
                       : <div style={{ width:"100%", height:"100%", display:"flex", flexDirection:"column",
                           alignItems:"center", justifyContent:"center", gap:3 }}>
                           <span style={{ fontSize:18 }}>📄</span>
@@ -1029,10 +553,10 @@ ${combined}
                             whiteSpace:"nowrap", width:"100%" }}>{f.file.name}</span>
                         </div>
                     }
-                    <button onClick={e=>{e.stopPropagation();removeFile(i);}} style={{
+                    <button onClick={e => { e.stopPropagation(); removeFile(i); }} style={{
                       position:"absolute", top:3, right:3, width:18, height:18, borderRadius:"50%",
                       background:"rgba(0,0,0,0.75)", border:"none", color:"#fff",
-                      fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center"
                     }}>✕</button>
                   </div>
                 ))}
@@ -1040,50 +564,46 @@ ${combined}
             </div>
           )}
 
-          {error&&<div style={{ background:T.redDim, border:`1px solid rgba(255,107,107,0.3)`, borderRadius:12,
-            padding:"10px 14px", marginBottom:14, fontSize:13, color:T.red, fontFamily:F }}>⚠️ {error}</div>}
-
+          {error && (
+            <div style={{ background:T.redDim, border:"1px solid rgba(255,107,107,0.3)", borderRadius:12,
+              padding:"10px 14px", marginBottom:14, fontSize:13, color:T.red, fontFamily:F }}>
+              ⚠️ {error}
+            </div>
+          )}
           <GreenBtn full onClick={analyze} disabled={!files.length}>
-            {files.length > 0 ? `${files.length}개 파일 분석 시작` : "파일을 추가해주세요"}
+            {files.length > 0 ? files.length + "개 파일 분석 시작" : "파일을 추가해주세요"}
           </GreenBtn>
         </>
       )}
 
-      {/* ── ANALYZING ── */}
-      {step==="analyzing"&&(
+      {step === "analyzing" && (
         <div style={{ padding:"20px 0", textAlign:"center" }}>
           <div style={{ position:"relative", width:64, height:64, margin:"0 auto 20px" }}>
-            <div style={{ width:64, height:64, borderRadius:"50%", border:`3px solid ${T.glass2}`,
-              borderTopColor:T.green, animation:"spin .8s linear infinite", position:"absolute" }}/>
+            <div style={{ width:64, height:64, borderRadius:"50%", border:"3px solid " + T.glass2,
+              borderTopColor:T.green, animation:"spin .8s linear infinite", position:"absolute" }} />
             <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
               justifyContent:"center", fontSize:22 }}>✨</div>
           </div>
           <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:4 }}>
-            {progress.label || "분석 중..."}
+            {statusMsg || "분석 중..."}
           </div>
           <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:16 }}>
-            {progress.current < progress.total
-              ? "1장씩 순차 분석 중이에요 (실패 없이 안정적)"
-              : "모든 내용을 하나의 공지로 합치고 있어요"}
+            {current < files.length ? "1장씩 순차 분석 (안정적)" : "하나의 공지로 합치는 중..."}
           </div>
-          <div style={{ background:T.glass2, borderRadius:6, height:8,
-            margin:"0 auto 12px", width:"85%", overflow:"hidden" }}>
-            <div style={{ height:"100%", borderRadius:6,
-              background:`linear-gradient(90deg,${T.green},#28a864)`,
-              width: progress.current >= progress.total ? "95%" : `${Math.max(pct, 3)}%`,
-              transition:"width .5s ease" }}/>
+          <div style={{ background:T.glass2, borderRadius:6, height:8, margin:"0 auto 12px", width:"85%", overflow:"hidden" }}>
+            <div style={{ height:"100%", borderRadius:6, background:"linear-gradient(90deg," + T.green + ",#28a864)",
+              width: current >= files.length ? "95%" : Math.max(pct, 3) + "%", transition:"width .5s ease" }} />
           </div>
           <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F, marginBottom:20 }}>
-            {progress.current >= progress.total ? "마무리 중..." : `${pct}%`}
+            {current >= files.length ? "마무리 중..." : pct + "%"}
           </div>
-          {/* 썸네일 */}
           <div style={{ display:"flex", flexWrap:"wrap", gap:4, justifyContent:"center", maxWidth:300, margin:"0 auto" }}>
-            {files.map((f,i)=>(
+            {files.map((f, i) => (
               <div key={i} style={{ width:26, height:26, borderRadius:6, overflow:"hidden",
-                border:`1.5px solid ${i < progress.current ? T.green : T.border1}`,
+                border:"1.5px solid " + (i < current ? T.green : T.border1),
                 background:T.glass1, transition:"border .3s", flexShrink:0 }}>
                 {f.preview
-                  ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                  ? <img src={f.preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
                   : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
                       justifyContent:"center", fontSize:11 }}>📄</div>
                 }
@@ -1093,47 +613,47 @@ ${combined}
         </div>
       )}
 
-      {/* ── RESULT ── */}
-      {step==="result"&&result&&(
+      {step === "result" && result && (
         <>
           <div style={{ ...glassBox({ padding:"18px", marginBottom:16,
             background:"linear-gradient(135deg,rgba(61,220,132,0.08),rgba(90,200,250,0.05))",
-            border:`1px solid rgba(61,220,132,0.22)` }) }}>
+            border:"1px solid rgba(61,220,132,0.22)" }) }}>
             <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
               <Pill label={result.category}
-                color={(CAT[result.category]||CAT["기타"]).color}
-                dim={(CAT[result.category]||CAT["기타"]).dim}/>
-              <Pill label={`✨ ${files.length}개 파일 통합`} color={T.gold} dim={T.goldDim}/>
+                color={(CAT[result.category] || CAT["기타"]).color}
+                dim={(CAT[result.category] || CAT["기타"]).dim} />
+              <Pill label={"✨ " + files.length + "개 파일 통합"} color={T.gold} dim={T.goldDim} />
             </div>
-            <div style={{ fontSize:17, fontWeight:700, color:T.l1, fontFamily:F,
-              marginBottom:10, lineHeight:1.4 }}>{result.title}</div>
-            <div style={{ fontSize:14, color:T.l2, fontFamily:F, lineHeight:1.85,
-              whiteSpace:"pre-line" }}>{result.summary}</div>
+            <div style={{ fontSize:17, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:10, lineHeight:1.4 }}>
+              {result.title}
+            </div>
+            <div style={{ fontSize:14, color:T.l2, fontFamily:F, lineHeight:1.85, whiteSpace:"pre-line" }}>
+              {result.summary}
+            </div>
           </div>
-
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16,
-            padding:"12px 14px", background:T.glass1, border:`1px solid ${T.border0}`, borderRadius:12 }}>
+            padding:"12px 14px", background:T.glass1, border:"1px solid " + T.border0, borderRadius:12 }}>
             <input type="checkbox" id="aipin" checked={savePinned}
-              onChange={e=>setSavePinned(e.target.checked)}
-              style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }}/>
-            <label htmlFor="aipin" style={{ fontSize:14, color:T.l1, cursor:"pointer",
-              userSelect:"none", fontFamily:F }}>상단 고정</label>
+              onChange={e => setSavePinned(e.target.checked)}
+              style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }} />
+            <label htmlFor="aipin" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>
+              상단 고정
+            </label>
           </div>
-
           <div style={{ ...glassBox({ padding:"12px 14px", marginBottom:16,
-            background:"rgba(255,255,255,0.03)", border:`1px solid ${T.border0}` }),
+            background:"rgba(255,255,255,0.03)", border:"1px solid " + T.border0 }),
             display:"flex", gap:10, alignItems:"center" }}>
             <span style={{ fontSize:15, flexShrink:0 }}>💡</span>
             <span style={{ fontSize:12, color:T.l3, fontFamily:F, lineHeight:1.6 }}>
               할일은 공지 저장 후 할일 탭에서 직접 추가할 수 있어요.
             </span>
           </div>
-
           <div style={{ display:"flex", gap:10 }}>
-            <button onClick={()=>{setStep("upload");setResult(null);}}
-              style={{ flex:1, padding:"13px", borderRadius:14, border:`1px solid ${T.border1}`,
-                background:T.glass1, color:T.l2, fontSize:14, fontWeight:600,
-                cursor:"pointer", fontFamily:F }}>다시 업로드</button>
+            <button onClick={() => { setStep("upload"); setResult(null); }}
+              style={{ flex:1, padding:"13px", borderRadius:14, border:"1px solid " + T.border1,
+                background:T.glass1, color:T.l2, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:F }}>
+              다시 업로드
+            </button>
             <GreenBtn onClick={handleSave}>공지 저장하기</GreenBtn>
           </div>
         </>
@@ -1145,19 +665,6 @@ ${combined}
 
 /* ════════════════════════ MAIN APP ════════════════════════ */
 function App() {
-  /* API 키 */
-  const [apiKeyReady, setApiKeyReady] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("sbx_apikey");
-    if (saved) { window.ANTHROPIC_API_KEY = saved; setApiKeyReady(true); }
-  }, []);
-
-  const handleApiKeyComplete = () => {
-    window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
-    setApiKeyReady(true);
-  };
-
   /* 프로필 */
   const [profile, setProfileRaw] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -1259,9 +766,6 @@ function App() {
   };
   const now = new Date();
 
-  /* API 키 미설정 → 키 입력 화면 */
-  if (!apiKeyReady) return <ApiKeySetup onComplete={handleApiKeyComplete}/>;
-
   /* 프로필 미설정 → 설정 화면 */
   if (loading) return (
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -1307,14 +811,45 @@ function App() {
         boxShadow:"0 4px 30px rgba(0,0,0,0.4),inset 0 -1px 0 rgba(255,255,255,0.06)" }}>
 
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px 10px" }}>
-          {/* 왼쪽: 프로필 아바타 + 이름·직급 */}
-          <div onClick={()=>setShowProfileSetup(true)} style={{
-            display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
-            <div style={{
+          {/* 로고 */}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ width:40, height:40, borderRadius:13,
+              background:"linear-gradient(145deg,#1a5c38,#00704A)",
+              display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
+              boxShadow:"0 2px 20px rgba(0,112,74,0.45),inset 0 1px 0 rgba(255,255,255,0.18)",
+              border:"1px solid rgba(255,255,255,0.12)" }}>
+              <svg width="22" height="22" viewBox="0 0 100 100" fill="none">
+                <circle cx="50" cy="50" r="44" stroke="white" strokeWidth="5"/>
+                <ellipse cx="50" cy="36" rx="15" ry="18" fill="white"/>
+                <path d="M27 57 Q50 78 73 57 Q70 92 50 96 Q30 92 27 57Z" fill="white"/>
+                <path d="M35 57 Q50 50 65 57" stroke="#1a5c38" strokeWidth="4" fill="none" strokeLinecap="round"/>
+                <rect x="22" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(-18 27 63)"/>
+                <rect x="69" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(18 73 63)"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize:10, fontWeight:700, color:T.l3, letterSpacing:3.5, fontFamily:F }}>STARBUCKS</div>
+              <div style={{ fontSize:14, fontWeight:600, color:T.l1, lineHeight:1.2, fontFamily:F }}>Store</div>
+            </div>
+          </div>
+
+          {/* 프로필 + 날짜 */}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {/* 날짜 */}
+            <div style={{ ...glassBox({ borderRadius:14, padding:"7px 14px", background:T.glass2 }), textAlign:"right" }}>
+              <div style={{ fontSize:17, fontWeight:700, color:T.l1, letterSpacing:-0.5, lineHeight:1.15, fontFamily:F }}>
+                {now.toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
+              </div>
+              <div style={{ fontSize:11, color:T.green, fontWeight:500, marginTop:1, fontFamily:F }}>
+                {now.toLocaleDateString("ko-KR",{weekday:"long"})}
+              </div>
+            </div>
+            {/* 아바타 */}
+            <div onClick={()=>setShowProfileSetup(true)} style={{
               width:42, height:42, borderRadius:"50%", background:rc.bg,
-              border:`1.5px solid ${rc.color}44`, flexShrink:0,
+              border:`1.5px solid ${rc.color}44`, cursor:"pointer",
               display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-              boxShadow:`0 2px 12px ${rc.color}22`,
+              flexShrink:0, boxShadow:`0 2px 12px ${rc.color}22`,
             }}>
               <div style={{ fontSize:16, fontWeight:800, color:rc.color, lineHeight:1 }}>
                 {profile.name[0]}
@@ -1322,24 +857,6 @@ function App() {
               <div style={{ fontSize:8, color:rc.color, opacity:0.7, fontWeight:600, lineHeight:1.2 }}>
                 {profile.role.slice(0,2)}
               </div>
-            </div>
-            <div>
-              <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, lineHeight:1.2 }}>
-                {profile.name}
-              </div>
-              <div style={{ fontSize:11, color:rc.color, fontWeight:500, fontFamily:F, marginTop:1 }}>
-                {profile.role}
-              </div>
-            </div>
-          </div>
-
-          {/* 오른쪽: 날짜 */}
-          <div style={{ ...glassBox({ borderRadius:14, padding:"7px 14px", background:T.glass2 }), textAlign:"right" }}>
-            <div style={{ fontSize:17, fontWeight:700, color:T.l1, letterSpacing:-0.5, lineHeight:1.15, fontFamily:F }}>
-              {now.toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
-            </div>
-            <div style={{ fontSize:11, color:T.green, fontWeight:500, marginTop:1, fontFamily:F }}>
-              {now.toLocaleDateString("ko-KR",{weekday:"long"})}
             </div>
           </div>
         </div>
