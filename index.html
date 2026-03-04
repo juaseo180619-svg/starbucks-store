@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="theme-color" content="#04060A"/>
@@ -20,7 +21,7 @@
 <body>
   <div id="root"></div>
   <script>
-    window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
+    window.ANTHROPIC_API_KEY = "";
     window.storage = {
       get: async (key, shared) => {
         const k = (shared ? "sh_" : "pr_") + key;
@@ -794,6 +795,18 @@ function ApiKeySetup({ onComplete }) {
 
 /* ════════════════════════ MAIN APP ════════════════════════ */
 function App() {
+  /* API 키 */
+  const [apiKeyReady, setApiKeyReady] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("sbx_apikey");
+    if (saved) { window.ANTHROPIC_API_KEY = saved; setApiKeyReady(true); }
+  }, []);
+
+  const handleApiKeyComplete = () => {
+    setApiKeyReady(true);
+  };
+
   /* 프로필 */
   const [profile, setProfileRaw] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -894,6 +907,9 @@ function App() {
     return (events||[]).filter(e=>e.date===s);
   };
   const now = new Date();
+
+  /* API 키 미설정 → 키 입력 화면 */
+  if (!apiKeyReady) return <ApiKeySetup onComplete={handleApiKeyComplete}/>;
 
   /* 프로필 미설정 → 설정 화면 */
   if (loading) return (
