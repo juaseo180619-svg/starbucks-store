@@ -420,7 +420,7 @@ function AIAnalyzeSheet({ onClose, onSave }) {
       const isPDF  = file.type === "application/pdf";
       return isPDF
         ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }
-        : { type:"image",    source:{ type:"base64", media_type:file.type, data:base64 } };
+        : { type:"image",    source:{ type:"base64", media_type:"image/jpeg", data:base64 } };
     }));
 
     const prompt = `이 ${chunkFiles.length}개의 이미지/문서는 스타벅스 파트너넷 공지사항의 일부 페이지입니다.
@@ -493,10 +493,13 @@ ${combined}
     setChunks(grouped.map(() => ({ status:"pending", summary:"" })));
 
     try {
-      // 묶음들을 동시에 병렬 처리
-      const texts = await Promise.all(
-        grouped.map((group, idx) => analyzeChunk(group, idx))
-      );
+      // 묶음들을 순차 처리 (rate limit 방지)
+      const texts = [];
+      for (let idx = 0; idx < grouped.length; idx++) {
+        const text = await analyzeChunk(grouped[idx], idx);
+        texts.push(text);
+        if (idx < grouped.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
 
       // 마지막 합치기
       setMerging(true);
