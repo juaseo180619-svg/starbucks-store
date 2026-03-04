@@ -13,50 +13,29 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; background: #04060A; overflow-x: hidden; }
-    #root { min-height: 100vh; }
-    [contenteditable]:empty:before {
-      content: attr(data-placeholder);
-      color: #666;
-      pointer-events: none;
-      position: absolute;
-    }
-    .rich-editor { outline: none; position: relative; }
-    .rich-editor img { max-width: 100%; border-radius: 10px; margin: 4px 0; display: block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:#04060A;overflow-x:hidden}
+    #root{min-height:100vh}
+    [contenteditable]:empty:before{content:attr(data-placeholder);color:#555;pointer-events:none;position:absolute}
+    .rich-editor{outline:none;position:relative}
+    .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script>
-    window.ANTHROPIC_API_KEY = localStorage.getItem("sbx_apikey") || "";
-    window.storage = {
-      get: async (key, shared) => {
-        const k = (shared ? "sh_" : "pr_") + key;
-        const v = localStorage.getItem(k);
-        return v ? { key, value: v, shared } : null;
-      },
-      set: async (key, value, shared) => {
-        const k = (shared ? "sh_" : "pr_") + key;
-        localStorage.setItem(k, value);
-        return { key, value, shared };
-      },
-      delete: async (key, shared) => {
-        const k = (shared ? "sh_" : "pr_") + key;
-        localStorage.removeItem(k);
-        return { key, deleted: true, shared };
-      },
-      list: async (prefix, shared) => {
-        const p = (shared ? "sh_" : "pr_") + (prefix || "");
-        const keys = Object.keys(localStorage).filter(k => k.startsWith(p));
-        return { keys, shared };
-      }
+    window.ANTHROPIC_API_KEY=localStorage.getItem("sbx_apikey")||"";
+    window.storage={
+      get:async(k,s)=>{const v=localStorage.getItem((s?"sh_":"pr_")+k);return v?{key:k,value:v,shared:s}:null},
+      set:async(k,v,s)=>{localStorage.setItem((s?"sh_":"pr_")+k,v);return{key:k,value:v,shared:s}},
+      delete:async(k,s)=>{localStorage.removeItem((s?"sh_":"pr_")+k);return{key:k,deleted:true,shared:s}},
+      list:async(p,s)=>{const px=(s?"sh_":"pr_")+(p||"");return{keys:Object.keys(localStorage).filter(k=>k.startsWith(px)),shared:s}}
     };
   </script>
   <script type="text/babel" data-presets="react">
-    const { useState, useEffect, useCallback, useRef } = React;
+    const{useState,useEffect,useCallback,useRef}=React;
 
 
 /* ─── Font ─── */
@@ -408,7 +387,8 @@ function App() {
   const [addTask,     setAddTask]     = useState(false);
   const [noticeCat,   setNoticeCat]   = useState("전체");
 
-  const [calDate, setCalDate] = useState(new Date("2026-03-01"));
+  const [calDate, setCalDate] = useState(new Date());
+  const [selDay,  setSelDay]  = useState(todayStr());
   const cY=calDate.getFullYear(), cM=calDate.getMonth();
   const firstDow=new Date(cY,cM,1).getDay();
   const daysInMo=new Date(cY,cM+1,0).getDate();
@@ -441,6 +421,10 @@ function App() {
     saveNotices(p=>[{ id:"n"+Date.now(), ...nf, date:todayStr(), _read:false, author:profile?.name||nf.author },...p]);
     setNf({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
     setAddNotice(false);
+  };
+  const submitNoticeRich = (data) => {
+    if (!data.title.trim()) return;
+    saveNotices(p=>[{ id:"n"+Date.now(), ...data, date:todayStr(), _read:false, author:profile?.name||"" }, ...p]);
   };
   const submitEvent = () => {
     if (!ef.title.trim()) return;
@@ -727,8 +711,6 @@ function App() {
 
         {/* ── CALENDAR ── */}
         {tab==="calendar"&&(()=>{
-          // 멀티데이 이벤트 레이아웃 계산
-          // 각 날짜 셀: 7열 고정, 셀 너비 = 1/7
           const monthEvents = (events||[]).filter(e => {
             const start = e.date;
             const end   = e.endDate || e.date;
@@ -737,10 +719,8 @@ function App() {
                    (start < mStr+"-01" && end > mStr+"-31");
           });
 
-          // 각 주(row)별 이벤트 바 계산
           const weeks = [];
-          let day = 1;
-          let weekStart = firstDow; // 첫 주 앞 빈칸
+          let day = 1, weekStart = firstDow;
           while (day <= daysInMo) {
             const row = [];
             for (let col = 0; col < 7; col++) {
@@ -751,131 +731,135 @@ function App() {
             weeks.push(row);
           }
 
-          // 이벤트 바: 각 주에 어떤 이벤트가 몇 번째 슬롯에?
           const getEventBars = (weekDays) => {
-            const validDays = weekDays.filter(d => d !== null);
-            if (!validDays.length) return [];
-            const wStart = validDays[0];
-            const wEnd   = validDays[validDays.length-1];
-            const mStr   = cY+"-"+String(cM+1).padStart(2,"0")+"-";
+            const valid = weekDays.filter(d => d !== null);
+            if (!valid.length) return [];
+            const wStart = valid[0], wEnd = valid[valid.length-1];
             const bars = [];
             monthEvents.forEach(ev => {
               const evStart = parseInt((ev.date||"").slice(8,10));
               const evEnd   = parseInt((ev.endDate||ev.date||"").slice(8,10));
-              const overlap = evStart <= wEnd && evEnd >= wStart;
-              if (!overlap) return;
+              if (evStart > wEnd || evEnd < wStart) return;
               const barStart = Math.max(evStart, wStart);
-              const barEnd   = Math.min(evEnd,   wEnd);
+              const barEnd   = Math.min(evEnd, wEnd);
               const colStart = weekDays.indexOf(barStart);
               const colEnd   = weekDays.indexOf(barEnd);
-              const span     = (colEnd >= 0 ? colEnd : 6) - (colStart >= 0 ? colStart : 0) + 1;
-              const startCol = colStart >= 0 ? colStart : 0;
-              bars.push({ ev, startCol, span,
-                startsHere: evStart >= wStart,
-                endsHere:   evEnd   <= wEnd });
+              const span     = (colEnd>=0?colEnd:6) - (colStart>=0?colStart:0) + 1;
+              bars.push({ ev, startCol:colStart>=0?colStart:0, span,
+                startsHere: evStart>=wStart, endsHere: evEnd<=wEnd });
             });
-            // 슬롯 배치 (겹침 방지)
-            const slots = [];
+            // 슬롯 배치
+            const used = [];
             bars.forEach(bar => {
               let slot = 0;
-              while (slots[slot] && slots[slot].some(b =>
-                b.startCol < bar.startCol + bar.span &&
-                b.startCol + b.span > bar.startCol)) slot++;
-              if (!slots[slot]) slots[slot] = [];
-              slots[slot].push(bar);
+              while (used[slot]&&used[slot].some(b=>
+                b.startCol < bar.startCol+bar.span && b.startCol+b.span > bar.startCol)) slot++;
+              if (!used[slot]) used[slot]=[];
+              used[slot].push(bar);
               bar.slot = slot;
             });
             return bars;
           };
 
+          const selDayEvents = (events||[]).filter(e => {
+            const start = e.date, end = e.endDate||e.date;
+            return selDay >= start && selDay <= end;
+          });
+
+          const GAP = 2;
           const maxSlots = 3;
 
           return (
             <div style={{ padding:"16px" }} className="fi">
               {/* 월 네비 */}
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
                 <button onClick={()=>setCalDate(new Date(cY,cM-1,1))} style={{
-                  ...glassBox({ width:40,height:40,display:"flex",alignItems:"center",
-                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2 }),
-                  cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1 }}>‹</button>
-                <span style={{ fontSize:18,fontWeight:700,color:T.l1,fontFamily:F }}>
+                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",
+                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
+                  cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1}}>‹</button>
+                <span style={{fontSize:18,fontWeight:700,color:T.l1,fontFamily:F}}>
                   {calDate.toLocaleDateString("ko-KR",{year:"numeric",month:"long"})}
                 </span>
                 <button onClick={()=>setCalDate(new Date(cY,cM+1,1))} style={{
-                  ...glassBox({ width:40,height:40,display:"flex",alignItems:"center",
-                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2 }),
-                  cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1 }}>›</button>
+                  ...glassBox({width:40,height:40,display:"flex",alignItems:"center",
+                    justifyContent:"center",borderRadius:13,padding:0,background:T.glass2}),
+                  cursor:"pointer",color:T.l1,fontSize:20,border:"1px solid "+T.border1}}>›</button>
               </div>
 
               {/* 요일 헤더 */}
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:4 }}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
                 {WDAYS.map((d,i)=>(
-                  <div key={d} style={{ textAlign:"center",fontSize:11,fontWeight:600,
+                  <div key={d} style={{textAlign:"center",fontSize:11,fontWeight:600,
                     fontFamily:F,padding:"2px 0",
-                    color:i===0?T.red:i===6?T.blue:T.l3 }}>{d}</div>
+                    color:i===0?T.red:i===6?T.blue:T.l3}}>{d}</div>
                 ))}
               </div>
 
-              {/* 주 단위 렌더링 */}
-              {weeks.map((weekDays, wi) => {
+              {/* 주 단위 */}
+              {weeks.map((weekDays,wi)=>{
                 const bars = getEventBars(weekDays);
-                const slotCount = bars.length > 0 ? Math.min(bars.reduce((m,b)=>Math.max(m,b.slot+1),0), maxSlots) : 0;
-                const cellHeight = 28 + slotCount * 20;
-
+                const slotCount = bars.length>0 ? Math.min(bars.reduce((m,b)=>Math.max(m,b.slot+1),0),maxSlots) : 0;
+                const cellH = 30 + slotCount*20;
                 return (
-                  <div key={wi} style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:2, position:"relative" }}>
-                    {/* 날짜 숫자 셀 - 고정 높이 */}
-                    {weekDays.map((d, ci) => {
-                      if (d === null) return <div key={"e"+ci} style={{ height:cellHeight }}/>;
+                  <div key={wi} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",
+                    gap:GAP,marginBottom:GAP,position:"relative"}}>
+                    {/* 날짜 셀 */}
+                    {weekDays.map((d,ci)=>{
+                      if(d===null) return <div key={"e"+ci} style={{height:cellH}}/>;
                       const dStr = cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
-                      const isTod = dStr === todayStr();
-                      const isSun = ci===0, isSat = ci===6;
+                      const isTod = dStr===todayStr();
+                      const isSel = dStr===selDay;
+                      const isSun=ci===0, isSat=ci===6;
                       return (
-                        <div key={d} style={{
-                          height: cellHeight,
-                          background: isTod?"linear-gradient(145deg,"+T.green+",#28a864)":T.glass1,
+                        <div key={d} onClick={()=>setSelDay(dStr)} style={{
+                          height:cellH,
+                          background:isTod
+                            ? "linear-gradient(145deg,"+T.green+",#28a864)"
+                            : isSel
+                              ? T.glass3
+                              : T.glass1,
                           backdropFilter:"blur(20px) saturate(180%)",
                           WebkitBackdropFilter:"blur(20px) saturate(180%)",
-                          border:"1px solid "+(isTod?"rgba(61,220,132,0.5)":T.border0),
+                          border:"2px solid "+(isSel&&!isTod?"rgba(255,255,255,0.35)":isTod?"rgba(61,220,132,0.6)":T.border0),
                           borderRadius:8,
-                          display:"flex", alignItems:"flex-start", justifyContent:"center",
+                          display:"flex",alignItems:"flex-start",justifyContent:"center",
                           paddingTop:5,
-                          boxShadow:isTod?"0 4px 20px rgba(61,220,132,0.35)":"none"
+                          boxShadow:isTod?"0 4px 20px rgba(61,220,132,0.35)":"none",
+                          cursor:"pointer",
+                          position:"relative", zIndex:1,
                         }}>
-                          <span style={{ fontSize:12,fontWeight:isTod?800:500,lineHeight:1,fontFamily:F,
-                            color:isTod?"#001808":isSun?T.red:isSat?T.blue:T.l1 }}>{d}</span>
+                          <span style={{fontSize:12,fontWeight:isTod?800:500,lineHeight:1,fontFamily:F,
+                            color:isTod?"#001808":isSun?T.red:isSat?T.blue:T.l1}}>{d}</span>
                         </div>
                       );
                     })}
 
-                    {/* 이벤트 바 오버레이 */}
-                    {bars.filter(b=>b.slot < maxSlots).map((bar, bi) => {
-                      const meta = CAT[bar.ev.category]||CAT["기타"];
-                      const GAP = 2;
-                      const topOffset = 24 + bar.slot * 20;
-                      // 셀 너비: (100% - gaps) / 7
-                      const cellW = "calc((100% - "+((7-1)*GAP)+"px) / 7)";
-                      const leftPct = bar.startCol * (100/7);
+                    {/* 이벤트 바 오버레이 (z-index 높게) */}
+                    {bars.filter(b=>b.slot<maxSlots).map((bar,bi)=>{
+                      const meta=CAT[bar.ev.category]||CAT["기타"];
+                      const topOff = 26 + bar.slot*20;
+                      const leftFrac = bar.startCol/7*100;
+                      const wFrac = bar.span/7*100;
+                      const gapAdjust = (bar.span-1)*GAP;
                       return (
                         <div key={bar.ev.id+"_"+wi+"_"+bi} style={{
                           position:"absolute",
-                          top: topOffset,
-                          left:"calc("+leftPct+"% + "+(bar.startCol > 0 ? GAP : 0)+"px"+(bar.startsHere?" + 1px":"")+  ")",
-                          width:"calc("+(bar.span/7*100)+"% - "+(bar.span>1?(bar.span-1)*GAP:0)+"px"+(bar.startsHere?" - 2px":"")+(bar.endsHere?" - 2px":"")+")",
-                          height:16,
-                          background:meta.color+"44",
-                          borderLeft: bar.startsHere ? "3px solid "+meta.color : "none",
-                          borderRight: "none",
-                          borderRadius: bar.startsHere ? (bar.endsHere?"6px":"6px 0 0 6px") : (bar.endsHere?"0 6px 6px 0":"0"),
-                          display:"flex", alignItems:"center",
-                          paddingLeft: bar.startsHere ? 5 : 3,
+                          top:topOff,
+                          left:"calc("+leftFrac+"% + "+(bar.startCol*GAP)+"px"+(bar.startsHere?"+1px":"")+")",
+                          width:"calc("+wFrac+"% - "+(bar.startCol*GAP)+"px - "+((7-bar.startCol-bar.span)*GAP)+"px"+(bar.startsHere?"-2px":"")+(bar.endsHere?"-2px":"")+")",
+                          height:15,
+                          background:meta.color+"55",
+                          borderLeft:bar.startsHere?"3px solid "+meta.color:"none",
+                          borderRadius:bar.startsHere?(bar.endsHere?"5px":"5px 0 0 5px"):(bar.endsHere?"0 5px 5px 0":"0"),
+                          display:"flex",alignItems:"center",
+                          paddingLeft:bar.startsHere?4:2,
                           overflow:"hidden",
-                          zIndex:2,
+                          zIndex:10,
                           pointerEvents:"none",
                         }}>
-                          {bar.startsHere && (
-                            <span style={{ fontSize:9,fontWeight:700,color:meta.color,
-                              fontFamily:F,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
+                          {bar.startsHere&&(
+                            <span style={{fontSize:9,fontWeight:700,color:meta.color,
+                              fontFamily:F,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                               {bar.ev.title}
                             </span>
                           )}
@@ -886,18 +870,26 @@ function App() {
                 );
               })}
 
-              {/* 이달 일정 리스트 */}
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",
-                marginBottom:10, marginTop:16 }}>
-                <span style={{ fontSize:15,fontWeight:600,color:T.l1,fontFamily:F }}>이달의 일정</span>
+              {/* 선택 날짜 일정 */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                marginBottom:10,marginTop:18}}>
+                <div>
+                  <span style={{fontSize:15,fontWeight:600,color:T.l1,fontFamily:F}}>
+                    {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
+                  </span>
+                  <span style={{fontSize:13,color:T.l3,fontFamily:F,marginLeft:6}}>
+                    {selDayEvents.length>0?selDayEvents.length+"개 일정":"일정 없음"}
+                  </span>
+                </div>
                 <ActionBtn onClick={()=>setAddEvent(true)}>+ 추가</ActionBtn>
               </div>
-              <div style={{ ...glassBox({ overflow:"hidden",
-                boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-                {monthEvents.sort((a,b)=>a.date.localeCompare(b.date)).map((e,i,arr)=>(
-                  <div key={e.id}><ERow e={e}/>{i<arr.length-1&&<Sep/>}</div>
-                ))}
-                {monthEvents.length===0&&<EmptyRow text="이달 일정 없음"/>}
+              <div style={{...glassBox({overflow:"hidden",
+                boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)"})}}>
+                {selDayEvents.length===0
+                  ? <EmptyRow text="이 날에 일정이 없어요"/>
+                  : selDayEvents.map((e,i,arr)=>(
+                      <div key={e.id}><ERow e={e}/>{i<arr.length-1&&<Sep/>}</div>
+                    ))}
               </div>
             </div>
           );
@@ -1518,7 +1510,7 @@ function TRow({ t, done, onToggle, onDelete, showAuthor }) {
 }
 
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
+    const root=ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(App));
   </script>
 </body>
