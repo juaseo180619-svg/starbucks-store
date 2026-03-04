@@ -16,7 +16,16 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #04060A; overflow-x: hidden; }
     #root { min-height: 100vh; }
-    @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
+    [contenteditable]:empty:before {
+      content: attr(data-placeholder);
+      color: #666;
+      pointer-events: none;
+      position: absolute;
+    }
+    .rich-editor { outline: none; position: relative; }
+    .rich-editor img { max-width: 100%; border-radius: 10px; margin: 4px 0; display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
   </style>
 </head>
 <body>
@@ -355,122 +364,9 @@ function ProfileSetup({ onComplete, existing }) {
 }
 
 /* ══════════════════ AI ANALYZE SHEET ══════════════════ */
-function AIChatSheet({ onClose, notices }) {
-  const [msgs, setMsgs]   = useState([
-    { role:"ai", text:"안녕하세요! 공지 내용에 대해 무엇이든 물어보세요. 예: '이번 달 이벤트 알려줘', '음료 관련 공지 요약해줘'" }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef();
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
-  }, [msgs]);
-
-  const send = async () => {
-    const q = input.trim();
-    if (!q || loading) return;
-    setInput("");
-    setMsgs(prev => [...prev, { role:"user", text:q }]);
-    setLoading(true);
-
-    const noticeContext = (notices||[]).slice(0,30).map(n =>
-      "[" + n.date + "] [" + n.category + "] " + n.title + "\n" + n.content
-    ).join("\n\n---\n\n");
-
-    const systemPrompt = "당신은 스타벅스 매장 파트너를 돕는 AI 어시스턴트입니다.\n"
-      + "아래는 매장의 공지사항 목록입니다. 이 내용을 바탕으로 질문에 답하세요.\n"
-      + "공지에 없는 내용은 '공지에서 찾을 수 없어요'라고 말하세요.\n"
-      + "답변은 한국어로, 친근하고 간결하게 해주세요.\n\n"
-      + "=== 공지 목록 ===\n" + noticeContext;
-
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": window.ANTHROPIC_API_KEY || "",
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages: [{ role:"user", content: q }]
-        })
-      });
-      const data = await resp.json();
-      const answer = data.content?.map(b => b.text||"").join("").trim() || "답변을 가져오지 못했어요.";
-      setMsgs(prev => [...prev, { role:"ai", text:answer }]);
-    } catch(e) {
-      setMsgs(prev => [...prev, { role:"ai", text:"오류가 발생했어요. 다시 시도해주세요." }]);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <Sheet title="AI 공지 검색" onClose={onClose} tall>
-      <div style={{ display:"flex", flexDirection:"column", height:"60vh" }}>
-        {/* 메시지 목록 */}
-        <div style={{ flex:1, overflowY:"auto", marginBottom:12, display:"flex", flexDirection:"column", gap:10 }}>
-          {msgs.map((m, i) => (
-            <div key={i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start" }}>
-              {m.role==="ai" && (
-                <div style={{ width:28, height:28, borderRadius:"50%", background:T.greenDim,
-                  border:"1px solid " + T.green, display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:14, flexShrink:0, marginRight:8, marginTop:2 }}>✨</div>
-              )}
-              <div style={{
-                maxWidth:"78%", padding:"10px 14px", borderRadius: m.role==="user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                background: m.role==="user" ? "linear-gradient(135deg," + T.green + ",#28a864)" : T.glass2,
-                color: m.role==="user" ? "#001808" : T.l1,
-                fontSize:14, fontFamily:F, lineHeight:1.6, whiteSpace:"pre-wrap",
-                border: m.role==="user" ? "none" : "1px solid " + T.border1
-              }}>{m.text}</div>
-            </div>
-          ))}
-          {loading && (
-            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ width:28, height:28, borderRadius:"50%", background:T.greenDim,
-                border:"1px solid " + T.green, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>✨</div>
-              <div style={{ padding:"10px 14px", borderRadius:"18px 18px 18px 4px",
-                background:T.glass2, border:"1px solid " + T.border1, display:"flex", gap:5, alignItems:"center" }}>
-                {[0,1,2].map(i => (
-                  <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.l3,
-                    animation:"pulse 1.2s ease-in-out " + (i*0.2) + "s infinite" }}/>
-                ))}
-              </div>
-            </div>
-          )}
-          <div ref={bottomRef}/>
-        </div>
-        {/* 입력창 */}
-        <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="공지 내용에 대해 질문하세요..."
-            rows={2}
-            style={{ flex:1, padding:"12px 14px", borderRadius:14, background:T.glass2,
-              border:"1px solid " + T.border1, color:T.l1, fontSize:14, fontFamily:F,
-              resize:"none", outline:"none", lineHeight:1.5 }}
-          />
-          <button onClick={send} disabled={!input.trim() || loading}
-            style={{ width:44, height:44, borderRadius:14, background: input.trim() ? T.green : T.glass2,
-              border:"none", cursor: input.trim() ? "pointer" : "default",
-              color: input.trim() ? "#001808" : T.l3, fontSize:18, display:"flex",
-              alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all .2s" }}>↑</button>
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
 
 /* ════════════════════════ MAIN APP ════════════════════════ */
-function App() {
+export default function App() {
   /* 프로필 */
   const [profile, setProfileRaw] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -506,9 +402,10 @@ function App() {
   const [taskMode,    setTaskMode]    = useState("personal"); // "personal" | "role"
   const [viewNotice,  setViewNotice]  = useState(null);
   const [addNotice,   setAddNotice]   = useState(false);
+  const [aiChat,      setAiChat]      = useState(false);
+  const [editNotice,  setEditNotice]  = useState(null);
   const [addEvent,    setAddEvent]    = useState(false);
   const [addTask,     setAddTask]     = useState(false);
-  const [aiChat,      setAiChat]      = useState(false);
   const [noticeCat,   setNoticeCat]   = useState("전체");
 
   const [calDate, setCalDate] = useState(new Date("2026-03-01"));
@@ -558,13 +455,6 @@ function App() {
     else                     saveTasks(p=>[...p, newTask]);
     setTf({ text:"", priority:"보통", dueDate:todayStr() });
     setAddTask(false);
-  };
-  const handleAISave = ({ notice, tasks:newTasks }) => {
-    saveNotices(p=>[notice,...p]);
-    if (newTasks.length>0) {
-      if (taskMode === "role") saveRoleTasks(p=>[...newTasks,...p]);
-      else                     saveTasks(p=>[...newTasks,...p]);
-    }
   };
   const eventsOnDay = d => {
     const s=`${cY}-${String(cM+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
@@ -800,12 +690,12 @@ function App() {
             <div onClick={()=>setAiChat(true)} style={{
               ...glassBox({ padding:"14px 16px", marginBottom:14, cursor:"pointer",
                 background:"linear-gradient(135deg,rgba(61,220,132,0.10),rgba(90,200,250,0.08))",
-                border:`1px solid rgba(61,220,132,0.25)` }),
+                border:"1px solid rgba(61,220,132,0.25)" }),
               display:"flex", alignItems:"center", gap:12 }}>
-              <div style={{ fontSize:28, flexShrink:0 }}>✨</div>
+              <div style={{ fontSize:28, flexShrink:0 }}>🤖</div>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:2 }}>AI 공지 검색</div>
-                <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>공지 내용 질문 · 검색 · 요약 요청</div>
+                <div style={{ fontSize:12, color:T.l3, fontFamily:F }}>공지 내용 검색 · 질문하기</div>
               </div>
               <span style={{ color:T.green, fontSize:18 }}>›</span>
             </div>
@@ -838,76 +728,98 @@ function App() {
         {/* ── CALENDAR ── */}
         {tab==="calendar"&&(
           <div style={{ padding:"16px" }} className="fi">
+            {/* 월 네비게이션 */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <button onClick={()=>setCalDate(new Date(cY,cM-1,1))} style={{
                 ...glassBox({ width:40, height:40, display:"flex", alignItems:"center",
                   justifyContent:"center", borderRadius:13, padding:0, background:T.glass2 }),
-                cursor:"pointer", color:T.l1, fontSize:20, border:`1px solid ${T.border1}` }}>‹</button>
+                cursor:"pointer", color:T.l1, fontSize:20, border:"1px solid " + T.border1 }}>‹</button>
               <span style={{ fontSize:18, fontWeight:700, color:T.l1, fontFamily:F }}>
                 {calDate.toLocaleDateString("ko-KR",{year:"numeric",month:"long"})}
               </span>
               <button onClick={()=>setCalDate(new Date(cY,cM+1,1))} style={{
                 ...glassBox({ width:40, height:40, display:"flex", alignItems:"center",
                   justifyContent:"center", borderRadius:13, padding:0, background:T.glass2 }),
-                cursor:"pointer", color:T.l1, fontSize:20, border:`1px solid ${T.border1}` }}>›</button>
+                cursor:"pointer", color:T.l1, fontSize:20, border:"1px solid " + T.border1 }}>›</button>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:8 }}>
+
+            {/* 요일 헤더 */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:4 }}>
               {WDAYS.map((d,i)=>(
-                <div key={d} style={{ textAlign:"center", fontSize:12, fontWeight:600, fontFamily:F,
+                <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:600, fontFamily:F,
                   padding:"2px 0", color:i===0?T.red:i===6?T.blue:T.l3 }}>{d}</div>
               ))}
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:20 }}>
+
+            {/* 날짜 그리드 - 애플 캘린더 스타일: 이벤트 텍스트 바로 표시 */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:16 }}>
               {Array(firstDow).fill(null).map((_,i)=><div key={"x"+i}/>)}
               {Array(daysInMo).fill(null).map((_,i)=>{
-                const d=i+1;
-                const ev=eventsOnDay(d);
-                const dStr=`${cY}-${String(cM+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-                const isTod=dStr===todayStr();
-                const dow=(firstDow+i)%7;
+                const d = i+1;
+                const ev = eventsOnDay(d);
+                const dStr = cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+                const isTod = dStr===todayStr();
+                const isSun = (firstDow+i)%7===0;
+                const isSat = (firstDow+i)%7===6;
                 return (
                   <div key={d} style={{
-                    background:isTod?`linear-gradient(145deg,${T.green},#28a864)`:T.glass1,
-                    backdropFilter:"blur(20px) saturate(180%)", WebkitBackdropFilter:"blur(20px) saturate(180%)",
-                    border:`1px solid ${isTod?"rgba(61,220,132,0.5)":T.border0}`,
-                    borderRadius:10, padding:"5px 4px",
-                    minHeight: ev.length>0 ? (56 + ev.length*18) : 48,
-                    boxShadow:isTod?`0 4px 20px rgba(61,220,132,0.35)`:"none" }}>
+                    background:isTod?"linear-gradient(145deg,"+T.green+",#28a864)":T.glass1,
+                    backdropFilter:"blur(20px) saturate(180%)",
+                    WebkitBackdropFilter:"blur(20px) saturate(180%)",
+                    border:"1px solid "+(isTod?"rgba(61,220,132,0.5)":T.border0),
+                    borderRadius:10,
+                    padding:"4px 3px 5px",
+                    minHeight: ev.length > 0 ? (40 + ev.length * 18) : 40,
+                    boxShadow:isTod?"0 4px 20px rgba(61,220,132,0.35)":"none"
+                  }}>
+                    {/* 날짜 숫자 */}
                     <div style={{ textAlign:"center", fontSize:13, fontWeight:isTod?800:500,
-                      color:isTod?"#001808":dow===0?T.red:dow===6?T.blue:T.l1,
-                      fontFamily:F, marginBottom:ev.length>0?3:0, lineHeight:1.3 }}>{d}</div>
-                    {ev.map(e=>(
-                      <div key={e.id} style={{
-                        fontSize:9, borderRadius:4, padding:"1px 4px", marginBottom:2,
-                        background:(CAT[e.category]||CAT["기타"]).color+"33",
-                        borderLeft:"2px solid "+(CAT[e.category]||CAT["기타"]).color,
-                        color:isTod?"#001808":T.l1, fontFamily:F,
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                        lineHeight:1.4
-                      }}>{e.title}</div>
-                    ))}
+                      color:isTod?"#001808":isSun?T.red:isSat?T.blue:T.l1,
+                      fontFamily:F, marginBottom:2, lineHeight:1 }}>{d}</div>
+                    {/* 이벤트 목록 - 텍스트로 바로 표시 */}
+                    {ev.map(e=>{
+                      const meta = CAT[e.category]||CAT["기타"];
+                      return (
+                        <div key={e.id} style={{
+                          background:meta.color+"33",
+                          borderLeft:"2px solid "+meta.color,
+                          borderRadius:"0 4px 4px 0",
+                          padding:"1px 3px",
+                          marginBottom:2,
+                          fontSize:9,
+                          fontWeight:600,
+                          color:meta.color,
+                          fontFamily:F,
+                          lineHeight:1.4,
+                          overflow:"hidden",
+                          textOverflow:"ellipsis",
+                          whiteSpace:"nowrap",
+                        }}>{e.title}</div>
+                      );
+                    })}
                   </div>
                 );
               })}
             </div>
+
+            {/* 이달 전체 일정 리스트 */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
               <span style={{ fontSize:15, fontWeight:600, color:T.l1, fontFamily:F }}>이달의 일정</span>
               <ActionBtn onClick={()=>setAddEvent(true)}>+ 추가</ActionBtn>
             </div>
             <div style={{ ...glassBox({ overflow:"hidden",
               boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {(events||[]).filter(e=>e.date.startsWith(`${cY}-${String(cM+1).padStart(2,"0")}`))
+              {(events||[]).filter(e=>e.date.startsWith(cY+"-"+String(cM+1).padStart(2,"0")))
+                .sort((a,b)=>a.date.localeCompare(b.date))
                 .map((e,i,arr)=>(
                   <div key={e.id}><ERow e={e}/>{i<arr.length-1&&<Sep/>}</div>
                 ))}
-              {(events||[]).filter(e=>e.date.startsWith(`${cY}-${String(cM+1).padStart(2,"0")}`)).length===0
+              {(events||[]).filter(e=>e.date.startsWith(cY+"-"+String(cM+1).padStart(2,"0"))).length===0
                 &&<EmptyRow text="이달 일정 없음"/>}
             </div>
           </div>
         )}
 
-        {/* ── TASKS ── */}
-        {/* ── TASKS ── */}
         {tab==="tasks"&&(
           <div style={{ padding:"16px" }} className="fi">
             {/* 프로필 + 세그먼트 헤더 */}
@@ -1046,74 +958,41 @@ function App() {
             {viewNotice.date}{viewNotice.author&&` · ${viewNotice.author}`}
           </div>
           <div style={{ height:1, background:T.border0, marginBottom:20 }}/>
-          <div style={{ fontSize:15, color:T.l2, lineHeight:1.9, whiteSpace:"pre-line", fontFamily:F, marginBottom:28 }}>
-            {viewNotice.content}
+          <div style={{ fontSize:15, color:T.l2, lineHeight:1.9, fontFamily:F, marginBottom:28 }}
+            dangerouslySetInnerHTML={{ __html: viewNotice.content || "" }}
+          />
+          <div style={{ display:"flex", gap:10, marginTop:0 }}>
+            <button onClick={()=>togglePin(viewNotice.id)} style={{
+              flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+              fontSize:15, fontWeight:700, transition:"all .2s",
+              border:"1px solid "+(viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1),
+              background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
+              color:viewNotice.pinned?T.gold:T.l2,
+              backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+            }}>
+              <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
+              {viewNotice.pinned?"고정 해제":"상단 고정"}
+            </button>
+            <button onClick={()=>{ setEditNotice(viewNotice); setViewNotice(null); }} style={{
+              flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+              fontSize:15, fontWeight:700, transition:"all .2s",
+              border:"1px solid "+T.border1,
+              background:T.glass2, color:T.l2,
+              backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+            }}>
+              <span style={{ fontSize:18 }}>✏️</span>수정
+            </button>
           </div>
-          <button onClick={()=>togglePin(viewNotice.id)} style={{
-            width:"100%", padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
-            fontSize:15, fontWeight:700, transition:"all .2s",
-            border:`1px solid ${viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1}`,
-            background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
-            color:viewNotice.pinned?T.gold:T.l2,
-            backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-          }}>
-            <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
-            {viewNotice.pinned?"고정 해제":"상단 고정"}
-          </button>
         </Sheet>
       )}
 
       {addNotice&&(
-        <Sheet title="공지 작성" onClose={()=>setAddNotice(false)} tall>
-          <Field label="제목" value={nf.title} onChange={v=>setNf({...nf,title:v})} placeholder="공지 제목"/>
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
-            <Seg value={nf.category} onChange={v=>setNf({...nf,category:v})} options={["이벤트","운영","인사","기타"]}/>
-          </div>
-          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:6 }}>내용</div>
-          <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
-            {[["bold","B",{fontWeight:700}],["italic","I",{fontStyle:"italic"}],["underline","U",{textDecoration:"underline"}]].map(([cmd,icon,st])=>(
-              <button key={cmd} onMouseDown={e=>{e.preventDefault();document.execCommand(cmd);}}
-                style={{ width:32,height:32,borderRadius:8,border:"1px solid "+T.border1,background:T.glass2,color:T.l1,cursor:"pointer",fontFamily:F,fontSize:13,...st }}>{icon}</button>
-            ))}
-            <div style={{ width:1,height:24,background:T.border1,margin:"0 2px" }}/>
-            {[["#FFE066","노"],["#80FF9E","초"],["#80CFFF","파"],["#FF9E9E","빨"]].map(([col,lbl])=>(
-              <button key={col} onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,col);}}
-                style={{ width:32,height:32,borderRadius:8,border:"2px solid rgba(255,255,255,0.15)",background:col,cursor:"pointer",fontSize:10,color:"#333",fontWeight:700 }}>{lbl}</button>
-            ))}
-            <div style={{ width:1,height:24,background:T.border1,margin:"0 2px" }}/>
-            <label style={{ width:32,height:32,borderRadius:8,border:"1px solid "+T.border1,background:T.glass2,color:T.l1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>
-              🖼<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-                const f=e.target.files[0];if(!f)return;
-                const r=new FileReader();
-                r.onload=ev=>{document.execCommand("insertImage",false,ev.target.result);};
-                r.readAsDataURL(f);e.target.value="";
-              }}/>
-            </label>
-          </div>
-          <div id="notice-editor" contentEditable suppressContentEditableWarning
-            onInput={e=>setNf(prev=>({...prev,content:e.currentTarget.innerHTML}))}
-            style={{ minHeight:200,padding:"12px 14px",borderRadius:14,background:T.glass2,
-              border:"1px solid "+T.border1,color:T.l1,fontSize:14,fontFamily:F,lineHeight:1.7,
-              outline:"none",marginBottom:12,overflowY:"auto" }}
-          />
-          <style dangerouslySetInnerHTML={{__html:`
-            #notice-editor:empty:after{content:'공지 내용을 입력하세요...';color:`+T.l4+`;pointer-events:none;}
-            #notice-editor img{max-width:100%;border-radius:8px;margin:4px 0;display:block;}
-          `}}/>
-          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"12px 14px",background:T.glass1,border:"1px solid "+T.border0,borderRadius:12 }}>
-            <input type="checkbox" id="pin4" checked={nf.pinned} onChange={e=>setNf({...nf,pinned:e.target.checked})} style={{ width:18,height:18,accentColor:T.green,cursor:"pointer" }}/>
-            <label htmlFor="pin4" style={{ fontSize:14,color:T.l1,cursor:"pointer",userSelect:"none",fontFamily:F }}>상단 고정</label>
-          </div>
-          <GreenBtn full onClick={()=>{
-            if(!nf.title.trim())return;
-            saveNotices(p=>[{id:"n"+Date.now(),...nf,date:todayStr(),_read:false,author:profile?.name||nf.author},...p]);
-            setNf({title:"",category:"이벤트",content:"",pinned:false,author:""});
-            const ed=document.getElementById("notice-editor");if(ed)ed.innerHTML="";
-            setAddNotice(false);
-          }} disabled={!nf.title.trim()}>저장하기</GreenBtn>
-        </Sheet>
+        <RichNoticeSheet
+          onClose={()=>setAddNotice(false)}
+          onSave={(data)=>{ submitNoticeRich(data); setAddNotice(false); }}
+        />
       )}
 
       {addEvent&&(
@@ -1161,10 +1040,288 @@ function App() {
         </Sheet>
       )}
 
-      {aiChat&&<AIChatSheet onClose={()=>setAiChat(false)} notices={notices}/>}
+      {aiChat&&<AIChatSheet onClose={()=>setAiChat(false)} notices={notices||[]}/>}
+      {editNotice&&(
+        <RichNoticeSheet
+          initial={editNotice}
+          onClose={()=>setEditNotice(null)}
+          onSave={(data)=>{
+            saveNotices((notices||[]).map(n => n.id===editNotice.id ? {...n,...data} : n));
+            setEditNotice(null);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+
+/* ══════════════════ 리치텍스트 공지 작성 ══════════════════ */
+function RichNoticeSheet({ onClose, onSave, initial }) {
+  const [title, setTitle]       = useState(initial ? initial.title : "");
+  const [category, setCategory] = useState(initial ? initial.category : "이벤트");
+  const [pinned, setPinned]     = useState(initial ? !!initial.pinned : false);
+  const editorRef = useRef();
+  const imgRef = useRef();
+
+  // 수정 모드일 때 에디터 초기 내용 설정
+  useEffect(() => {
+    if (initial && editorRef.current) {
+      editorRef.current.innerHTML = initial.content || "";
+    }
+  }, []);
+
+  const execCmd = (cmd, val) => {
+    document.execCommand(cmd, false, val || null);
+    editorRef.current.focus();
+  };
+
+  const insertImage = async (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement("img");
+      img.src = e.target.result;
+      img.style.maxWidth = "100%";
+      img.style.borderRadius = "10px";
+      img.style.margin = "6px 0";
+      const sel = window.getSelection();
+      if (sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.insertNode(img);
+        range.collapse(false);
+      } else {
+        editorRef.current.appendChild(img);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = () => {
+    if (!title.trim()) return;
+    const content = editorRef.current.innerHTML;
+    onSave({ title: title.trim(), category, content, pinned });
+  };
+
+  const tools = [
+    { icon: "B", cmd: "bold",   style: { fontWeight:800 }, title: "굵게" },
+    { icon: "I", cmd: "italic", style: { fontStyle:"italic" }, title: "기울임" },
+    { icon: "U", cmd: "underline", style: { textDecoration:"underline" }, title: "밑줄" },
+  ];
+
+  const highlights = [
+    { color: "#FFE066", label: "노랑" },
+    { color: "#A8FFB0", label: "초록" },
+    { color: "#FFB3B3", label: "빨강" },
+    { color: "#B3D4FF", label: "파랑" },
+    { color: "transparent", label: "없음" },
+  ];
+
+  return (
+    <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} tall>
+      <style>{`
+        .rich-editor { outline: none; min-height: 180px; }
+        .rich-editor img { max-width: 100%; border-radius: 10px; margin: 4px 0; }
+        .rich-editor b, .rich-editor strong { font-weight: 800; }
+      `}</style>
+
+      {/* 제목 */}
+      <input
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        onKeyDown={e => { if(e.key==="Enter") e.preventDefault(); }}
+        placeholder="공지 제목"
+        style={{ ...fBase, marginBottom:10, fontSize:17, fontWeight:600 }}
+      />
+
+      {/* 카테고리 */}
+      <div style={{ marginBottom:10 }}>
+        <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
+        <Seg value={category} onChange={setCategory} options={["이벤트","운영","인사","기타"]}/>
+      </div>
+
+      {/* 서식 툴바 */}
+      <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
+        {tools.map(t => (
+          <button key={t.cmd} onMouseDown={e => { e.preventDefault(); execCmd(t.cmd); }}
+            title={t.title}
+            style={{ ...t.style, padding:"5px 12px", borderRadius:8, border:"1px solid " + T.border1,
+              background:T.glass2, color:T.l1, fontSize:13, cursor:"pointer", fontFamily:F }}>
+            {t.icon}
+          </button>
+        ))}
+        <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+        {/* 형광펜 */}
+        {highlights.map(h => (
+          <button key={h.color} onMouseDown={e => {
+            e.preventDefault();
+            if (h.color === "transparent") execCmd("removeFormat");
+            else execCmd("hiliteColor", h.color);
+          }}
+            title={"형광펜 " + h.label}
+            style={{ width:22, height:22, borderRadius:5, border:"1px solid " + T.border1,
+              background: h.color === "transparent" ? T.glass2 : h.color,
+              cursor:"pointer", fontSize:h.color === "transparent" ? 11 : 0 }}>
+            {h.color === "transparent" ? "✕" : ""}
+          </button>
+        ))}
+        <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+        {/* 이미지 삽입 */}
+        <button onMouseDown={e => { e.preventDefault(); imgRef.current.click(); }}
+          title="이미지 삽입"
+          style={{ padding:"5px 10px", borderRadius:8, border:"1px solid " + T.border1,
+            background:T.glass2, color:T.l2, fontSize:13, cursor:"pointer", fontFamily:F }}>
+          🖼
+        </button>
+        <input ref={imgRef} type="file" accept="image/*" style={{ display:"none" }}
+          onChange={e => e.target.files[0] && insertImage(e.target.files[0])} />
+      </div>
+
+      {/* 에디터 */}
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        className="rich-editor"
+        data-placeholder="공지 내용을 입력하세요..."
+        style={{ ...fBase, minHeight:180, fontSize:15, lineHeight:1.8, padding:"12px 14px",
+          whiteSpace:"pre-wrap", overflowY:"auto", marginBottom:10 }}
+      />
+
+      {/* 고정 */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16,
+        padding:"12px 14px", background:T.glass1, border:"1px solid " + T.border0, borderRadius:12 }}>
+        <input type="checkbox" id="richpin" checked={pinned} onChange={e => setPinned(e.target.checked)}
+          style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }}/>
+        <label htmlFor="richpin" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>
+          상단 고정
+        </label>
+      </div>
+
+      <GreenBtn full onClick={handleSave} disabled={!title.trim()}>등록하기</GreenBtn>
+    </Sheet>
+  );
+}
+
+/* ══════════════════ AI 공지 챗 ══════════════════ */
+function AIChatSheet({ onClose, notices }) {
+  const [messages, setMessages] = useState([
+    { role:"assistant", text:"안녕하세요! 공지 내용에 대해 질문하거나 검색해보세요 😊" }
+  ]);
+  const [input, setInput]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef();
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
+  }, [messages]);
+
+  const send = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+    setInput("");
+    setMessages(prev => [...prev, { role:"user", text:q }]);
+    setLoading(true);
+
+    try {
+      const noticeText = notices.slice(0, 20).map(n =>
+        "[" + n.date + "] " + n.title + ": " + (n.content || "").replace(/<[^>]+>/g, "").slice(0, 300)
+      ).join("\n");
+
+      const systemPrompt = "당신은 스타벅스 매장 운영 도우미 AI입니다.\n"
+        + "아래는 최근 매장 공지 목록입니다. 이 내용을 바탕으로 질문에 친절하게 답해주세요.\n"
+        + "공지에 없는 내용이면 솔직하게 모른다고 말해주세요.\n\n"
+        + "=== 공지 목록 ===\n" + noticeText;
+
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key": window.ANTHROPIC_API_KEY || "",
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
+        body: JSON.stringify({
+          model:"claude-haiku-4-5-20251001",
+          max_tokens:1000,
+          system: systemPrompt,
+          messages:[{ role:"user", content:q }]
+        })
+      });
+      const data = await resp.json();
+      const answer = data.content?.map(b => b.text||"").join("").trim() || "응답을 받지 못했어요.";
+      setMessages(prev => [...prev, { role:"assistant", text:answer }]);
+    } catch(e) {
+      setMessages(prev => [...prev, { role:"assistant", text:"오류가 발생했어요. 다시 시도해주세요." }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <Sheet title="AI 공지 검색" onClose={onClose} tall>
+      {/* 메시지 목록 */}
+      <div style={{ flex:1, overflowY:"auto", marginBottom:12, display:"flex", flexDirection:"column", gap:10, minHeight:300, maxHeight:440 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start" }}>
+            {m.role==="assistant" && (
+              <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg," + T.green + ",#28a864)",
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0, marginRight:8, marginTop:2 }}>
+                🤖
+              </div>
+            )}
+            <div style={{
+              maxWidth:"78%", padding:"10px 14px", borderRadius: m.role==="user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+              background: m.role==="user"
+                ? "linear-gradient(135deg," + T.green + ",#28a864)"
+                : T.glass2,
+              color: m.role==="user" ? "#001808" : T.l1,
+              fontSize:14, lineHeight:1.6, fontFamily:F,
+              border: m.role==="user" ? "none" : "1px solid " + T.border1,
+              whiteSpace:"pre-wrap"
+            }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg," + T.green + ",#28a864)",
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>🤖</div>
+            <div style={{ background:T.glass2, border:"1px solid " + T.border1, borderRadius:"18px 18px 18px 4px",
+              padding:"10px 16px", display:"flex", gap:5, alignItems:"center" }}>
+              {[0,1,2].map(i => (
+                <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:T.green,
+                  animation:"bounce .8s " + (i*0.15) + "s infinite alternate" }}/>
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+      <style>{`@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}`}</style>
+
+      {/* 입력창 */}
+      <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key==="Enter" && !e.shiftKey && send()}
+          placeholder="공지 내용에 대해 질문하세요..."
+          style={{ ...fBase, flex:1, borderRadius:20 }}
+          disabled={loading}
+        />
+        <button onClick={send} disabled={!input.trim()||loading}
+          style={{ width:44, height:44, borderRadius:"50%", border:"none",
+            background: input.trim() && !loading ? "linear-gradient(135deg," + T.green + ",#28a864)" : T.glass2,
+            color: input.trim() && !loading ? "#001808" : T.l3,
+            fontSize:18, cursor: input.trim() && !loading ? "pointer" : "default",
+            display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+          ›
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 
 /* ── Sub components ── */
 function SecHead({ title, onMore }) {
@@ -1195,7 +1352,9 @@ function NRow({ n, onClick }) {
           <span style={{ fontSize:12, color:T.l3, flexShrink:0, fontFamily:F }}>{n.date}</span>
         </div>
         <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
-          display:"-webkit-box", WebkitLineClamp:1, WebkitBoxOrient:"vertical", marginBottom:6 }}>{n.content}</div>
+          display:"-webkit-box", WebkitLineClamp:1, WebkitBoxOrient:"vertical", marginBottom:6 }}
+          dangerouslySetInnerHTML={{ __html: (n.content||"").replace(/<[^>]+>/g,"").slice(0,80) }}
+        />
         <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
           <Pill label={n.category} color={meta.color} dim={meta.dim}/>
           {n.pinned&&<Pill label="고정" color={T.gold} dim={T.goldDim}/>}
@@ -1259,7 +1418,7 @@ function TRow({ t, done, onToggle, onDelete, showAuthor }) {
 }
 
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
+    const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(App));
   </script>
 </body>
