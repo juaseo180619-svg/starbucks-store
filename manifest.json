@@ -1,0 +1,18 @@
+{
+  "name": "Starbucks Store",
+  "short_name": "Store",
+  "description": "스타벅스 매장 파트너 업무 앱",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#04060A",
+  "theme_color": "#04060A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
