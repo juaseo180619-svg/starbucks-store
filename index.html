@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
-<head>
+<html lang="ko"><head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <meta name="mobile-web-app-capable" content="yes"/>
@@ -659,6 +658,7 @@ function App() {
 
   const [nf, setNf] = useState({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
   const [ef, setEf] = useState({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
+  const [editingEventId, setEditingEventId] = useState(null);
   const [tf, setTf] = useState({ text:"", priority:"보통", dueDate:todayStr() });
 
   const loading = profileLoading || nL || eL || tL || rL;
@@ -708,16 +708,22 @@ function App() {
     saveNotices(p=>[{ id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" }, ...(p||[])]);
     // 날짜 입력 시 캘린더에 자동 추가
     if (data.noticeDate) {
-      saveEvents(p=>[...(p||[]), {
+      const newEv = {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
         endDate:data.noticeEndDate||"", category:data.category, memo:"공지 연동"
-      }].sort((a,b)=>a.date.localeCompare(b.date)));
+      };
+      saveEvents(prev => [...(prev||events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
     }
   };
   const submitEvent = () => {
     if (!ef.title.trim()) return;
-    saveEvents(p=>[...p,{id:"e"+Date.now(),...ef}].sort((a,b)=>a.date.localeCompare(b.date)));
-    setEf({ title:"", date:todayStr(), category:"이벤트", memo:"" });
+    if (editingEventId) {
+      saveEvents(p=>(p||[]).map(e=>e.id===editingEventId?{...e,...ef,endDate:ef.endDate||""}:e));
+      setEditingEventId(null);
+    } else {
+      saveEvents(p=>[...(p||[]),{id:"e"+Date.now(),...ef,endDate:ef.endDate||""}].sort((a,b)=>a.date.localeCompare(b.date)));
+    }
+    setEf({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
     setAddEvent(false);
   };
   const submitTask = () => {
@@ -1029,61 +1035,33 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {/* 오늘 일정 요약 */}
-                <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                {/* 오늘 일정 요약 - 클릭 가능 버튼 */}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                   {[
-                    { val:todayEvents.length, label:"오늘 일정" },
-                    { val:(tasks||[]).filter(t=>!t.done).length, label:"미완료 할일" },
-                    { val:unreadCount, label:"읽지않은공지" },
+                    { val:todayEvents.length,                              label:"오늘 일정",     tab:"calendar", icon:"📅" },
+                    { val:(tasks||[]).filter(t=>!t.done).length+(roleTasks||[]).filter(t=>!t.done).length, label:"미완료 할일", tab:"tasks",    icon:"✅" },
+                    { val:unreadCount,                                     label:"읽지않은공지",  tab:"notices",  icon:"📢" },
                   ].map(function(item){ return (
-                    <div key={item.label} style={{ background:"rgba(255,255,255,0.15)", borderRadius:12,
-                      padding:"10px 14px", flex:1, minWidth:80 }}>
-                      <div style={{ fontSize:24, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
+                    <button key={item.label} onClick={()=>setTab(item.tab)}
+                      style={{ background:"rgba(255,255,255,0.18)", borderRadius:12,
+                        padding:"10px 12px", flex:1, minWidth:72, border:"none", cursor:"pointer",
+                        textAlign:"left", transition:"background .15s",
+                        backdropFilter:"blur(8px)" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.28)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.18)"}>
+                      <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
                         {item.val}
                       </div>
-                      <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:3 }}>
+                      <div style={{ fontSize:11, color:"rgba(255,255,255,0.75)", fontFamily:F, marginTop:3, whiteSpace:"nowrap" }}>
                         {item.label}
                       </div>
-                    </div>
+                    </button>
                   ); })}
                 </div>
               </div>
             </div>
 
-            {/* ── D-day 대시보드 ── */}
-            {(()=>{
-              const ddays = (events||[])
-                .filter(e => e.date >= todayStr())
-                .sort((a,b)=>a.date.localeCompare(b.date))
-                .slice(0,3)
-                .map(e=>{
-                  const diff = Math.ceil((new Date(e.date)-new Date(todayStr()))/(1000*60*60*24));
-                  return { ...e, diff };
-                });
-              if (!ddays.length) return null;
-              return (
-                <div style={{ display:"flex", gap:10, marginBottom:16, overflowX:"auto", paddingBottom:4 }}>
-                  {ddays.map(e=>{
-                    const meta = CAT[e.category]||{color:T.green};
-                    return (
-                      <div key={e.id} style={{ background:T.card, borderRadius:16, padding:"14px 16px",
-                        minWidth:130, flexShrink:0, boxShadow:"0 2px 16px rgba(30,57,50,0.08)",
-                        borderTop:"3px solid "+meta.color }}>
-                        <div style={{ fontSize:11, color:meta.color, fontWeight:700, fontFamily:F,
-                          marginBottom:4 }}>{e.category}</div>
-                        <div style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F,
-                          marginBottom:6, lineHeight:1.3 }}
-                          >{e.title.length>14?e.title.slice(0,13)+"…":e.title}</div>
-                        <div style={{ fontSize:22, fontWeight:900, color:meta.color, fontFamily:F, lineHeight:1 }}>
-                          {e.diff===0?"D-Day":"D-"+e.diff}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
+            
             {/* ── 미니 캘린더 ── */}
             <div style={{ ...glassBox({ marginBottom:16, padding:"16px", overflow:"hidden" }) }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
@@ -1176,9 +1154,9 @@ function App() {
                 ))}
             </div>
 
-            {/* ── 오늘 할일 ── */}
+            {/* ── 오늘 할일 (통합) ── */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-              <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>✅ 오늘 할일</span>
+              <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>✅ 미완료 할일</span>
               <div style={{ display:"flex", gap:8 }}>
                 <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
                 <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
@@ -1186,19 +1164,26 @@ function App() {
               </div>
             </div>
             <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20 }) }}>
-              {(tasks||[]).filter(t=>!t.done).length===0&&(roleTasks||[]).filter(t=>!t.done).length===0
-                ? <EmptyRow text="오늘 할일을 추가해보세요"/>
+              {(tasks||[]).filter(t=>!t.done).length===0 && (roleTasks||[]).filter(t=>!t.done).length===0
+                ? <EmptyRow text="미완료 할일 없음 🎉"/>
                 : <>
-                    {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
+                    {(tasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
                       <div key={t.id}>
                         <TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>
                         {i<arr.length-1&&<Sep/>}
                       </div>
                     ))}
-                    {(roleTasks||[]).filter(t=>!t.done).slice(0,2).map((t,i,arr)=>(
+                    {(tasks||[]).filter(t=>!t.done).length>0 && (roleTasks||[]).filter(t=>!t.done).length>0 && (
+                      <div style={{ padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ flex:1, height:1, background:T.border0 }}/>
+                        <span style={{ fontSize:11, color:T.l4, fontFamily:F }}>팀 공유</span>
+                        <div style={{ flex:1, height:1, background:T.border0 }}/>
+                      </div>
+                    )}
+                    {(roleTasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
                       <div key={t.id}>
-                        <Sep/>
-                        <TRow t={t} showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
+                        <TRow t={t} onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
+                        {i<arr.length-1&&<Sep/>}
                       </div>
                     ))}
                   </>
@@ -1305,6 +1290,8 @@ function App() {
             todayStr={todayStr}
             CAT={CAT}
             onAddEvent={()=>setAddEvent(true)}
+            onDeleteEvent={(id)=>saveEvents(p=>(p||[]).filter(e=>e.id!==id))}
+            onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
           />
         )}
 
@@ -1485,7 +1472,7 @@ function App() {
       )}
 
       {addEvent&&(
-        <Sheet title="일정 추가" onClose={()=>setAddEvent(false)}>
+        <Sheet title={editingEventId?"일정 수정":"일정 추가"} onClose={()=>{setAddEvent(false);setEditingEventId(null);}}>
           <Field label="일정 이름" value={ef.title} onChange={v=>setEf({...ef,title:v})} placeholder="일정 이름"/>
           <div style={{ display:"flex", gap:10, marginBottom:12 }}>
             <div style={{ flex:1 }}>
@@ -2572,7 +2559,7 @@ function AIChatSheet({ onClose, notices }) {
 
 
 /* ══════════════════ CALENDAR TAB ══════════════════ */
-function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent }) {
+function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent, onDeleteEvent, onEditEvent }) {
   var cY = calDate.getFullYear();
   var cM = calDate.getMonth();
   var firstDow = new Date(cY, cM, 1).getDay();
@@ -2751,8 +2738,16 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
           ? <EmptyRow text="이 날에 일정이 없어요"/>
           : selDayEvents.map(function(e,i){
               return (
-                <div key={e.id}>
+                <div key={e.id} style={{ position:"relative" }}>
                   <ERow e={e}/>
+                  <div style={{ display:"flex", gap:6, padding:"0 16px 10px", justifyContent:"flex-end" }}>
+                    <button onClick={()=>onEditEvent&&onEditEvent(e)} style={{
+                      padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
+                      border:"1px solid "+T.border1, background:T.glass1, color:T.l2, cursor:"pointer" }}>수정</button>
+                    <button onClick={()=>{ if(window.confirm("일정을 삭제할까요?")) onDeleteEvent&&onDeleteEvent(e.id); }} style={{
+                      padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
+                      border:"1px solid #ff6b6b44", background:"#ff6b6b11", color:"#e05252", cursor:"pointer" }}>삭제</button>
+                  </div>
                   {i<selDayEvents.length-1&&<Sep/>}
                 </div>
               );
