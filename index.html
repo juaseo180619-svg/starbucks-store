@@ -23,6 +23,8 @@
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
     .rich-editor mark{padding:1px 3px;border-radius:3px}
     @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+    @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(16px)}}
     @keyframes spin{to{transform:rotate(360deg)}}
     .fi{animation:fadeUp .28s cubic-bezier(.22,1,.36,1) both}
     button:active{transform:scale(0.96);transition:transform .1s}
@@ -212,7 +214,26 @@ const GistSync = {
     return Object.keys(payload).length;
   },
 
-  /** 자동 push - debounce 300ms */
+  /** 내 Gist 목록에서 StarbucksStore Gist 찾기 */
+  findExisting: async () => {
+    const token = GistSync.getToken();
+    if (!token) return null;
+    let page = 1;
+    while (page <= 5) {
+      const resp = await fetch("https://api.github.com/gists?per_page=30&page="+page, {
+        headers:{ Authorization:"token "+token }
+      });
+      if (!resp.ok) break;
+      const list = await resp.json();
+      if (!list.length) break;
+      const found = list.find(g => g.files && g.files[GIST_FILENAME]);
+      if (found) { GistSync.setGistId(found.id); return found.id; }
+      page++;
+    }
+    return null;
+  },
+
+  /** 자동 push - debounce 2초 */
   _timer: null,
   autoPush: () => {
     clearTimeout(GistSync._timer);
@@ -595,11 +616,15 @@ function App() {
   const [gistToken,   setGistToken]   = useState(()=>{ try{return localStorage.getItem("sbx_gist_token")||"";}catch(e){return "";} });
   const [gistId,      setGistId]      = useState(()=>{ try{return localStorage.getItem("sbx_gist_id")||"";}catch(e){return "";} });
   const [syncStatus,  setSyncStatus]  = useState("idle"); // idle|syncing|ok|error
-  // 토스트 자동 사라지기
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastAnim, setToastAnim] = useState("in"); // "in"|"out"
+  // 토스트 자동 사라지기 (fadeDown 후 hide)
   useEffect(()=>{
     if(syncStatus==="ok"||syncStatus==="error"){
-      const t=setTimeout(()=>setSyncStatus("idle"),2500);
-      return ()=>clearTimeout(t);
+      setToastVisible(true); setToastAnim("in");
+      const t1=setTimeout(()=>setToastAnim("out"), 2000);
+      const t2=setTimeout(()=>{ setToastVisible(false); setSyncStatus("idle"); }, 2600);
+      return ()=>{ clearTimeout(t1); clearTimeout(t2); };
     }
   },[syncStatus]);
   const [lastSync,    setLastSync]    = useState(()=>{ try{return localStorage.getItem("sbx_last_sync")||"";}catch(e){return "";} });
@@ -707,7 +732,7 @@ function App() {
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${T.glass2}`,
         borderTopColor:T.green, animation:"spin .7s linear infinite" }}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}} @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(16px)}}`}</style>
     </div>
   );
 
@@ -718,7 +743,8 @@ function App() {
   return (
     <div style={{ minHeight:"100vh", background:isPC?"#E8F2EC":T.bg,
       fontFamily:F, position:"relative", overflowX:"hidden",
-      display:isPC?"flex":"block" }}>
+      display:isPC?"flex":"block",
+      justifyContent:isPC?"center":"flex-start" }}>
       <style>{`
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
         ::placeholder{color:${T.l3};font-family:${F};}
@@ -878,7 +904,7 @@ function App() {
       )}
 
       {/* ══ 메인 콘텐츠 영역 ══ */}
-      <div style={{ flex:1, minWidth:0, maxWidth:isPC?740:430,
+      <div style={{ flex:1, minWidth:0, maxWidth:isPC?"calc(100vw - 280px)":430,
         margin:isPC?"0":"0 auto", width:"100%",
         background:T.bg, minHeight:"100vh",
         boxShadow:isPC?"0 0 60px rgba(0,0,0,0.08)":"none" }}>
@@ -956,8 +982,14 @@ function App() {
 
         {/* ── HOME ── */}
         {tab==="home"&&(
-          <div style={{ padding:"16px" }} className="fi">
+          <div style={{ padding:isPC?"24px 28px":"16px",
+            display:isPC?"grid":"block",
+            gridTemplateColumns:isPC?"1fr 1fr":"unset",
+            gap:isPC?"24px":"0",
+            alignItems:"start" }} className="fi">
 
+            {/* ── 왼쪽 컬럼 (브리핑/D-day/캘린더) ── */}
+            <div>
             {/* ── 오늘 브리핑 카드 ── */}
             <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
               borderRadius:20, padding:"22px 20px", marginBottom:16, position:"relative", overflow:"hidden" }}>
@@ -1121,6 +1153,10 @@ function App() {
               )}
             </div>
 
+            </div>{/* ── 왼쪽 컬럼 끝 ── */}
+
+            {/* ── 오른쪽 컬럼 (공지/할일/동기화) ── */}
+            <div>
             {/* ── 고정 공지 ── */}
             <SecHead title="📌 고정 공지" onMore={()=>setTab("notices")}/>
             <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16 }) }}>
@@ -1198,6 +1234,7 @@ function App() {
                 )}
               </div>
             )}
+            </div>{/* ── 오른쪽 컬럼 끝 ── */}
           </div>
         )}
 
@@ -1517,17 +1554,19 @@ function App() {
         <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)",
           background:"rgba(30,57,50,0.92)", color:"#fff", borderRadius:20, padding:"8px 18px",
           fontSize:13, fontFamily:F, zIndex:999, pointerEvents:"none",
-          display:"flex", alignItems:"center", gap:8 }}>
+          display:"flex", alignItems:"center", gap:8,
+          animation:"toastIn .3s ease" }}>
           <span style={{ animation:"spin 1s linear infinite", display:"inline-block" }}>⚙</span>
           동기화 중...
         </div>
       )}
-      {syncStatus==="ok" && (
-        <div key={lastSync} style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)",
-          background:T.green, color:"#fff", borderRadius:20, padding:"8px 18px",
+      {toastVisible && (
+        <div style={{ position:"fixed", bottom:80, left:"50%",
+          background:syncStatus==="error"?"#e53e3e":T.green, color:"#fff",
+          borderRadius:20, padding:"8px 18px",
           fontSize:13, fontFamily:F, zIndex:999, pointerEvents:"none",
-          animation:"fadeUp .3s ease" }}>
-          ✓ 동기화 완료
+          animation:toastAnim==="in"?"toastIn .35s ease forwards":"toastOut .5s ease forwards" }}>
+          {syncStatus==="error"?"⚠ 동기화 실패":"✓ 동기화 완료"}
         </div>
       )}
       {/* showQuiz - already closed above */}
@@ -1877,11 +1916,22 @@ function GistSetupModal({ onClose, onSave, currentToken, currentGistId }) {
       // 토큰 저장
       localStorage.setItem("sbx_gist_token", token.trim());
 
-      // 기존 Gist가 없으면 첫 push로 생성
+      // 기존 Gist ID가 없으면 먼저 탐색 → 없으면 새로 생성
       if (!currentGistId) {
-        await GistSync.push();
+        setTestResult({ ok:null, msg:"기존 동기화 데이터 탐색 중..." });
+        const found = await GistSync.findExisting();
+        if (found) {
+          // 기존 Gist 발견 → 바로 pull
+          await GistSync.pull();
+          setTestResult({ ok:true, login:user.login, found:true });
+        } else {
+          // 없으면 새로 생성
+          await GistSync.push();
+          setTestResult({ ok:true, login:user.login, found:false });
+        }
+      } else {
+        setTestResult({ ok:true, login:user.login });
       }
-      setTestResult({ ok:true, login:user.login });
       setTimeout(()=>{ onSave(token.trim(), GistSync.getGistId()); }, 1200);
     } catch(e) {
       setTestResult({ ok:false, msg:e.message });
@@ -1974,10 +2024,15 @@ function GistSetupModal({ onClose, onSave, currentToken, currentGistId }) {
             />
             {testResult && (
               <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
-                background:testResult.ok?"#E8F7EE":"#FEE8E8",
-                border:"1px solid "+(testResult.ok?T.green:T.red) }}>
-                <div style={{ fontSize:13, color:testResult.ok?T.green:T.red, fontFamily:F, fontWeight:600 }}>
-                  {testResult.ok?"✓ "+testResult.login+"으로 연결됐어요! Gist를 생성 중...":"✗ "+testResult.msg}
+                background:testResult.ok===null?"#EEF4FF":testResult.ok?"#E8F7EE":"#FEE8E8",
+                border:"1px solid "+(testResult.ok===null?T.blue:testResult.ok?T.green:T.red) }}>
+                <div style={{ fontSize:13, fontFamily:F, fontWeight:600,
+                  color:testResult.ok===null?T.blue:testResult.ok?T.green:T.red }}>
+                  {testResult.ok===null
+                    ? "🔍 "+testResult.msg
+                    : testResult.ok
+                      ? "✓ "+testResult.login+"님 연결 완료!"+(testResult.found?" 기존 데이터를 불러왔어요":"")
+                      : "✗ "+testResult.msg}
                 </div>
               </div>
             )}
