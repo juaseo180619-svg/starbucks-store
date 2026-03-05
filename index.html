@@ -1948,8 +1948,8 @@ function GistSetupModal({ onClose, onSave, currentToken, currentGistId }) {
         {step==="input" && (
           <div>
             <div style={{ fontSize:13, color:T.l2, fontFamily:F, marginBottom:12, lineHeight:1.7 }}>
-              GitHub에서 발급받은 토큰을 붙여넣어 주세요.<br/>
-              <span style={{ color:T.l3, fontSize:12 }}>토큰은 기기에만 저장되며 서버로 전송되지 않아요.</span>
+              <div>GitHub에서 발급받은 토큰을 붙여넣어 주세요.</div>
+              <div style={{ color:T.l3, fontSize:12 }}>토큰은 기기에만 저장되며 서버로 전송되지 않아요.</div>
             </div>
             <input
               value={token}
@@ -1981,8 +1981,8 @@ function GistSetupModal({ onClose, onSave, currentToken, currentGistId }) {
                 ✓ 동기화 연결됨
               </div>
               <div style={{ fontSize:12, color:T.l2, fontFamily:F, lineHeight:1.7 }}>
-                Gist ID: {currentGistId ? currentGistId.slice(0,8)+"..." : "없음"}<br/>
-                변경사항이 자동으로 저장되고 2분마다 최신 데이터를 불러와요.
+                <div>Gist ID: {currentGistId ? currentGistId.slice(0,8)+"..." : "없음"}</div>
+                <div>변경사항이 자동으로 저장되고 2분마다 최신 데이터를 불러와요.</div>
               </div>
             </div>
             <button onClick={()=>{ if(window.confirm("동기화 연결을 끊을까요? 기기의 데이터는 유지됩니다.")) disconnect(); }}
