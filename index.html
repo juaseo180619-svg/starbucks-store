@@ -533,12 +533,19 @@ function App() {
     if (!GistSync.getToken() || !GistSync.getGistId()) return;
     if (!silent) setSyncStatus("syncing");
     try {
+      // 변경 감지용: pull 전 스냅샷
+      const before = ["sbx6_notices","sbx6_events","sbx6_categories","sbx_teamtasks"]
+        .map(k=>localStorage.getItem("sh_"+k)).join("|");
       await GistSync.pull();
       const t = new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
       localStorage.setItem("sbx_last_sync", t);
       setLastSync(t);
       setSyncStatus("ok");
-      if (!silent) window.location.reload();
+      const after = ["sbx6_notices","sbx6_events","sbx6_categories","sbx_teamtasks"]
+        .map(k=>localStorage.getItem("sh_"+k)).join("|");
+      // silent여도 데이터가 달라졌으면 reload
+      if (before !== after) window.location.reload();
+      else if (!silent) window.location.reload();
     } catch(e) {
       setSyncStatus("error");
     }
@@ -588,6 +595,13 @@ function App() {
   const [gistToken,   setGistToken]   = useState(()=>{ try{return localStorage.getItem("sbx_gist_token")||"";}catch(e){return "";} });
   const [gistId,      setGistId]      = useState(()=>{ try{return localStorage.getItem("sbx_gist_id")||"";}catch(e){return "";} });
   const [syncStatus,  setSyncStatus]  = useState("idle"); // idle|syncing|ok|error
+  // 토스트 자동 사라지기
+  useEffect(()=>{
+    if(syncStatus==="ok"||syncStatus==="error"){
+      const t=setTimeout(()=>setSyncStatus("idle"),2500);
+      return ()=>clearTimeout(t);
+    }
+  },[syncStatus]);
   const [lastSync,    setLastSync]    = useState(()=>{ try{return localStorage.getItem("sbx_last_sync")||"";}catch(e){return "";} });
   const [editNotice,  setEditNotice]  = useState(null);
   const [addEvent,    setAddEvent]    = useState(false);
@@ -1213,12 +1227,15 @@ function App() {
                     color:noticeCat===cat?(CAT[cat]||{color:T.green}).color:T.l2,
                   }}>{cat}</button>
                 ))}
-                <button onClick={()=>setShowCatMgr(true)} style={{
-                  padding:"5px 10px", borderRadius:20, fontSize:12, fontWeight:600,
-                  border:"1px solid "+T.border1, cursor:"pointer", fontFamily:F,
-                  background:T.glass1, color:T.l3 }}>⚙</button>
               </div>
-              <ActionBtn onClick={()=>setAddNotice(true)}>+ 작성</ActionBtn>
+              <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                <button onClick={()=>setShowCatMgr(true)} style={{
+                  width:32, height:32, borderRadius:10, fontSize:14,
+                  border:"1px solid "+T.border1, cursor:"pointer", fontFamily:F,
+                  background:T.glass1, color:T.l3,
+                  display:"flex", alignItems:"center", justifyContent:"center" }}>⚙</button>
+                <ActionBtn onClick={()=>setAddNotice(true)}>+ 작성</ActionBtn>
+              </div>
             </div>
             <div style={{ ...glassBox({ overflow:"hidden",
               boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
