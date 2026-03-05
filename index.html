@@ -1035,29 +1035,71 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {/* 오늘 일정 요약 - 클릭 가능 버튼 */}
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                {/* 오늘 요약 - 숫자 + 미완료 할일 목록 */}
+                {/* 상단: 3개 통계 버튼 */}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
                   {[
-                    { val:todayEvents.length,                              label:"오늘 일정",     tab:"calendar", icon:"📅" },
-                    { val:(tasks||[]).filter(t=>!t.done).length+(roleTasks||[]).filter(t=>!t.done).length, label:"미완료 할일", tab:"tasks",    icon:"✅" },
-                    { val:unreadCount,                                     label:"읽지않은공지",  tab:"notices",  icon:"📢" },
+                    { val:todayEvents.length,   label:"오늘 일정",    tab:"calendar" },
+                    { val:unreadCount,           label:"읽지않은공지", tab:"notices"  },
                   ].map(function(item){ return (
                     <button key={item.label} onClick={()=>setTab(item.tab)}
                       style={{ background:"rgba(255,255,255,0.18)", borderRadius:12,
-                        padding:"10px 12px", flex:1, minWidth:72, border:"none", cursor:"pointer",
-                        textAlign:"left", transition:"background .15s",
-                        backdropFilter:"blur(8px)" }}
+                        padding:"8px 12px", flex:1, border:"none", cursor:"pointer",
+                        textAlign:"left", backdropFilter:"blur(8px)" }}
                       onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.28)"}
                       onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.18)"}>
-                      <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
+                      <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
                         {item.val}
                       </div>
-                      <div style={{ fontSize:11, color:"rgba(255,255,255,0.75)", fontFamily:F, marginTop:3, whiteSpace:"nowrap" }}>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:2 }}>
                         {item.label}
                       </div>
                     </button>
-                  ); })}
+                  );})}
                 </div>
+                {/* 미완료 할일 인라인 목록 */}
+                {(()=>{
+                  const todos = [
+                    ...(tasks||[]).filter(t=>!t.done).slice(0,3),
+                    ...(roleTasks||[]).filter(t=>!t.done).slice(0,2)
+                  ].slice(0,4);
+                  const totalCnt = (tasks||[]).filter(t=>!t.done).length + (roleTasks||[]).filter(t=>!t.done).length;
+                  return (
+                    <button onClick={()=>setTab("tasks")}
+                      style={{ width:"100%", background:"rgba(255,255,255,0.18)", borderRadius:12,
+                        padding:"10px 12px", border:"none", cursor:"pointer", textAlign:"left",
+                        backdropFilter:"blur(8px)" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.28)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.18)"}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: todos.length?6:0 }}>
+                        <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F }}>✅ 미완료 할일</div>
+                        <div style={{ fontSize:16, fontWeight:800, color:"#fff", fontFamily:F }}>{totalCnt}</div>
+                      </div>
+                      {todos.length===0
+                        ? <div style={{ fontSize:11, color:"rgba(255,255,255,0.6)", fontFamily:F }}>모두 완료했어요 🎉</div>
+                        : todos.map(function(t,i){ return (
+                          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:6,
+                            marginTop: i===0?0:4 }}>
+                            <div style={{ width:5, height:5, borderRadius:"50%",
+                              background:"rgba(255,255,255,0.6)", flexShrink:0 }}/>
+                            <div style={{ fontSize:12, color:"rgba(255,255,255,0.9)", fontFamily:F,
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>
+                              {t.text}
+                            </div>
+                            {t.dueDate && <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontFamily:F, flexShrink:0 }}>
+                              {t.dueDate.slice(5)}
+                            </div>}
+                          </div>
+                        );})
+                      }
+                      {totalCnt>4 && (
+                        <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontFamily:F, marginTop:4 }}>
+                          +{totalCnt-4}개 더 있어요
+                        </div>
+                      )}
+                    </button>
+                  );
+                })()}</div>
               </div>
             </div>
 
@@ -2656,7 +2698,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
             bar.slot=slot;
           });
           var maxSlot = weekBars.reduce(function(m,b){return Math.max(m,b.slot+1);},0);
-          var cellH = 34 + Math.min(maxSlot,2)*17;
+          var cellH = 34 + maxSlot*18;
 
           return (
             <div key={wi} style={{ position:"relative", marginBottom:2 }}>
@@ -2694,7 +2736,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
               {/* 이벤트 바 */}
               {weekBars.filter(function(b){return b.slot<2;}).map(function(bar,bi){
                 var meta = CAT[bar.ev.category] || { color:T.green };
-                var topOff = 34 + bar.slot*17;
+                var topOff = 34 + bar.slot*18;
                 var span = bar.colE - bar.colS + 1;
                 return (
                   <div key={bar.ev.id+"_"+wi+"_"+bi} style={{
