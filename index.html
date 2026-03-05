@@ -476,6 +476,8 @@ function App() {
   const [viewNotice,  setViewNotice]  = useState(null);
   const [addNotice,   setAddNotice]   = useState(false);
   const [aiChat,      setAiChat]      = useState(false);
+  const [showBriefing,setShowBriefing]= useState(false);
+  const [showQuiz,    setShowQuiz]    = useState(false);
   const [editNotice,  setEditNotice]  = useState(null);
   const [addEvent,    setAddEvent]    = useState(false);
   const [addTask,     setAddTask]     = useState(false);
@@ -831,8 +833,24 @@ function App() {
                   letterSpacing:1, marginBottom:6 }}>
                   {now.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
                 </div>
-                <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:14 }}>
-                  안녕하세요, {profile.name}님 👋
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                  <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F }}>
+                    안녕하세요, {profile.name}님 👋
+                  </div>
+                  <div style={{ display:"flex", gap:8, flexShrink:0, marginLeft:10 }}>
+                    <button onClick={()=>setShowBriefing(true)} style={{
+                      background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.3)",
+                      borderRadius:10, padding:"6px 11px", color:"#fff", fontSize:12,
+                      fontWeight:700, cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
+                      🤖 AI 요약
+                    </button>
+                    <button onClick={()=>setShowQuiz(true)} style={{
+                      background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.3)",
+                      borderRadius:10, padding:"6px 11px", color:"#fff", fontSize:12,
+                      fontWeight:700, cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
+                      📝 퀴즈
+                    </button>
+                  </div>
                 </div>
                 {/* 오늘 일정 요약 */}
                 <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
@@ -854,6 +872,40 @@ function App() {
                 </div>
               </div>
             </div>
+
+            {/* ── D-day 대시보드 ── */}
+            {(()=>{
+              const ddays = (events||[])
+                .filter(e => e.date >= todayStr())
+                .sort((a,b)=>a.date.localeCompare(b.date))
+                .slice(0,3)
+                .map(e=>{
+                  const diff = Math.ceil((new Date(e.date)-new Date(todayStr()))/(1000*60*60*24));
+                  return { ...e, diff };
+                });
+              if (!ddays.length) return null;
+              return (
+                <div style={{ display:"flex", gap:10, marginBottom:16, overflowX:"auto", paddingBottom:4 }}>
+                  {ddays.map(e=>{
+                    const meta = CAT[e.category]||{color:T.green};
+                    return (
+                      <div key={e.id} style={{ background:T.card, borderRadius:16, padding:"14px 16px",
+                        minWidth:130, flexShrink:0, boxShadow:"0 2px 16px rgba(30,57,50,0.08)",
+                        borderTop:"3px solid "+meta.color }}>
+                        <div style={{ fontSize:11, color:meta.color, fontWeight:700, fontFamily:F,
+                          marginBottom:4 }}>{e.category}</div>
+                        <div style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F,
+                          marginBottom:6, lineHeight:1.3 }}
+                          >{e.title.length>14?e.title.slice(0,13)+"…":e.title}</div>
+                        <div style={{ fontSize:22, fontWeight:900, color:meta.color, fontFamily:F, lineHeight:1 }}>
+                          {e.diff===0?"D-Day":"D-"+e.diff}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* ── 미니 캘린더 ── */}
             <div style={{ ...glassBox({ marginBottom:16, padding:"16px", overflow:"hidden" }) }}>
@@ -1267,6 +1319,8 @@ function App() {
       )}
 
       {aiChat&&<AIChatSheet onClose={()=>setAiChat(false)} notices={notices||[]}/>}
+      {showBriefing&&<AIBriefingSheet onClose={()=>setShowBriefing(false)} notices={notices||[]} events={events||[]}/>}
+      {showQuiz&&<AIQuizSheet onClose={()=>setShowQuiz(false)} notices={notices||[]}/>}
       {showCatMgr&&<CatManagerSheet onClose={()=>setShowCatMgr(false)} categories={categories} onSave={saveCategories}/>}
       {editNotice&&(
         <RichNoticeSheet
@@ -1591,6 +1645,318 @@ function CatManagerSheet({ onClose, categories, onSave }) {
 }
 
 /* ══════════════════ AI 공지 챗 ══════════════════ */
+/* ══════════════════ AI 브리핑 시트 ══════════════════ */
+function AIBriefingSheet({ onClose, notices, events }) {
+  const [status, setStatus] = useState("idle"); // idle | loading | done | error
+  const [briefing, setBriefing] = useState(null);
+
+  const run = async () => {
+    setStatus("loading");
+    let key = "";
+    try { key = localStorage.getItem("sbx_apikey")||""; } catch(e) {}
+    if (!key) { setStatus("error"); setBriefing({ error:"API 키가 없어요. 공지 탭 > AI 공지 검색에서 먼저 설정해주세요." }); return; }
+
+    const today = new Date().toISOString().slice(0,10);
+    const recentNotices = (notices||[]).slice(0,15).map(n=>
+      `[${n.date}][${n.category}] ${n.title}: ${(n.content||"").replace(/<[^>]+>/g,"").slice(0,200)}`
+    ).join("
+");
+    const upcomingEvents = (events||[])
+      .filter(e=>e.date>=today).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5)
+      .map(e=>`${e.date} ${e.title}(${e.category})`).join(", ");
+
+    const prompt = `당신은 스타벅스 매장 수퍼바이저 보조 AI입니다.
+아래 공지와 일정을 분석해서 오늘 파트너들이 반드시 알아야 할 핵심 내용을 브리핑해주세요.
+
+=== 최근 공지 ===
+${recentNotices}
+
+=== 다가오는 일정 ===
+${upcomingEvents || "없음"}
+
+다음 형식으로 정확히 JSON만 반환하세요 (마크다운 없이):
+{
+  "headline": "한 줄 요약 (20자 이내)",
+  "points": [
+    {"icon":"🗓","title":"제목","detail":"상세 내용 1-2줄","urgent":true},
+    {"icon":"📦","title":"제목","detail":"상세 내용 1-2줄","urgent":false},
+    {"icon":"👥","title":"제목","detail":"상세 내용 1-2줄","urgent":false}
+  ],
+  "tip": "오늘 파트너들에게 한마디"
+}`;
+
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key": key,
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
+        body: JSON.stringify({
+          model:"claude-haiku-4-5-20251001", max_tokens:800,
+          messages:[{ role:"user", content:prompt }]
+        })
+      });
+      if (!resp.ok) throw new Error("API "+resp.status);
+      const data = await resp.json();
+      const text = data.content?.map(b=>b.text||"").join("").trim();
+      const json = JSON.parse(text.replace(/```json|```/g,"").trim());
+      setBriefing(json);
+      setStatus("done");
+    } catch(e) {
+      setStatus("error");
+      setBriefing({ error:"브리핑 생성 중 오류가 발생했어요: "+e.message });
+    }
+  };
+
+  useEffect(()=>{ run(); }, []);
+
+  return (
+    <Sheet title="🤖 AI 오늘의 브리핑" onClose={onClose} full>
+      {status==="loading" && (
+        <div style={{ textAlign:"center", padding:"40px 0" }}>
+          <div style={{ fontSize:40, marginBottom:12, animation:"spin 1.5s linear infinite", display:"inline-block" }}>⚙️</div>
+          <div style={{ fontSize:14, color:T.l2, fontFamily:F }}>공지를 분석중이에요...</div>
+        </div>
+      )}
+      {status==="error" && (
+        <div style={{ background:T.redDim, borderRadius:14, padding:16, marginBottom:12 }}>
+          <div style={{ fontSize:13, color:T.red, fontFamily:F }}>{briefing?.error}</div>
+        </div>
+      )}
+      {status==="done" && briefing && (
+        <div>
+          {/* 헤드라인 */}
+          <div style={{ background:"linear-gradient(135deg,#00704A,#1E3932)", borderRadius:16,
+            padding:"18px 20px", marginBottom:16, color:"#fff" }}>
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", fontFamily:F, marginBottom:4 }}>오늘의 핵심</div>
+            <div style={{ fontSize:18, fontWeight:800, fontFamily:F }}>{briefing.headline}</div>
+          </div>
+          {/* 포인트들 */}
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
+            {(briefing.points||[]).map(function(p,i){
+              return (
+                <div key={i} style={{ background:T.card, borderRadius:14,
+                  padding:"14px 16px", border:"1px solid "+(p.urgent?"rgba(212,53,28,0.2)":T.border0),
+                  boxShadow:"0 2px 12px rgba(30,57,50,0.06)",
+                  borderLeft:"4px solid "+(p.urgent?T.red:T.green) }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                    <span style={{ fontSize:18 }}>{p.icon}</span>
+                    <span style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F }}>{p.title}</span>
+                    {p.urgent && <span style={{ fontSize:10, background:T.redDim, color:T.red,
+                      borderRadius:6, padding:"2px 7px", fontWeight:700, fontFamily:F }}>긴급</span>}
+                  </div>
+                  <div style={{ fontSize:13, color:T.l2, fontFamily:F, lineHeight:1.6, paddingLeft:26 }}>
+                    {p.detail}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 팁 */}
+          {briefing.tip && (
+            <div style={{ background:T.greenLight, borderRadius:14, padding:"13px 16px",
+              border:"1px solid "+T.greenBorder, marginBottom:16 }}>
+              <div style={{ fontSize:11, color:T.green, fontWeight:700, fontFamily:F, marginBottom:3 }}>💡 오늘의 팁</div>
+              <div style={{ fontSize:13, color:T.l1, fontFamily:F, lineHeight:1.6 }}>{briefing.tip}</div>
+            </div>
+          )}
+          <button onClick={run} style={{ width:"100%", padding:"12px", borderRadius:12, border:"1px solid "+T.border1,
+            background:T.card, color:T.l2, fontSize:13, cursor:"pointer", fontFamily:F, fontWeight:600 }}>
+            🔄 다시 생성
+          </button>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/* ══════════════════ AI 퀴즈 시트 ══════════════════ */
+function AIQuizSheet({ onClose, notices }) {
+  const [status,  setStatus]  = useState("idle");
+  const [quizzes, setQuizzes] = useState([]);
+  const [current, setCurrent] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [showResult, setShowResult] = useState(false);
+
+  const run = async () => {
+    setStatus("loading");
+    setAnswers({}); setCurrent(0); setShowResult(false);
+    let key = "";
+    try { key = localStorage.getItem("sbx_apikey")||""; } catch(e) {}
+    if (!key) { setStatus("error"); return; }
+
+    const recentNotices = (notices||[]).slice(0,12).map(n=>
+      `[${n.category}] ${n.title}: ${(n.content||"").replace(/<[^>]+>/g,"").slice(0,250)}`
+    ).join("
+");
+
+    const prompt = `다음 스타벅스 매장 공지들을 바탕으로 파트너가 꼭 알아야 할 내용으로 퀴즈 5개를 만들어주세요.
+
+=== 공지 ===
+${recentNotices}
+
+JSON만 반환하세요(마크다운 없이):
+[
+  {
+    "q": "질문 내용",
+    "options": ["선택지A","선택지B","선택지C","선택지D"],
+    "answer": 0,
+    "explanation": "정답 해설 1-2줄"
+  }
+]
+answer는 0부터 시작하는 정답 인덱스입니다.`;
+
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key": key,
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
+        body: JSON.stringify({
+          model:"claude-haiku-4-5-20251001", max_tokens:1500,
+          messages:[{ role:"user", content:prompt }]
+        })
+      });
+      if (!resp.ok) throw new Error("API "+resp.status);
+      const data = await resp.json();
+      const text = data.content?.map(b=>b.text||"").join("").trim();
+      const json = JSON.parse(text.replace(/```json|```/g,"").trim());
+      setQuizzes(json);
+      setStatus("done");
+    } catch(e) {
+      setStatus("error");
+    }
+  };
+
+  useEffect(()=>{ run(); }, []);
+
+  const score = quizzes.length ? quizzes.filter((q,i)=>answers[i]===q.answer).length : 0;
+  const q = quizzes[current];
+  const answered = answers[current] !== undefined;
+  const isCorrect = answered && answers[current] === q?.answer;
+
+  return (
+    <Sheet title="📝 공지 퀴즈" onClose={onClose} tall>
+      {status==="loading" && (
+        <div style={{ textAlign:"center", padding:"40px 0" }}>
+          <div style={{ fontSize:40, marginBottom:12, animation:"spin 1.5s linear infinite", display:"inline-block" }}>⚙️</div>
+          <div style={{ fontSize:14, color:T.l2, fontFamily:F }}>퀴즈를 만들고 있어요...</div>
+        </div>
+      )}
+      {status==="error" && (
+        <div style={{ textAlign:"center", padding:24 }}>
+          <div style={{ fontSize:14, color:T.red, fontFamily:F, marginBottom:12 }}>
+            퀴즈 생성 실패. API 키를 확인해주세요.
+          </div>
+          <button onClick={run} style={{ padding:"10px 20px", borderRadius:10, border:"none",
+            background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontWeight:700 }}>다시 시도</button>
+        </div>
+      )}
+      {status==="done" && !showResult && q && (
+        <div>
+          {/* 진행바 */}
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8, alignItems:"center" }}>
+            <span style={{ fontSize:12, color:T.l3, fontFamily:F }}>{current+1} / {quizzes.length}</span>
+            <span style={{ fontSize:12, color:T.green, fontFamily:F, fontWeight:700 }}>
+              {Object.keys(answers).filter(i=>answers[i]===quizzes[i]?.answer).length}개 정답
+            </span>
+          </div>
+          <div style={{ height:4, background:T.border0, borderRadius:4, marginBottom:20 }}>
+            <div style={{ height:4, width:((current+1)/quizzes.length*100)+"%",
+              background:"linear-gradient(90deg,"+T.green+",#1E3932)",
+              borderRadius:4, transition:"width .3s" }}/>
+          </div>
+          {/* 질문 */}
+          <div style={{ background:T.card, borderRadius:16, padding:"18px 18px",
+            marginBottom:16, boxShadow:"0 2px 16px rgba(30,57,50,0.08)" }}>
+            <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, lineHeight:1.6 }}>
+              Q{current+1}. {q.q}
+            </div>
+          </div>
+          {/* 선택지 */}
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
+            {q.options.map(function(opt,i){
+              const sel = answers[current]===i;
+              const correct = i===q.answer;
+              let bg = T.card, border = T.border0, col = T.l1;
+              if (answered) {
+                if (correct)        { bg="#E8F7EE"; border=T.green; col=T.green; }
+                else if (sel)       { bg="#FEE8E8"; border=T.red;   col=T.red;   }
+              } else if (sel)       { bg=T.greenLight; border=T.green; }
+              return (
+                <button key={i} disabled={answered}
+                  onClick={()=>{ setAnswers(prev=>({...prev,[current]:i})); }}
+                  style={{ background:bg, border:"1.5px solid "+border, borderRadius:12,
+                    padding:"13px 16px", textAlign:"left", cursor:answered?"default":"pointer",
+                    color:col, fontSize:14, fontFamily:F, fontWeight:sel||correct&&answered?700:400,
+                    transition:"all .15s", display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ width:22, height:22, borderRadius:"50%",
+                    background:answered&&correct?T.green:answered&&sel?T.red:T.border0,
+                    color:answered&&(correct||sel)?"#fff":T.l3,
+                    display:"inline-flex", alignItems:"center", justifyContent:"center",
+                    fontSize:11, fontWeight:700, flexShrink:0 }}>
+                    {answered&&correct?"✓":answered&&sel?"✗":["A","B","C","D"][i]}
+                  </span>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+          {/* 해설 */}
+          {answered && (
+            <div style={{ background:isCorrect?"#E8F7EE":"#FEE8E8", borderRadius:12,
+              padding:"12px 16px", marginBottom:16,
+              border:"1px solid "+(isCorrect?T.green:T.red) }}>
+              <div style={{ fontSize:13, fontWeight:700, color:isCorrect?T.green:T.red,
+                fontFamily:F, marginBottom:4 }}>{isCorrect?"✓ 정답!":"✗ 오답"}</div>
+              <div style={{ fontSize:12, color:T.l2, fontFamily:F, lineHeight:1.6 }}>{q.explanation}</div>
+            </div>
+          )}
+          {/* 다음/완료 버튼 */}
+          {answered && (
+            <GreenBtn full onClick={()=>{
+              if (current < quizzes.length-1) { setCurrent(c=>c+1); }
+              else { setShowResult(true); }
+            }}>
+              {current < quizzes.length-1 ? "다음 문제 →" : "결과 보기"}
+            </GreenBtn>
+          )}
+        </div>
+      )}
+      {/* 결과 화면 */}
+      {showResult && (
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:60, marginBottom:12 }}>
+            {score===quizzes.length?"🏆":score>=3?"🌟":"📚"}
+          </div>
+          <div style={{ fontSize:24, fontWeight:800, color:T.l1, fontFamily:F, marginBottom:4 }}>
+            {score} / {quizzes.length} 정답
+          </div>
+          <div style={{ fontSize:14, color:T.l2, fontFamily:F, marginBottom:24 }}>
+            {score===quizzes.length?"완벽해요! 모든 내용을 숙지했어요 👏":
+             score>=3?"잘 했어요! 틀린 내용을 한번 더 확인해보세요":
+             "공지를 다시 한번 읽어보는 게 좋을 것 같아요 📖"}
+          </div>
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={run} style={{ flex:1, padding:"13px", borderRadius:12,
+              border:"1px solid "+T.border1, background:T.card, color:T.l2,
+              fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:600 }}>🔄 다시 풀기</button>
+            <button onClick={onClose} style={{ flex:1, padding:"13px", borderRadius:12,
+              border:"none", background:"linear-gradient(135deg,#00704A,#1E3932)", color:"#fff",
+              fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:700 }}>완료</button>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function AIChatSheet({ onClose, notices }) {
   const [messages, setMessages] = useState([
     { role:"assistant", text:"안녕하세요! 공지 내용에 대해 질문하거나 검색해보세요 😊" }
