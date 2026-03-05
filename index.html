@@ -237,10 +237,12 @@ const GistSync = {
   _timer: null,
   autoPush: () => {
     clearTimeout(GistSync._timer);
-    GistSync._timer = setTimeout(()=>{
-      if(GistSync.getToken() && GistSync.getGistId()) {
-        GistSync.push().catch(()=>{});
+    GistSync._timer = setTimeout(async ()=>{
+      if(!GistSync.getToken()) return;
+      if(!GistSync.getGistId()) {
+        await GistSync.findExisting().catch(()=>{});
       }
+      GistSync.push().catch(()=>{});
     }, 2000);
   }
 };
@@ -256,7 +258,7 @@ function useShared(key, seed) {
     })();
   }, [key]);
   const save = useCallback(async (next) => {
-    const val = typeof next === "function" ? next(data) : next;
+    const val = typeof next === "function" ? next(data||seed) : next;
     setData(val);
     try { await window.storage.set(key, JSON.stringify(val), true); } catch {}
     GistSync.autoPush();
@@ -551,7 +553,12 @@ function App() {
 
   // ── Gist 자동 pull (앱 시작시 + 2분마다) ──
   const doPull = useCallback(async (silent=true) => {
-    if (!GistSync.getToken() || !GistSync.getGistId()) return;
+    if (!GistSync.getToken()) return;
+    // Gist ID 없으면 먼저 탐색
+    if (!GistSync.getGistId()) {
+      const found = await GistSync.findExisting().catch(()=>null);
+      if (!found) return; // 연결된 Gist 없음
+    }
     if (!silent) setSyncStatus("syncing");
     try {
       // 변경 감지용: pull 전 스냅샷
@@ -698,10 +705,10 @@ function App() {
   const submitNoticeRich = (data) => {
     if (!data.title.trim()) return;
     const now_id = Date.now();
-    saveNotices(p=>[{ id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" }, ...p]);
+    saveNotices(p=>[{ id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" }, ...(p||[])]);
     // 날짜 입력 시 캘린더에 자동 추가
     if (data.noticeDate) {
-      saveEvents(p=>[...p, {
+      saveEvents(p=>[...(p||[]), {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
         endDate:data.noticeEndDate||"", category:data.category, memo:"공지 연동"
       }].sort((a,b)=>a.date.localeCompare(b.date)));
