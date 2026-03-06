@@ -1000,7 +1000,8 @@ function App() {
             {/* ─── 브리핑 카드 ─── */}
             <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
               borderRadius:20, padding:"20px", marginBottom:16, position:"relative",
-              overflow:"hidden" }}>
+              overflow:"hidden",
+              maxWidth:isPC?"560px":"unset" }}>
               <div style={{ position:"absolute", right:-30, top:-30, width:120, height:120,
                 borderRadius:"50%", background:"rgba(255,255,255,0.06)" }}/>
               <div style={{ position:"absolute", right:30, bottom:-40, width:80, height:80,
@@ -2762,7 +2763,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
               </div>
 
               {/* 이벤트 바 */}
-              {weekBars.filter(function(b){return b.slot<2;}).map(function(bar,bi){
+              {weekBars.map(function(bar,bi){
                 var meta = CAT[bar.ev.category] || { color:T.green };
                 var topOff = 34 + bar.slot*18;
                 var span = bar.colE - bar.colS + 1;
