@@ -995,37 +995,30 @@ function App() {
 
         {/* ── HOME ── */}
         {tab==="home"&&(
-          <div style={{ padding:isPC?"24px 28px":"16px",
-            display:isPC?"grid":"block",
-            gridTemplateColumns:isPC?"1fr 1fr":"unset",
-            gap:isPC?"24px":"0",
-            alignItems:"start" }} className="fi">
+          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
 
-            {/* ── 왼쪽 컬럼 (브리핑/D-day/캘린더) ── */}
-            <div>
-            {/* ── 오늘 브리핑 카드 ── */}
+            {/* ─── 브리핑 카드 ─── */}
             <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-              borderRadius:20, padding:"22px 20px", marginBottom:16, position:"relative", overflow:"hidden" }}>
-              {/* 배경 원 장식 */}
-              <div style={{ position:"absolute", right:-30, top:-30, width:140, height:140,
+              borderRadius:20, padding:"20px", marginBottom:16, position:"relative",
+              overflow:"hidden" }}>
+              <div style={{ position:"absolute", right:-30, top:-30, width:120, height:120,
                 borderRadius:"50%", background:"rgba(255,255,255,0.06)" }}/>
-              <div style={{ position:"absolute", right:30, bottom:-40, width:100, height:100,
+              <div style={{ position:"absolute", right:30, bottom:-40, width:80, height:80,
                 borderRadius:"50%", background:"rgba(255,255,255,0.04)" }}/>
               <div style={{ position:"relative", zIndex:1 }}>
-                <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", fontFamily:F,
-                  letterSpacing:1, marginBottom:6 }}>
-                  {now.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
+                <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", fontFamily:F, marginBottom:4 }}>
+                  {new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
                 </div>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
-                  <div style={{ fontSize:22, fontWeight:800, color:"#fff", fontFamily:F }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                  <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F }}>
                     안녕하세요, {profile.name}님 👋
                   </div>
-                  <div style={{ display:"flex", gap:8, flexShrink:0, marginLeft:10 }}>
-                    <button onClick={()=>setShowBriefing(true)} style={{
+                  <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                    <button onClick={()=>setShowAIBriefing(true)} style={{
                       background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.3)",
                       borderRadius:10, padding:"6px 11px", color:"#fff", fontSize:12,
                       fontWeight:700, cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
-                      🤖 AI 요약
+                      🔍 AI브리핑
                     </button>
                     <button onClick={()=>setShowQuiz(true)} style={{
                       background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.3)",
@@ -1035,245 +1028,277 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {/* 오늘 요약 - 숫자 + 미완료 할일 목록 */}
-                {/* 상단: 3개 통계 버튼 */}
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
-                  {[
-                    { val:todayEvents.length,   label:"오늘 일정",    tab:"calendar" },
-                    { val:unreadCount,           label:"읽지않은공지", tab:"notices"  },
-                  ].map(function(item){ return (
-                    <button key={item.label} onClick={()=>setTab(item.tab)}
-                      style={{ background:"rgba(255,255,255,0.18)", borderRadius:12,
-                        padding:"8px 12px", flex:1, border:"none", cursor:"pointer",
-                        textAlign:"left", backdropFilter:"blur(8px)" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.28)"}
-                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.18)"}>
-                      <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
-                        {item.val}
-                      </div>
-                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:2 }}>
-                        {item.label}
-                      </div>
-                    </button>
-                  );})}
-                </div>
-                {/* 미완료 할일 인라인 목록 */}
-                {(()=>{
-                  const todos = [
-                    ...(tasks||[]).filter(t=>!t.done).slice(0,3),
-                    ...(roleTasks||[]).filter(t=>!t.done).slice(0,2)
-                  ].slice(0,4);
-                  const totalCnt = (tasks||[]).filter(t=>!t.done).length + (roleTasks||[]).filter(t=>!t.done).length;
-                  return (
-                    <button onClick={()=>setTab("tasks")}
-                      style={{ width:"100%", background:"rgba(255,255,255,0.18)", borderRadius:12,
-                        padding:"10px 12px", border:"none", cursor:"pointer", textAlign:"left",
-                        backdropFilter:"blur(8px)" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.28)"}
-                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.18)"}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: todos.length?6:0 }}>
-                        <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F }}>✅ 미완료 할일</div>
-                        <div style={{ fontSize:16, fontWeight:800, color:"#fff", fontFamily:F }}>{totalCnt}</div>
-                      </div>
-                      {todos.length===0
-                        ? <div style={{ fontSize:11, color:"rgba(255,255,255,0.6)", fontFamily:F }}>모두 완료했어요 🎉</div>
-                        : todos.map(function(t,i){ return (
-                          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:6,
-                            marginTop: i===0?0:4 }}>
-                            <div style={{ width:5, height:5, borderRadius:"50%",
-                              background:"rgba(255,255,255,0.6)", flexShrink:0 }}/>
-                            <div style={{ fontSize:12, color:"rgba(255,255,255,0.9)", fontFamily:F,
-                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>
-                              {t.text}
-                            </div>
-                            {t.dueDate && <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontFamily:F, flexShrink:0 }}>
-                              {t.dueDate.slice(5)}
-                            </div>}
-                          </div>
-                        );})
-                      }
-                      {totalCnt>4 && (
-                        <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontFamily:F, marginTop:4 }}>
-                          +{totalCnt-4}개 더 있어요
-                        </div>
-                      )}
-                    </button>
-                  );
-                })()}</div>
-              </div>
-            </div>
 
-            
-            {/* ── 미니 캘린더 ── */}
-            <div style={{ ...glassBox({ marginBottom:16, padding:"16px", overflow:"hidden" }) }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-                <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>
-                  {calDate.toLocaleDateString("ko-KR",{month:"long"})} 일정
-                </span>
-                <button onClick={()=>setTab("calendar")} style={{ background:"none", border:"none",
-                  color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>
-                  전체보기 →
-                </button>
-              </div>
-              {/* 미니 캘린더 그리드 */}
-              <div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:4 }}>
-                  {["일","월","화","수","목","금","토"].map(function(w,i){
-                    return (
-                      <div key={w} style={{ textAlign:"center", fontSize:10, fontWeight:600,
-                        color:i===0?T.red:i===6?T.blue:T.l3, fontFamily:F, padding:"2px 0" }}>{w}</div>
-                    );
-                  })}
+                {/* 통계 버튼 행 */}
+                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                  <button onClick={()=>setTab("calendar")} style={{
+                    flex:1, background:"rgba(255,255,255,0.18)", borderRadius:12,
+                    padding:"8px 10px", border:"none", cursor:"pointer", textAlign:"left" }}>
+                    <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
+                      {todayEvents.length}
+                    </div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:2 }}>
+                      오늘 일정
+                    </div>
+                  </button>
+                  <button onClick={()=>setTab("notices")} style={{
+                    flex:1, background:"rgba(255,255,255,0.18)", borderRadius:12,
+                    padding:"8px 10px", border:"none", cursor:"pointer", textAlign:"left" }}>
+                    <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F, lineHeight:1 }}>
+                      {unreadCount}
+                    </div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F, marginTop:2 }}>
+                      읽지않은공지
+                    </div>
+                  </button>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
-                  {miniDays.map(function(day,i){
-                    if(!day) return <div key={"e"+i}/>;
-                    const dStr=cY2+"-"+String(cM2+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
-                    const isTod=dStr===todayStr();
-                    const isSel=dStr===selDay;
-                    const hasEv=mEvs.some(function(e){ return dStr>=e.date&&dStr<=(e.endDate||e.date); });
-                    const isWeekend=i%7===0||i%7===6;
-                    const dayCol=isTod?"#fff":isSel?T.green:i%7===0?T.red:i%7===6?T.blue:T.l1;
-                    return (
-                      <div key={day} onClick={function(){setSelDay(dStr);}}
-                        style={{ textAlign:"center", padding:"5px 0", borderRadius:8, cursor:"pointer",
-                          background:isTod?"#00704A":isSel?T.greenLight:"transparent",
-                          transition:"background .15s" }}>
-                        <span style={{ fontSize:12, fontWeight:isTod||isSel?700:400,
-                          color:dayCol, fontFamily:F }}>{day}</span>
-                        {hasEv&&!isTod&&(
-                          <div style={{ width:4, height:4, borderRadius:"50%", background:T.green,
-                            margin:"1px auto 0" }}/>
+
+                {/* 미완료 할일 목록 버튼 */}
+                <button onClick={()=>setTab("tasks")} style={{
+                  width:"100%", background:"rgba(255,255,255,0.18)", borderRadius:12,
+                  padding:"10px 12px", border:"none", cursor:"pointer", textAlign:"left" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    marginBottom:6 }}>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.7)", fontFamily:F }}>
+                      ✅ 미완료 할일
+                    </div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"#fff", fontFamily:F }}>
+                      {(tasks||[]).filter(t=>!t.done).length+(roleTasks||[]).filter(t=>!t.done).length}
+                    </div>
+                  </div>
+                  {(tasks||[]).filter(t=>!t.done).length===0 && (roleTasks||[]).filter(t=>!t.done).length===0
+                    ? <div style={{ fontSize:11, color:"rgba(255,255,255,0.6)", fontFamily:F }}>모두 완료했어요 🎉</div>
+                    : (
+                      <div>
+                        {(tasks||[]).filter(t=>!t.done).slice(0,3).map(function(t){
+                          return (
+                            <div key={t.id} style={{ display:"flex", alignItems:"center", gap:5, marginBottom:3 }}>
+                              <div style={{ width:4, height:4, borderRadius:"50%", background:"rgba(255,255,255,0.6)", flexShrink:0 }}/>
+                              <div style={{ fontSize:12, color:"rgba(255,255,255,0.9)", fontFamily:F,
+                                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                {t.text}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(roleTasks||[]).filter(t=>!t.done).slice(0,2).map(function(t){
+                          return (
+                            <div key={t.id} style={{ display:"flex", alignItems:"center", gap:5, marginBottom:3 }}>
+                              <div style={{ width:4, height:4, borderRadius:"50%", background:"rgba(255,255,255,0.4)", flexShrink:0 }}/>
+                              <div style={{ fontSize:12, color:"rgba(255,255,255,0.7)", fontFamily:F,
+                                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                {t.text}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(tasks||[]).filter(t=>!t.done).length+(roleTasks||[]).filter(t=>!t.done).length>4 && (
+                          <div style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontFamily:F, marginTop:2 }}>
+                            +{(tasks||[]).filter(t=>!t.done).length+(roleTasks||[]).filter(t=>!t.done).length-4}개 더 있어요
+                          </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-              {/* 선택날짜 이벤트 */}
-              {selDayEventsHome.length===0 ? (
-                <div style={{ marginTop:12, padding:"10px 0", textAlign:"center",
-                  color:T.l3, fontSize:13, fontFamily:F }}>
-                  {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})} · 일정 없음
-                </div>
-              ) : (
-                <div style={{ marginTop:12 }}>
-                  <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:6 }}>
-                    {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}
-                  </div>
-                  {selDayEventsHome.slice(0,3).map(function(e){
-                    const meta=CAT[e.category]||{color:T.green};
-                    return (
-                      <div key={e.id} style={{ display:"flex", alignItems:"center", gap:8,
-                        padding:"6px 0", borderTop:"1px solid "+T.border0 }}>
-                        <div style={{ width:8, height:8, borderRadius:"50%",
-                          background:meta.color, flexShrink:0 }}/>
-                        <span style={{ fontSize:13, color:T.l1, fontFamily:F, flex:1,
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {e.title}
-                        </span>
-                        <span style={{ fontSize:11, color:T.l3, fontFamily:F }}>{e.category}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            </div>
-            {/* ── 왼쪽 컬럼 끝 ── */}
-
-            {/* ── 오른쪽 컬럼 (공지/할일/동기화) ── */}
-            <div>
-            {/* ── 고정 공지 ── */}
-            <SecHead title="📌 고정 공지" onMore={()=>setTab("notices")}/>
-            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16 }) }}>
-              {pinnedN.length===0 ? <EmptyRow text="고정 공지 없음"/>
-                : pinnedN.map((n,i)=>(
-                  <div key={n.id}>
-                    <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);setTab("notices");}}/>
-                    {i<pinnedN.length-1&&<Sep/>}
-                  </div>
-                ))}
-            </div>
-
-            {/* ── 오늘 할일 (통합) ── */}
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-              <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>✅ 미완료 할일</span>
-              <div style={{ display:"flex", gap:8 }}>
-                <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
-                <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
-                  color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>전체보기</button>
+                    )
+                  }
+                </button>
               </div>
             </div>
-            <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20 }) }}>
-              {(tasks||[]).filter(t=>!t.done).length===0 && (roleTasks||[]).filter(t=>!t.done).length===0
-                ? <EmptyRow text="미완료 할일 없음 🎉"/>
-                : <>
-                    {(tasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
-                      <div key={t.id}>
-                        <TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>
-                        {i<arr.length-1&&<Sep/>}
-                      </div>
-                    ))}
-                    {(tasks||[]).filter(t=>!t.done).length>0 && (roleTasks||[]).filter(t=>!t.done).length>0 && (
-                      <div style={{ padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}>
-                        <div style={{ flex:1, height:1, background:T.border0 }}/>
-                        <span style={{ fontSize:11, color:T.l4, fontFamily:F }}>팀 공유</span>
-                        <div style={{ flex:1, height:1, background:T.border0 }}/>
-                      </div>
-                    )}
-                    {(roleTasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
-                      <div key={t.id}>
-                        <TRow t={t} onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
-                        {i<arr.length-1&&<Sep/>}
-                      </div>
-                    ))}
-                  </>
-              }
-            </div>
 
-            {/* ── 모바일 동기화 ── */}
-            {!isPC && (
-              <div style={{ ...glassBox({ padding:"14px 16px", marginBottom:20 }) }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                  <span style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F }}>
-                    {gistToken && gistId ? "🔄 자동 동기화" : "💾 데이터 동기화"}
-                  </span>
-                  {gistToken && gistId && lastSync && (
-                    <span style={{ fontSize:11, color:T.green, fontFamily:F }}>✓ {lastSync}</span>
+            {/* ─── PC: 2컬럼 그리드 레이아웃 ─── */}
+            <div style={{ display:isPC?"grid":"block", gridTemplateColumns:"1fr 1fr",
+              gap:isPC?"20px":"0", alignItems:"start" }}>
+
+              {/* 왼쪽: 미니 캘린더 */}
+              <div>
+                <div style={{ ...glassBox({ marginBottom:0, padding:"16px", overflow:"hidden" }) }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    marginBottom:12 }}>
+                    <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>
+                      {calDate.toLocaleDateString("ko-KR",{month:"long"})} 일정
+                    </span>
+                    <button onClick={()=>setTab("calendar")} style={{ background:"none", border:"none",
+                      color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+                      전체보기 →
+                    </button>
+                  </div>
+                  <div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:4 }}>
+                      {["일","월","화","수","목","금","토"].map(function(w,wi){
+                        return (
+                          <div key={w} style={{ textAlign:"center", fontSize:10, fontWeight:600,
+                            color:wi===0?T.red:wi===6?T.blue:T.l3, fontFamily:F, padding:"2px 0" }}>
+                            {w}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+                      {miniDays.map(function(day,mi){
+                        if(!day) return <div key={"e"+mi}/>;
+                        var dStr=cY2+"-"+String(cM2+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+                        var isTod=dStr===todayStr();
+                        var isSel=dStr===selDay;
+                        var hasEv=mEvs.some(function(e){ return dStr>=e.date&&dStr<=(e.endDate||e.date); });
+                        var dayCol=isTod?"#fff":isSel?T.green:mi%7===0?T.red:mi%7===6?T.blue:T.l1;
+                        return (
+                          <div key={day} onClick={function(){ setSelDay(dStr); }}
+                            style={{ textAlign:"center", padding:"5px 0", borderRadius:8, cursor:"pointer",
+                              background:isTod?"#00704A":isSel?T.greenLight:"transparent",
+                              transition:"background .15s" }}>
+                            <span style={{ fontSize:12, fontWeight:(isTod||isSel)?700:400,
+                              color:dayCol, fontFamily:F }}>
+                              {day}
+                            </span>
+                            {hasEv && !isTod && (
+                              <div style={{ width:4, height:4, borderRadius:"50%", background:T.green,
+                                margin:"1px auto 0" }}/>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {selDayEventsHome.length===0 ? (
+                    <div style={{ marginTop:12, padding:"10px 0", textAlign:"center",
+                      color:T.l3, fontSize:13, fontFamily:F }}>
+                      {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})} 일정 없음
+                    </div>
+                  ) : (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:6 }}>
+                        {new Date(selDay+"T00:00:00").toLocaleDateString("ko-KR",{month:"long",day:"numeric"})} 일정
+                      </div>
+                      {selDayEventsHome.slice(0,3).map(function(e){
+                        var meta=CAT[e.category]||{color:T.green};
+                        return (
+                          <div key={e.id} style={{ display:"flex", alignItems:"center", gap:8,
+                            padding:"6px 0", borderTop:"1px solid "+T.border0 }}>
+                            <div style={{ width:8, height:8, borderRadius:"50%",
+                              background:meta.color, flexShrink:0 }}/>
+                            <span style={{ fontSize:13, color:T.l1, fontFamily:F, flex:1,
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {e.title}
+                            </span>
+                            <span style={{ fontSize:11, color:T.l3, fontFamily:F }}>
+                              {e.category}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-                {gistToken && gistId ? (
+              </div>
+
+              {/* 오른쪽: 고정 공지 + 미완료 할일 */}
+              <div style={{ marginTop:isPC?"0":"16px" }}>
+                <SecHead title="📌 고정 공지" onMore={()=>setTab("notices")}/>
+                <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16 }) }}>
+                  {pinnedN.length===0 ? <EmptyRow text="고정 공지 없음"/>
+                    : pinnedN.map(function(n,ni){
+                      return (
+                        <div key={n.id}>
+                          <NRow n={n} onClick={function(){ readNotice(n.id); setViewNotice(n); setTab("notices"); }}/>
+                          {ni<pinnedN.length-1&&<Sep/>}
+                        </div>
+                      );
+                    })}
+                </div>
+
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                  marginBottom:10 }}>
+                  <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>
+                    ✅ 미완료 할일
+                  </span>
                   <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>doPull(false)} style={{ flex:1, padding:"9px 0", borderRadius:9, border:"none",
-                      background:"linear-gradient(135deg,"+T.green+",#1E3932)", color:"#fff",
-                      fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:700 }}>⬇ 불러오기</button>
-                    <button onClick={async()=>{ setSyncStatus("syncing"); try{ await GistSync.push();
-                          const t=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
-                          localStorage.setItem("sbx_last_sync",t); setLastSync(t); setSyncStatus("ok");
-                        }catch(e){setSyncStatus("error");} }}
-                      style={{ flex:1, padding:"9px 0", borderRadius:9, border:"1px solid "+T.border1,
-                        background:T.card, color:T.green, fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                      ⬆ 업로드</button>
-                    <button onClick={()=>setShowGistSetup(true)} style={{ padding:"9px 12px", borderRadius:9,
-                      border:"1px solid "+T.border1, background:T.card, color:T.l3, fontSize:13,
-                      cursor:"pointer", fontFamily:F }}>⚙</button>
+                    <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
+                    <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
+                      color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+                      전체보기
+                    </button>
                   </div>
-                ) : (
-                  <button onClick={()=>setShowGistSetup(true)} style={{ width:"100%", padding:"10px 0",
-                    borderRadius:10, border:"none", background:"linear-gradient(135deg,"+T.green+",#1E3932)",
-                    color:"#fff", fontSize:13, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                    🔗 자동 동기화 설정하기
-                  </button>
+                </div>
+                <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20 }) }}>
+                  {(tasks||[]).filter(t=>!t.done).length===0 && (roleTasks||[]).filter(t=>!t.done).length===0
+                    ? <EmptyRow text="미완료 할일 없음 🎉"/>
+                    : (
+                      <div>
+                        {(tasks||[]).filter(t=>!t.done).map(function(t,ti,arr){
+                          return (
+                            <div key={t.id}>
+                              <TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>
+                              {ti<arr.length-1&&<Sep/>}
+                            </div>
+                          );
+                        })}
+                        {(tasks||[]).filter(t=>!t.done).length>0 && (roleTasks||[]).filter(t=>!t.done).length>0 && (
+                          <div style={{ padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}>
+                            <div style={{ flex:1, height:1, background:T.border0 }}/>
+                            <span style={{ fontSize:11, color:T.l4, fontFamily:F }}>팀 공유</span>
+                            <div style={{ flex:1, height:1, background:T.border0 }}/>
+                          </div>
+                        )}
+                        {(roleTasks||[]).filter(t=>!t.done).map(function(t,ti,arr){
+                          return (
+                            <div key={t.id}>
+                              <TRow t={t} onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
+                              {ti<arr.length-1&&<Sep/>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
+                  }
+                </div>
+
+                {/* 모바일 동기화 */}
+                {!isPC && (
+                  <div style={{ marginBottom:16 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.l2, fontFamily:F, marginBottom:8 }}>
+                      🔗 자동 동기화
+                    </div>
+                    {GistSync.getToken() ? (
+                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={()=>doPull(false)} style={{
+                            flex:1, padding:"9px 0", borderRadius:9, border:"none",
+                            background:T.green, color:"#fff", fontSize:12, cursor:"pointer",
+                            fontFamily:F, fontWeight:700 }}>
+                            ⬇ 가져오기
+                          </button>
+                          <button onClick={async()=>{ setSyncStatus("syncing"); try{ await GistSync.push(); setSyncStatus("ok"); }catch(e){ setSyncStatus("error"); } }} style={{
+                            flex:1, padding:"9px 0", borderRadius:9, border:"none",
+                            background:T.card, color:T.green, fontSize:12, cursor:"pointer",
+                            fontFamily:F, fontWeight:700, border:"1px solid "+T.border1 }}>
+                            ⬆ 업로드
+                          </button>
+                          <button onClick={()=>setShowGistSetup(true)} style={{
+                            padding:"9px 14px", borderRadius:9,
+                            border:"1px solid "+T.border1, background:T.card, color:T.l2,
+                            cursor:"pointer", fontFamily:F }}>
+                            ⚙
+                          </button>
+                        </div>
+                        {lastSync && (
+                          <div style={{ fontSize:11, color:T.l4, fontFamily:F, textAlign:"center" }}>
+                            마지막 동기화: {lastSync}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <button onClick={()=>setShowGistSetup(true)} style={{ width:"100%",
+                        borderRadius:10, border:"none", background:"linear-gradient(135deg,#00704A,#1E3932)",
+                        color:"#fff", fontSize:13, cursor:"pointer", fontFamily:F, fontWeight:700,
+                        padding:"12px 0" }}>
+                        🔗 자동 동기화 설정하기
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
             </div>
-            {/* ── 오른쪽 컬럼 끝 ── */}
           </div>
         )}
-
         {tab==="notices"&&(
           <div style={{ padding:"16px" }} className="fi">
             <div onClick={()=>setAiChat(true)} style={{
