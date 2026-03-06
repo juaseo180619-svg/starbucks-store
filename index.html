@@ -332,7 +332,8 @@ function Sheet({ onClose, title, children, tall, full }) {
   return (
     <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,0.55)",
       backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-      display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      display:"flex", alignItems:"flex-end", justifyContent:"center",
+      touchAction:"none" }}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div ref={sheetRef}
         style={{ background:"rgba(245,250,247,0.98)",
@@ -342,7 +343,8 @@ function Sheet({ onClose, title, children, tall, full }) {
           borderRadius: expanded ? "0" : "26px 26px 0 0",
           width:"100%", maxWidth:430,
           height: maxH,
-          overflowY:"auto", paddingBottom:44,
+          overflowY:"auto", overflowX:"hidden", paddingBottom:44,
+          touchAction:"pan-y",
           transform: dragDY > 0 ? "translateY("+Math.min(dragDY,120)+"px)" : "none",
           transition: dragging ? "none" : "height .35s cubic-bezier(.32,0,.67,0), border-radius .35s, transform .2s",
           boxShadow:"0 -20px 60px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.09)" }}>
@@ -357,12 +359,6 @@ function Sheet({ onClose, title, children, tall, full }) {
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 22px 18px" }}>
           <span style={{ fontSize:20, fontWeight:700, color:T.l1, fontFamily:F }}>{title}</span>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={()=>setExpanded(v=>!v)} style={{ background:T.glass2,
-              border:"1px solid "+T.border1, borderRadius:8, width:30, height:30,
-              cursor:"pointer", color:T.l3, fontSize:12,
-              display:"flex", alignItems:"center", justifyContent:"center" }}>
-              {expanded ? "↓" : "↑"}
-            </button>
             <button onClick={onClose} style={{ background:T.glass2, border:"1px solid "+T.border1,
               borderRadius:"50%", width:30, height:30, cursor:"pointer", color:T.l2,
               fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
@@ -607,6 +603,7 @@ function App() {
   const [notices,   saveNotices,   nL] = useShared("sbx6_notices", SEED_NOTICES);
   const [categories,  saveCategories] = useShared("sbx6_categories", DEFAULT_CATS);
   const [catColors, saveCatColors] = useShared("sbx6_cat_colors", {});
+  const [memoNotes, saveMemoNotes] = useShared("sbx6_memos", []);
   const [events,    saveEvents,    eL] = useShared("sbx6_events",  SEED_EVENTS);
   const [roleTasks, saveRoleTasks, rL] = useShared(roleTaskKey, []);
   /* 개인 할일 */
@@ -664,7 +661,7 @@ function App() {
   const daysInMo=new Date(cY,cM+1,0).getDate();
 
   const [nf, setNf] = useState({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
-  const [ef, setEf] = useState({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
+  const [ef, setEf] = useState({ title:"", date:todayStr(), endDate:"", category:(categories||DEFAULT_CATS)[0]||"이벤트", memo:"" });
   const [editingEventId, setEditingEventId] = useState(null);
   const [tf, setTf] = useState({ text:"", priority:"보통", dueDate:todayStr() });
 
@@ -842,6 +839,7 @@ function App() {
               { id:"notices",  icon:"📢", label:"공지",   badge:0      },
               { id:"calendar", icon:"📅", label:"캘린더", badge:0      },
               { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
+              { id:"memo",     icon:"📓", label:"메모",   badge:0      },
             ].map(t=>(
               <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
                 display:"flex", alignItems:"center", gap:12, width:"100%",
@@ -930,8 +928,8 @@ function App() {
         boxShadow:isPC?"0 0 60px rgba(0,0,0,0.08)":"none" }}>
 
       {/* ══ HEADER (모바일) ══ */}
-      {!isPC && <div style={{ position:"sticky", top:0, zIndex:200,
-        background:"rgba(241,248,244,0.95)", backdropFilter:"blur(20px)",
+      {!isPC && <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:200,
+        background:"rgba(241,248,244,0.97)", backdropFilter:"blur(20px)",
         WebkitBackdropFilter:"blur(20px)",
         borderBottom:"1px solid rgba(0,112,74,0.12)" }}>
 
@@ -975,6 +973,7 @@ function App() {
             { id:"notices",  label:"공지",   badge:0 },
             { id:"calendar", label:"캘린더", badge:0 },
             { id:"tasks",    label:"할일",   badge:pending },
+            { id:"memo",     label:"메모",   badge:0 },
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
               flex:1, padding:"9px 4px", borderRadius:12, border:"none", cursor:"pointer",
@@ -998,7 +997,7 @@ function App() {
       </div>}
 
 {/* ══ CONTENT ══ */}
-      <div style={{ position:"relative", zIndex:1 }}>
+      <div style={{ position:"relative", zIndex:1, paddingTop:isPC?0:110 }}>
 
         {/* ── HOME ── */}
         {tab==="home"&&(
@@ -1018,7 +1017,8 @@ function App() {
                   {new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
                 </div>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                  <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F }}>
+                  <div style={{ fontSize:17, fontWeight:800, color:"#fff", fontFamily:F,
+                    whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
                     안녕하세요, {profile.name}! 👋
                   </div>
                   <div style={{ display:"flex", gap:6, flexShrink:0 }}>
@@ -1151,8 +1151,12 @@ function App() {
                         return (
                           <div key={day} onClick={function(){ setSelDay(dStr); }}
                             style={{ textAlign:"center", padding:"5px 0", borderRadius:8, cursor:"pointer",
-                              background:isTod?"#00704A":isSel?T.greenLight:"transparent",
+                              position:"relative",
                               transition:"background .15s" }}>
+                            {(isTod||isSel) && <div style={{ position:"absolute", inset:0,
+                              background:isTod?"#00704A":T.greenLight,
+                              borderRadius:8, zIndex:0 }}/>}
+                            <div style={{ position:"relative", zIndex:1 }}>
                             <span style={{ fontSize:12, fontWeight:(isTod||isSel)?700:400,
                               color:dayCol, fontFamily:F }}>
                               {day}
@@ -1161,6 +1165,7 @@ function App() {
                               <div style={{ width:4, height:4, borderRadius:"50%", background:T.green,
                                 margin:"1px auto 0" }}/>
                             )}
+                            </div>
                           </div>
                         );
                       })}
@@ -1302,7 +1307,8 @@ function App() {
               {(notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
                 .map((n,i,arr)=>(
                   <div key={n.id}>
-                    <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}/>
+                    <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
+                      onDelete={()=>saveNotices(p=>(p||[]).filter(x=>x.id!==n.id))}/>
                     {i<arr.length-1&&<Sep/>}
                   </div>
                 ))}
@@ -1322,7 +1328,7 @@ function App() {
             CAT={CAT}
             onAddEvent={()=>setAddEvent(true)}
             onDeleteEvent={(id)=>saveEvents(p=>(p||[]).filter(e=>e.id!==id))}
-            onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
+            onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||(categories||DEFAULT_CATS)[0]||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
           />
         )}
 
@@ -1447,6 +1453,14 @@ function App() {
         )}
       </div>
 
+
+        {/* ── MEMO ── */}
+        {tab==="memo"&&(
+          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
+            <MemoTab memos={memoNotes||[]} onSave={saveMemoNotes}/>
+          </div>
+        )}
+
       {/* ══ MODALS ══ */}
       {viewNotice&&(
         <Sheet title="" onClose={()=>setViewNotice(null)} full>
@@ -1519,7 +1533,7 @@ function App() {
           </div>
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
-            <Seg value={ef.category} onChange={v=>setEf({...ef,category:v})} options={["이벤트","운영","인사","기타"]}/>
+            <Seg value={ef.category} onChange={v=>setEf({...ef,category:v})} options={[...(categories||DEFAULT_CATS)]}/>
           </div>
           <Field label="메모 (선택)" value={ef.memo} onChange={v=>setEf({...ef,memo:v})} placeholder="간단한 메모"/>
           <GreenBtn full onClick={submitEvent}>추가하기</GreenBtn>
@@ -1856,6 +1870,112 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
 
 
 /* ══════════════════ 카테고리 관리 ══════════════════ */
+
+// ─── MemoTab ───
+function MemoTab({ memos, onSave }) {
+  const [input, setInput] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editText, setEditText] = useState("");
+
+  const add = () => {
+    const v = input.trim();
+    if (!v) return;
+    onSave([...memos, { id:"m"+Date.now(), text:v, date:new Date().toLocaleDateString("ko-KR",{month:"short",day:"numeric"}) }]);
+    setInput("");
+  };
+
+  const del = (id) => onSave(memos.filter(m=>m.id!==id));
+
+  const saveEdit = (id) => {
+    onSave(memos.map(m=>m.id===id?{...m,text:editText.trim()}:m));
+    setEditId(null);
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <span style={{ fontSize:18, fontWeight:700, color:T.l1, fontFamily:F }}>📓 메모장</span>
+        <span style={{ fontSize:12, color:T.l4, fontFamily:F }}>{memos.length}개</span>
+      </div>
+
+      {/* 입력 */}
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        <textarea value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();add();} }}
+          placeholder="메모를 입력하세요... (Enter로 저장)"
+          rows={2}
+          style={{ flex:1, padding:"12px 14px", borderRadius:14, border:"1px solid "+T.border1,
+            background:T.card, color:T.l1, fontSize:14, fontFamily:F, outline:"none",
+            resize:"none", lineHeight:1.6 }}/>
+        <button onClick={add} style={{
+          padding:"0 16px", borderRadius:14, border:"none",
+          background:T.green, color:"#fff", fontSize:14, fontWeight:700,
+          cursor:"pointer", fontFamily:F, flexShrink:0 }}>저장</button>
+      </div>
+
+      {/* 메모 목록 */}
+      {memos.length===0 ? (
+        <div style={{ padding:"40px 0", textAlign:"center" }}>
+          <div style={{ fontSize:32, marginBottom:10 }}>📝</div>
+          <div style={{ fontSize:14, color:T.l4, fontFamily:F }}>아직 메모가 없어요</div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {[...memos].reverse().map(function(m){
+            const isEdit = editId===m.id;
+            return (
+              <div key={m.id} style={{
+                padding:"14px 16px", borderRadius:16,
+                background:T.card, border:"1px solid "+T.border0,
+                boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+                {isEdit ? (
+                  <div>
+                    <textarea value={editText} onChange={e=>setEditText(e.target.value)}
+                      rows={3}
+                      style={{ width:"100%", padding:"8px 10px", borderRadius:10,
+                        border:"1px solid "+T.border1, background:T.bg,
+                        color:T.l1, fontSize:14, fontFamily:F, outline:"none",
+                        resize:"none", marginBottom:8, lineHeight:1.6 }}/>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={()=>saveEdit(m.id)} style={{
+                        padding:"6px 14px", borderRadius:8, border:"none",
+                        background:T.green, color:"#fff", fontSize:13,
+                        fontWeight:700, cursor:"pointer", fontFamily:F }}>저장</button>
+                      <button onClick={()=>setEditId(null)} style={{
+                        padding:"6px 14px", borderRadius:8,
+                        border:"1px solid "+T.border1, background:"none",
+                        color:T.l3, fontSize:13, cursor:"pointer", fontFamily:F }}>취소</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize:14, color:T.l1, fontFamily:F,
+                      lineHeight:1.7, whiteSpace:"pre-wrap", marginBottom:8 }}>{m.text}</div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <span style={{ fontSize:11, color:T.l4, fontFamily:F }}>{m.date}</span>
+                      <div style={{ display:"flex", gap:6 }}>
+                        <button onClick={()=>{setEditId(m.id);setEditText(m.text);}} style={{
+                          padding:"4px 10px", borderRadius:7,
+                          border:"1px solid "+T.border1, background:"none",
+                          color:T.l3, fontSize:12, cursor:"pointer", fontFamily:F }}>수정</button>
+                        <button onClick={()=>del(m.id)} style={{
+                          padding:"4px 10px", borderRadius:7,
+                          border:"1px solid rgba(220,38,38,0.2)",
+                          background:"rgba(220,38,38,0.05)",
+                          color:"#DC2626", fontSize:12, cursor:"pointer", fontFamily:F }}>삭제</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors }) {
   const cats = categories && categories.length ? [...categories] : [...DEFAULT_CATS];
   const [list, setList] = useState(cats);
@@ -2055,10 +2175,11 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
                   var dayCol = ci===0?T.red:ci===6?T.blue:T.l1;
                   return (
                     <div key={day} onClick={function(){setSelDay(dStr);}}
-                      style={{ height:cellH, cursor:"pointer", display:"flex",
-                        justifyContent:"center", paddingTop:4,
+                      style={{ height:cellH, cursor:"pointer", position:"relative",
                         background: isSel ? T.greenLight : "transparent",
                         borderRadius:10 }}>
+                      <div style={{ position:"relative", zIndex:2,
+                        display:"flex", justifyContent:"center", paddingTop:4 }}>
                       {isTod ? (
                         <div style={{ width:26, height:26, borderRadius:"50%",
                           background:"linear-gradient(135deg,#00704A,#1E3932)",
@@ -2072,6 +2193,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
                           color:isSel?T.green:dayCol, lineHeight:"26px", fontFamily:F }}>{day}</span>
                       )}
                     </div>
+                    </div>
                   );
                 })}
               </div>
@@ -2083,7 +2205,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
                 var span = bar.colE - bar.colS + 1;
                 return (
                   <div key={bar.ev.id+"_"+wi+"_"+bi} style={{
-                    position:"absolute", top:topOff,
+                    position:"absolute", top:topOff, zIndex:3,
                     left:(bar.colS*100/7)+"%", width:(span*100/7)+"%",
                     height:14,
                     background: meta.color+"30",
@@ -2160,13 +2282,14 @@ function SecHead({ title, onMore }) {
 function EmptyRow({ text }) {
   return <div style={{ padding:"22px 16px", textAlign:"center", color:T.l3, fontSize:14, fontFamily:F }}>{text}</div>;
 }
-function NRow({ n, onClick }) {
+function NRow({ n, onClick, onDelete }) {
   const meta=CAT[n.category]||CAT["기타"];
   return (
-    <div onClick={onClick} style={{ padding:"14px 16px", cursor:"pointer",
-      display:"flex", alignItems:"flex-start", gap:12, transition:"background .15s" }}
-      onMouseEnter={e=>e.currentTarget.style.background=T.glassHover}
-      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+    <div style={{ position:"relative" }}>
+      <div onClick={onClick} style={{ padding:"14px 16px", paddingRight:onDelete?"56px":"16px",
+        cursor:"pointer", display:"flex", alignItems:"flex-start", gap:12, transition:"background .15s" }}
+        onMouseEnter={e=>e.currentTarget.style.background=T.glassHover}
+        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
       <div style={{ width:3, alignSelf:"stretch", borderRadius:2,
         background:n._read?T.l4:meta.color, flexShrink:0, minHeight:40 }}/>
       <div style={{ flex:1, minWidth:0 }}>
@@ -2187,8 +2310,18 @@ function NRow({ n, onClick }) {
       </div>
       <span style={{ color:T.l4, fontSize:16, flexShrink:0, paddingTop:2 }}>›</span>
     </div>
+    </div>
+      {onDelete && (
+        <button onClick={e=>{e.stopPropagation();onDelete();}} style={{
+          position:"absolute", right:10, top:"50%", transform:"translateY(-50%)",
+          background:"rgba(220,38,38,0.07)", border:"1px solid rgba(220,38,38,0.18)",
+          color:"#DC2626", fontSize:12, fontWeight:700, cursor:"pointer",
+          padding:"4px 8px", zIndex:5, borderRadius:7, lineHeight:1, fontFamily:F }}>삭제</button>
+      )}
+    </div>
   );
 }
+
 function ERow({ e }) {
   const meta=CAT[e.category]||CAT["기타"];
   const d=new Date(e.date+"T00:00:00");
@@ -2246,6 +2379,192 @@ function TRow({ t, done, onToggle, onDelete, showAuthor }) {
     </div>
   );
 }
+
+// ─── AI Chat Sheet ───
+function AIChatSheet({ onClose, notices }) {
+  const [query, setQuery] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const ask = async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setAnswer("");
+    try {
+      const ctx = (notices||[]).slice(0,20).map(n=>
+        n.title+(n.body?": "+n.body.replace(/<[^>]*>/g,"").slice(0,100):"")
+      ).join("\n");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:800,
+          messages:[{ role:"user", content:"스타벅스 매장 공지 목록:\n"+ctx+"\n\n질문: "+query }]
+        })
+      });
+      const d = await res.json();
+      setAnswer((d.content||[]).map(b=>b.text||"").join(""));
+    } catch(e) { setAnswer("API 키가 설정되지 않았거나 오류가 발생했어요."); }
+    setLoading(false);
+  };
+
+  return (
+    <Sheet title="AI 공지 검색" onClose={onClose}>
+      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14 }}>
+        공지 내용에 대해 질문하거나 요약을 요청해보세요.
+      </p>
+      <Field label="질문" value={query} onChange={setQuery} placeholder="예: 이번 달 프로모션 정리해줘"/>
+      <GreenBtn full onClick={ask} disabled={loading}>
+        {loading ? "⏳ 답변 중..." : "✨ 물어보기"}
+      </GreenBtn>
+      {answer && (
+        <div style={{ marginTop:16, padding:"14px 16px", borderRadius:14,
+          background:T.glass1, border:"1px solid "+T.border0 }}>
+          <div style={{ fontSize:13, color:T.l1, fontFamily:F, lineHeight:1.7,
+            whiteSpace:"pre-wrap" }}>{answer}</div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── AI Briefing Sheet ───
+function AIBriefingSheet({ onClose, notices, events }) {
+  const [briefing, setBriefing] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const generate = async () => {
+    setLoading(true);
+    setBriefing("");
+    try {
+      const today = new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"});
+      const noticeCtx = (notices||[]).slice(0,10).map(n=>
+        "• "+n.title+(n.category?" ["+n.category+"]":"")
+      ).join("\n");
+      const evCtx = (events||[]).filter(e=>e.date>=new Date().toISOString().slice(0,10)).slice(0,5)
+        .map(e=>"• "+e.date+" "+e.title).join("\n");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:600,
+          messages:[{ role:"user", content:
+            "오늘("+today+") 스타벅스 매장 파트너를 위한 간결한 AI 브리핑을 작성해줘.\n\n최근 공지:\n"+noticeCtx+
+            "\n\n예정 일정:\n"+evCtx+
+            "\n\n형식: 3~5문장으로 오늘 주요 체크포인트 요약. 친근하고 간결하게." }]
+        })
+      });
+      const d = await res.json();
+      setBriefing((d.content||[]).map(b=>b.text||"").join(""));
+    } catch(e) { setBriefing("API 연결 오류가 발생했어요. AI API 키를 확인해주세요."); }
+    setLoading(false);
+  };
+
+  useEffect(()=>{ generate(); }, []);
+
+  return (
+    <Sheet title="🔍 AI 브리핑" onClose={onClose}>
+      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14 }}>
+        공지와 일정을 분석한 오늘의 브리핑이에요.
+      </p>
+      {loading ? (
+        <div style={{ padding:"40px 0", textAlign:"center" }}>
+          <div style={{ fontSize:13, color:T.l3, fontFamily:F }}>⏳ AI가 분석 중...</div>
+        </div>
+      ) : (
+        <div>
+          <div style={{ padding:"16px", borderRadius:14, background:T.glass1,
+            border:"1px solid "+T.border0, marginBottom:14 }}>
+            <div style={{ fontSize:14, color:T.l1, fontFamily:F, lineHeight:1.8,
+              whiteSpace:"pre-wrap" }}>{briefing||"내용을 불러오는 중이에요."}</div>
+          </div>
+          <ActionBtn onClick={generate}>🔄 새로 생성</ActionBtn>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── AI Quiz Sheet ───
+function AIQuizSheet({ onClose, notices }) {
+  const [quiz, setQuiz] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const generate = async () => {
+    setLoading(true);
+    setQuiz(null);
+    setSelected(null);
+    try {
+      const ctx = (notices||[]).slice(0,15).map(n=>
+        n.title+(n.body?": "+n.body.replace(/<[^>]*>/g,"").slice(0,80):"")
+      ).join("\n");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:400,
+          messages:[{ role:"user", content:
+            "공지 내용으로 퀴즈 1문제를 만들어줘:\n"+ctx+
+            "\n\n반드시 JSON만 반환해: {question:"질문",options:["A","B","C","D"],answer:0,explanation:"설명"}" }]
+        })
+      });
+      const d = await res.json();
+      const txt = (d.content||[]).map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
+      setQuiz(JSON.parse(txt));
+    } catch(e) { setQuiz({question:"API 오류",options:["확인"],answer:0,explanation:"API 키를 확인해주세요."}); }
+    setLoading(false);
+  };
+
+  useEffect(()=>{ generate(); }, []);
+
+  return (
+    <Sheet title="📝 공지 퀴즈" onClose={onClose}>
+      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14 }}>
+        공지 내용을 잘 이해하고 있는지 확인해봐요!
+      </p>
+      {loading ? (
+        <div style={{ padding:"40px 0", textAlign:"center" }}>
+          <div style={{ fontSize:13, color:T.l3, fontFamily:F }}>⏳ 문제 생성 중...</div>
+        </div>
+      ) : quiz ? (
+        <div>
+          <div style={{ padding:"16px", borderRadius:14, background:T.glass1,
+            border:"1px solid "+T.border0, marginBottom:14 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F,
+              marginBottom:14, lineHeight:1.6 }}>{quiz.question}</div>
+            {(quiz.options||[]).map(function(opt,i){
+              const isRight = i===quiz.answer;
+              const isWrong = selected!==null && selected===i && !isRight;
+              return (
+                <button key={i} onClick={()=>setSelected(i)} style={{
+                  width:"100%", padding:"11px 14px", borderRadius:12, marginBottom:8,
+                  border:"1px solid "+(selected===null?T.border1:isRight?"#00704A":isWrong?"#DC2626":T.border0),
+                  background:selected===null?T.card:isRight?"rgba(0,112,74,0.12)":isWrong?"rgba(220,38,38,0.08)":T.card,
+                  color:T.l1, fontSize:14, fontFamily:F, cursor:"pointer", textAlign:"left" }}>
+                  {["A","B","C","D"][i]}. {opt}
+                </button>
+              );
+            })}
+            {selected!==null && (
+              <div style={{ padding:"10px 14px", borderRadius:10,
+                background:"rgba(0,112,74,0.08)", border:"1px solid rgba(0,112,74,0.2)" }}>
+                <div style={{ fontSize:13, color:T.green, fontFamily:F, fontWeight:600, marginBottom:4 }}>
+                  {selected===quiz.answer?"✅ 정답!" :"❌ 오답"} — 정답: {["A","B","C","D"][quiz.answer]}
+                </div>
+                <div style={{ fontSize:13, color:T.l2, fontFamily:F, lineHeight:1.6 }}>
+                  {quiz.explanation}
+                </div>
+              </div>
+            )}
+          </div>
+          <ActionBtn onClick={generate}>🔄 새 문제</ActionBtn>
+        </div>
+      ) : null}
+    </Sheet>
+  );
+}
+
 
 
     const root=ReactDOM.createRoot(document.getElementById("root"));
