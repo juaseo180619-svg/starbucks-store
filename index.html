@@ -606,6 +606,7 @@ function App() {
   /* 공유 데이터 */
   const [notices,   saveNotices,   nL] = useShared("sbx6_notices", SEED_NOTICES);
   const [categories,  saveCategories] = useShared("sbx6_categories", DEFAULT_CATS);
+  const [catColors, saveCatColors] = useShared("sbx6_cat_colors", {});
   const [events,    saveEvents,    eL] = useShared("sbx6_events",  SEED_EVENTS);
   const [roleTasks, saveRoleTasks, rL] = useShared(roleTaskKey, []);
   /* 개인 할일 */
