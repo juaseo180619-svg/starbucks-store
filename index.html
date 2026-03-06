@@ -717,7 +717,7 @@ function App() {
     if (data.noticeDate) {
       const newEv = {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
-        endDate:data.noticeEndDate||"", category:data.category, memo:"공지 연동"
+        endDate:data.noticeEndDate||data.noticeDate, category:data.category, memo:"공지 연동"
       };
       saveEvents(prev => [...(prev||events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
     }
@@ -725,10 +725,10 @@ function App() {
   const submitEvent = () => {
     if (!ef.title.trim()) return;
     if (editingEventId) {
-      saveEvents(p=>(p||[]).map(e=>e.id===editingEventId?{...e,...ef,endDate:ef.endDate||""}:e));
+      saveEvents(p=>(p||[]).map(e=>e.id===editingEventId?{...e,...ef,endDate:ef.endDate||ef.date}:e));
       setEditingEventId(null);
     } else {
-      saveEvents(p=>[...(p||[]),{id:"e"+Date.now(),...ef,endDate:ef.endDate||""}].sort((a,b)=>a.date.localeCompare(b.date)));
+      saveEvents(p=>[...(p||[]),{id:"e"+Date.now(),...ef,endDate:ef.endDate||ef.date}].sort((a,b)=>a.date.localeCompare(b.date)));
     }
     setEf({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
     setAddEvent(false);
@@ -2021,7 +2021,7 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
           var weekBars = [];
           monthEvents.forEach(function(ev) {
             var evS = parseInt((ev.date||"").slice(8,10)||"0");
-            var evE = parseInt((ev.endDate||ev.date||"").slice(8,10)||"0");
+            var evE = parseInt(((ev.endDate&&ev.endDate.length>=10?ev.endDate:ev.date)||"").slice(8,10)||"0");
             if (evS > wEnd || evE < wStart) return;
             var clampS = Math.max(evS, wStart);
             var clampE = Math.min(evE, wEnd);
@@ -2086,8 +2086,11 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
                     position:"absolute", top:topOff,
                     left:(bar.colS*100/7)+"%", width:(span*100/7)+"%",
                     height:14,
-                    background: meta.color+"22",
+                    background: meta.color+"30",
                     borderLeft: bar.startsHere ? "3px solid "+meta.color : "none",
+                    borderRight: bar.endsHere ? "1px solid "+meta.color+"50" : "none",
+                    borderTop: "1px solid "+meta.color+"40",
+                    borderBottom: "1px solid "+meta.color+"40",
                     borderRadius: bar.startsHere?(bar.endsHere?"5px":"5px 0 0 5px"):(bar.endsHere?"0 5px 5px 0":"0"),
                     display:"flex", alignItems:"center", paddingLeft:bar.startsHere?4:2,
                     overflow:"hidden", pointerEvents:"none"
