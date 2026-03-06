@@ -502,7 +502,7 @@ function ProfileSetup({ onComplete, existing }) {
         {/* 폼 */}
         <div style={{ ...glassBox({ padding:"22px 20px",
           boxShadow:"0 8px 40px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)" }) }}>
-          <Field label="이름" value={name} onChange={setName} placeholder="이름을 입력하세요"/>
+          <Field label="닉네임" value={name} onChange={setName} placeholder="닉네임을 입력하세요 (예: 주이)"/>
 
           <div style={{ marginBottom:8 }}>
             <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:10, paddingLeft:2 }}>직급</div>
@@ -644,7 +644,13 @@ function App() {
   Object.keys(CAT).forEach(k => { if (!BASE_CAT[k]) delete CAT[k]; });
   Object.assign(CAT, BASE_CAT);
   (categories||DEFAULT_CATS).forEach((name, i) => {
-    if (!CAT[name]) {
+    const customColor = (catColors||{})[name];
+    if (customColor) {
+      // 커스텀 색상 적용
+      const hex = customColor;
+      const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+      CAT[name] = { color:hex, dim:"rgba("+r+","+g+","+b+",0.12)", border:"rgba("+r+","+g+","+b+",0.25)" };
+    } else if (!CAT[name]) {
       const ci = CAT_COLORS[i % CAT_COLORS.length];
       CAT[name] = { color:ci.color, dim:ci.dim, border:ci.color+"33" };
     }
@@ -1012,10 +1018,10 @@ function App() {
                 </div>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                   <div style={{ fontSize:20, fontWeight:800, color:"#fff", fontFamily:F }}>
-                    안녕하세요, {profile.name}님 👋
+                    안녕하세요, {profile.name}! 👋
                   </div>
                   <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                    <button onClick={()=>setShowAIBriefing(true)} style={{
+                    <button onClick={()=>setShowBriefing(true)} style={{
                       background:"rgba(255,255,255,0.18)", border:"1px solid rgba(255,255,255,0.3)",
                       borderRadius:10, padding:"6px 11px", color:"#fff", fontSize:12,
                       fontWeight:700, cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
@@ -1204,52 +1210,6 @@ function App() {
                         </div>
                       );
                     })}
-                </div>
-
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-                  marginBottom:10 }}>
-                  <span style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F }}>
-                    ✅ 미완료 할일
-                  </span>
-                  <div style={{ display:"flex", gap:8 }}>
-                    <ActionBtn onClick={()=>setAddTask(true)}>+ 추가</ActionBtn>
-                    <button onClick={()=>setTab("tasks")} style={{ background:"none", border:"none",
-                      color:T.green, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:F }}>
-                      전체보기
-                    </button>
-                  </div>
-                </div>
-                <div style={{ ...glassBox({ overflow:"hidden", marginBottom:20 }) }}>
-                  {(tasks||[]).filter(t=>!t.done).length===0 && (roleTasks||[]).filter(t=>!t.done).length===0
-                    ? <EmptyRow text="미완료 할일 없음 🎉"/>
-                    : (
-                      <div>
-                        {(tasks||[]).filter(t=>!t.done).map(function(t,ti,arr){
-                          return (
-                            <div key={t.id}>
-                              <TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>
-                              {ti<arr.length-1&&<Sep/>}
-                            </div>
-                          );
-                        })}
-                        {(tasks||[]).filter(t=>!t.done).length>0 && (roleTasks||[]).filter(t=>!t.done).length>0 && (
-                          <div style={{ padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}>
-                            <div style={{ flex:1, height:1, background:T.border0 }}/>
-                            <span style={{ fontSize:11, color:T.l4, fontFamily:F }}>팀 공유</span>
-                            <div style={{ flex:1, height:1, background:T.border0 }}/>
-                          </div>
-                        )}
-                        {(roleTasks||[]).filter(t=>!t.done).map(function(t,ti,arr){
-                          return (
-                            <div key={t.id}>
-                              <TRow t={t} onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>
-                              {ti<arr.length-1&&<Sep/>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )
-                  }
                 </div>
 
                 {/* 모바일 동기화 */}
@@ -1635,7 +1595,7 @@ function App() {
       )}
       {/* showQuiz - already closed above */}
       {false}
-      {showCatMgr&&<CatManagerSheet onClose={()=>setShowCatMgr(false)} categories={categories} onSave={saveCategories}/>}
+      {showCatMgr&&<CatManagerSheet onClose={()=>setShowCatMgr(false)} categories={categories} onSave={saveCategories} catColors={catColors||{}} onSaveColors={saveCatColors}/>}
       {editNotice&&(
         <RichNoticeSheet
           categories={categories}
@@ -1895,10 +1855,12 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
 
 
 /* ══════════════════ 카테고리 관리 ══════════════════ */
-function CatManagerSheet({ onClose, categories, onSave }) {
+function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors }) {
   const cats = categories && categories.length ? [...categories] : [...DEFAULT_CATS];
   const [list, setList] = useState(cats);
   const [input, setInput] = useState("");
+  const [colors, setColors] = useState(catColors||{});
+  const PALETTE = ["#00704A","#C07020","#2563EB","#7C3AED","#DC2626","#EA580C","#0891B2","#059669","#DB2777","#65A30D"];
 
   const add = () => {
     const v = input.trim();
@@ -1906,724 +1868,75 @@ function CatManagerSheet({ onClose, categories, onSave }) {
     setList(prev => [...prev, v]);
     setInput("");
   };
-
   const remove = (name) => {
     if (list.length <= 1) return;
     setList(prev => prev.filter(c => c !== name));
+  };
+  const setColor = (name, color) => {
+    setColors(prev => ({...prev, [name]: color}));
+  };
+  const handleSave = () => {
+    onSave(list);
+    onSaveColors(colors);
+    onClose();
   };
 
   return (
     <Sheet title="카테고리 관리" onClose={onClose}>
       <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:14, lineHeight:1.6 }}>
-        공지 카테고리를 자유롭게 추가하거나 삭제할 수 있어요.
+        카테고리를 추가하고 캘린더 표시 색상을 지정해요.
       </p>
 
-      {/* 현재 카테고리 목록 */}
-      <div style={{ ...glassBox({ overflow:"hidden", marginBottom:14 }) }}>
-        {list.map((cat, i) => {
-          const ci = CAT_COLORS[i % CAT_COLORS.length];
+      {/* 카테고리 목록 */}
+      <div style={{ marginBottom:14 }}>
+        {list.map(function(name){
+          const curColor = colors[name] || BASE_CAT[name]?.color || CAT_COLORS[0].color;
           return (
-            <div key={cat} style={{ padding:"12px 16px", display:"flex",
-              alignItems:"center", gap:12,
-              borderBottom: i < list.length-1 ? "1px solid "+T.border0 : "none" }}>
-              <div style={{ width:10, height:10, borderRadius:"50%",
-                background:ci.color, flexShrink:0 }}/>
-              <span style={{ flex:1, fontSize:15, color:T.l1, fontFamily:F }}>{cat}</span>
-              {list.length > 1 && (
-                <button onClick={() => remove(cat)}
-                  style={{ background:"none", border:"none", color:T.l4,
-                    fontSize:17, cursor:"pointer", padding:"0 4px" }}>✕</button>
-              )}
+            <div key={name} style={{ marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                <div style={{ width:14, height:14, borderRadius:4, background:curColor, flexShrink:0 }}/>
+                <span style={{ fontSize:14, fontWeight:600, color:T.l1, fontFamily:F, flex:1 }}>{name}</span>
+                {!DEFAULT_CATS.includes(name) && (
+                  <button onClick={()=>remove(name)} style={{
+                    background:"none", border:"none", color:T.red, fontSize:18,
+                    cursor:"pointer", lineHeight:1, padding:"0 4px" }}>×</button>
+                )}
+              </div>
+              {/* 색상 팔레트 */}
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", paddingLeft:22 }}>
+                {PALETTE.map(function(hex){
+                  const isSelected = curColor === hex;
+                  return (
+                    <button key={hex} onClick={()=>setColor(name, hex)} style={{
+                      width:24, height:24, borderRadius:6, background:hex, border:"none",
+                      cursor:"pointer", flexShrink:0,
+                      outline:isSelected?"3px solid "+hex:"none",
+                      outlineOffset:isSelected?"2px":"0",
+                      opacity:isSelected?1:0.65,
+                      transform:isSelected?"scale(1.15)":"scale(1)",
+                      transition:"all .15s" }}/>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
 
       {/* 새 카테고리 추가 */}
-      <div style={{ display:"flex", gap:8, marginBottom:20 }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if(e.key==="Enter") add(); }}
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        <input value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&add()}
           placeholder="새 카테고리 이름"
-          style={{ ...fBase, flex:1, marginBottom:0 }}
-        />
-        <button onClick={add}
-          style={{ padding:"0 18px", borderRadius:14, border:"1px solid "+T.green,
-            background:T.greenDim, color:T.green, fontSize:14, fontWeight:700,
-            cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>추가</button>
+          style={{ flex:1, padding:"10px 14px", borderRadius:12, border:"1px solid "+T.border1,
+            background:T.card, color:T.l1, fontSize:14, fontFamily:F, outline:"none" }}/>
+        <button onClick={add} style={{
+          padding:"10px 16px", borderRadius:12, border:"none",
+          background:T.green, color:"#fff", fontSize:14, fontWeight:700,
+          cursor:"pointer", fontFamily:F }}>추가</button>
       </div>
 
-      <GreenBtn full onClick={() => { onSave(list); onClose(); }}>저장하기</GreenBtn>
-    </Sheet>
-  );
-}
-
-/* ══════════════════ AI 공지 챗 ══════════════════ */
-/* ══════════════════ GIST SETUP MODAL ══════════════════ */
-function GistSetupModal({ onClose, onSave, currentToken, currentGistId }) {
-  const [step, setStep] = useState(currentToken ? "status" : "intro");
-  const [token, setToken] = useState(currentToken||"");
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-
-  const testAndSave = async () => {
-    if (!token.trim()) return;
-    setTesting(true); setTestResult(null);
-    try {
-      // 토큰 유효성 확인
-      const resp = await fetch("https://api.github.com/user", {
-        headers:{ Authorization:"token "+token.trim() }
-      });
-      if (!resp.ok) throw new Error("토큰이 올바르지 않아요 (HTTP "+resp.status+")");
-      const user = await resp.json();
-
-      // 토큰 저장
-      localStorage.setItem("sbx_gist_token", token.trim());
-
-      // 기존 Gist ID가 없으면 먼저 탐색 → 없으면 새로 생성
-      if (!currentGistId) {
-        setTestResult({ ok:null, msg:"기존 동기화 데이터 탐색 중..." });
-        const found = await GistSync.findExisting();
-        if (found) {
-          // 기존 Gist 발견 → 바로 pull
-          await GistSync.pull();
-          setTestResult({ ok:true, login:user.login, found:true });
-        } else {
-          // 없으면 새로 생성
-          await GistSync.push();
-          setTestResult({ ok:true, login:user.login, found:false });
-        }
-      } else {
-        setTestResult({ ok:true, login:user.login });
-      }
-      setTimeout(()=>{ onSave(token.trim(), GistSync.getGistId()); }, 1200);
-    } catch(e) {
-      setTestResult({ ok:false, msg:e.message });
-    }
-    setTesting(false);
-  };
-
-  const disconnect = () => {
-    localStorage.removeItem("sbx_gist_token");
-    localStorage.removeItem("sbx_gist_id");
-    localStorage.removeItem("sbx_last_sync");
-    onSave("", "");
-  };
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:900, background:"rgba(0,0,0,0.5)",
-      display:"flex", alignItems:"flex-end", justifyContent:"center" }}
-      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <div style={{ background:T.card, borderRadius:"24px 24px 0 0", width:"100%", maxWidth:500,
-        padding:"24px 20px 40px", maxHeight:"85vh", overflowY:"auto" }}>
-
-        {/* 헤더 */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-          <div style={{ fontSize:17, fontWeight:800, color:T.l1, fontFamily:F }}>
-            🔗 자동 동기화 설정
-          </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20,
-            color:T.l3, cursor:"pointer" }}>✕</button>
-        </div>
-
-        {step==="intro" && (
-          <div>
-            <div style={{ background:T.greenLight, borderRadius:16, padding:"16px", marginBottom:20,
-              border:"1px solid "+T.greenBorder }}>
-              <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F, marginBottom:8 }}>
-                📱💻 PC ↔ 모바일 자동 동기화
-              </div>
-              <div style={{ fontSize:13, color:T.l2, fontFamily:F, lineHeight:1.8 }}>
-                <div>{"• GitHub Gist를 클라우드 저장소로 사용해요"}</div>
-                <div>{"• 데이터 변경 시 자동으로 저장돼요"}</div>
-                <div>{"• 앱 열 때마다 자동으로 불러와요"}</div>
-                <div>{"• 무료 · 개인 비공개 저장 (secret gist)"}</div>
-              </div>
-            </div>
-            <div style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:12 }}>
-              설정 방법 (1회만)
-            </div>
-            {[
-              { n:"1", text:"github.com 로그인 후 우상단 프로필 → Settings" },
-              { n:"2", text:"왼쪽 메뉴 맨 아래 Developer settings 클릭" },
-              { n:"3", text:"Personal access tokens → Tokens (classic)" },
-              { n:"4", text:"Generate new token → Note에 'StarbucksStore' 입력" },
-              { n:"5", text:"gist 항목만 체크 → Generate token" },
-              { n:"6", text:"생성된 토큰(ghp_로 시작)을 아래에 붙여넣기" },
-            ].map(s=>(
-              <div key={s.n} style={{ display:"flex", gap:10, marginBottom:10, alignItems:"flex-start" }}>
-                <div style={{ width:22, height:22, borderRadius:"50%", background:T.green,
-                  color:"#fff", fontSize:11, fontWeight:800, display:"flex", alignItems:"center",
-                  justifyContent:"center", flexShrink:0, marginTop:1 }}>{s.n}</div>
-                <div style={{ fontSize:13, color:T.l2, fontFamily:F, lineHeight:1.6 }}>{s.text}</div>
-              </div>
-            ))}
-            <button onClick={()=>window.open("https://github.com/settings/tokens/new?description=StarbucksStore&scopes=gist","_blank")}
-              style={{ width:"100%", padding:"11px", borderRadius:11, border:"1px solid "+T.border1,
-                background:T.card, color:T.l1, fontSize:13, cursor:"pointer", fontFamily:F,
-                fontWeight:700, marginBottom:12 }}>
-              🔗 GitHub 토큰 발급 페이지 열기
-            </button>
-            <button onClick={()=>setStep("input")}
-              style={{ width:"100%", padding:"13px", borderRadius:12, border:"none",
-                background:"linear-gradient(135deg,#00704A,#1E3932)", color:"#fff",
-                fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-              토큰 입력하기 →
-            </button>
-          </div>
-        )}
-
-        {step==="input" && (
-          <div>
-            <div style={{ fontSize:13, color:T.l2, fontFamily:F, marginBottom:12, lineHeight:1.7 }}>
-              <div>GitHub에서 발급받은 토큰을 붙여넣어 주세요.</div>
-              <div style={{ color:T.l3, fontSize:12 }}>토큰은 기기에만 저장되며 서버로 전송되지 않아요.</div>
-            </div>
-            <input
-              value={token}
-              onChange={e=>setToken(e.target.value)}
-              placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-              style={{ ...fBase, width:"100%", fontFamily:"monospace", fontSize:13, marginBottom:12 }}
-              autoFocus
-            />
-            {testResult && (
-              <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
-                background:testResult.ok===null?"#EEF4FF":testResult.ok?"#E8F7EE":"#FEE8E8",
-                border:"1px solid "+(testResult.ok===null?T.blue:testResult.ok?T.green:T.red) }}>
-                <div style={{ fontSize:13, fontFamily:F, fontWeight:600,
-                  color:testResult.ok===null?T.blue:testResult.ok?T.green:T.red }}>
-                  {testResult.ok===null
-                    ? "🔍 "+testResult.msg
-                    : testResult.ok
-                      ? "✓ "+testResult.login+"님 연결 완료!"+(testResult.found?" 기존 데이터를 불러왔어요":"")
-                      : "✗ "+testResult.msg}
-                </div>
-              </div>
-            )}
-            <GreenBtn full onClick={testAndSave} disabled={!token.trim()||testing}>
-              {testing ? "확인 중..." : "연결하기"}
-            </GreenBtn>
-          </div>
-        )}
-
-        {step==="status" && (
-          <div>
-            <div style={{ background:T.greenLight, borderRadius:14, padding:16, marginBottom:16,
-              border:"1px solid "+T.greenBorder }}>
-              <div style={{ fontSize:13, fontWeight:700, color:T.green, fontFamily:F, marginBottom:4 }}>
-                ✓ 동기화 연결됨
-              </div>
-              <div style={{ fontSize:12, color:T.l2, fontFamily:F, lineHeight:1.7 }}>
-                <div>Gist ID: {currentGistId ? currentGistId.slice(0,8)+"..." : "없음"}</div>
-                <div>변경사항이 자동으로 저장되고 2분마다 최신 데이터를 불러와요.</div>
-              </div>
-            </div>
-            <button onClick={()=>{ if(window.confirm("동기화 연결을 끊을까요? 기기의 데이터는 유지됩니다.")) disconnect(); }}
-              style={{ width:"100%", padding:"11px", borderRadius:11, border:"1px solid "+T.border1,
-                background:T.card, color:T.red, fontSize:13, cursor:"pointer", fontFamily:F, fontWeight:700,
-                marginBottom:10 }}>
-              연결 끊기
-            </button>
-            <button onClick={onClose}
-              style={{ width:"100%", padding:"13px", borderRadius:12, border:"none",
-                background:"linear-gradient(135deg,#00704A,#1E3932)", color:"#fff",
-                fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-              닫기
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════ AI 브리핑 시트 ══════════════════ */
-function AIBriefingSheet({ onClose, notices, events }) {
-  const [status, setStatus] = useState("idle"); // idle | loading | done | error
-  const [briefing, setBriefing] = useState(null);
-
-  const run = async () => {
-    setStatus("loading");
-    let key = "";
-    try { key = localStorage.getItem("sbx_apikey")||""; } catch(e) {}
-    if (!key) { setStatus("error"); setBriefing({ error:"API 키가 없어요. 공지 탭 > AI 공지 검색에서 먼저 설정해주세요." }); return; }
-
-    const today = new Date().toISOString().slice(0,10);
-    const recentNotices = (notices||[]).slice(0,15).map(n=>
-      `[${n.date}][${n.category}] ${n.title}: ${(n.content||"").replace(/<[^>]+>/g,"").slice(0,200)}`
-    ).join("\n");
-    const upcomingEvents = (events||[])
-      .filter(e=>e.date>=today).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5)
-      .map(e=>`${e.date} ${e.title}(${e.category})`).join(", ");
-
-    const prompt = `당신은 스타벅스 매장 수퍼바이저 보조 AI입니다.
-아래 공지와 일정을 분석해서 오늘 파트너들이 반드시 알아야 할 핵심 내용을 브리핑해주세요.
-
-=== 최근 공지 ===
-${recentNotices}
-
-=== 다가오는 일정 ===
-${upcomingEvents || "없음"}
-
-다음 형식으로 정확히 JSON만 반환하세요 (마크다운 없이):
-{
-  "headline": "한 줄 요약 (20자 이내)",
-  "points": [
-    {"icon":"🗓","title":"제목","detail":"상세 내용 1-2줄","urgent":true},
-    {"icon":"📦","title":"제목","detail":"상세 내용 1-2줄","urgent":false},
-    {"icon":"👥","title":"제목","detail":"상세 내용 1-2줄","urgent":false}
-  ],
-  "tip": "오늘 파트너들에게 한마디"
-}`;
-
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "x-api-key": key,
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
-        body: JSON.stringify({
-          model:"claude-haiku-4-5-20251001", max_tokens:800,
-          messages:[{ role:"user", content:prompt }]
-        })
-      });
-      if (!resp.ok) throw new Error("API "+resp.status);
-      const data = await resp.json();
-      const text = data.content?.map(b=>b.text||"").join("").trim();
-      const json = JSON.parse(text.replace(/```json|```/g,"").trim());
-      setBriefing(json);
-      setStatus("done");
-    } catch(e) {
-      setStatus("error");
-      setBriefing({ error:"브리핑 생성 중 오류가 발생했어요: "+e.message });
-    }
-  };
-
-  useEffect(()=>{ run(); }, []);
-
-  return (
-    <Sheet title="🤖 AI 오늘의 브리핑" onClose={onClose} full>
-      {status==="loading" && (
-        <div style={{ textAlign:"center", padding:"40px 0" }}>
-          <div style={{ fontSize:40, marginBottom:12, animation:"spin 1.5s linear infinite", display:"inline-block" }}>⚙️</div>
-          <div style={{ fontSize:14, color:T.l2, fontFamily:F }}>공지를 분석중이에요...</div>
-        </div>
-      )}
-      {status==="error" && (
-        <div style={{ background:T.redDim, borderRadius:14, padding:16, marginBottom:12 }}>
-          <div style={{ fontSize:13, color:T.red, fontFamily:F }}>{briefing?.error}</div>
-        </div>
-      )}
-      {status==="done" && briefing && (
-        <div>
-          {/* 헤드라인 */}
-          <div style={{ background:"linear-gradient(135deg,#00704A,#1E3932)", borderRadius:16,
-            padding:"18px 20px", marginBottom:16, color:"#fff" }}>
-            <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", fontFamily:F, marginBottom:4 }}>오늘의 핵심</div>
-            <div style={{ fontSize:18, fontWeight:800, fontFamily:F }}>{briefing.headline}</div>
-          </div>
-          {/* 포인트들 */}
-          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
-            {(briefing.points||[]).map(function(p,i){
-              return (
-                <div key={i} style={{ background:T.card, borderRadius:14,
-                  padding:"14px 16px", border:"1px solid "+(p.urgent?"rgba(212,53,28,0.2)":T.border0),
-                  boxShadow:"0 2px 12px rgba(30,57,50,0.06)",
-                  borderLeft:"4px solid "+(p.urgent?T.red:T.green) }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                    <span style={{ fontSize:18 }}>{p.icon}</span>
-                    <span style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F }}>{p.title}</span>
-                    {p.urgent && <span style={{ fontSize:10, background:T.redDim, color:T.red,
-                      borderRadius:6, padding:"2px 7px", fontWeight:700, fontFamily:F }}>긴급</span>}
-                  </div>
-                  <div style={{ fontSize:13, color:T.l2, fontFamily:F, lineHeight:1.6, paddingLeft:26 }}>
-                    {p.detail}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* 팁 */}
-          {briefing.tip && (
-            <div style={{ background:T.greenLight, borderRadius:14, padding:"13px 16px",
-              border:"1px solid "+T.greenBorder, marginBottom:16 }}>
-              <div style={{ fontSize:11, color:T.green, fontWeight:700, fontFamily:F, marginBottom:3 }}>💡 오늘의 팁</div>
-              <div style={{ fontSize:13, color:T.l1, fontFamily:F, lineHeight:1.6 }}>{briefing.tip}</div>
-            </div>
-          )}
-          <button onClick={run} style={{ width:"100%", padding:"12px", borderRadius:12, border:"1px solid "+T.border1,
-            background:T.card, color:T.l2, fontSize:13, cursor:"pointer", fontFamily:F, fontWeight:600 }}>
-            🔄 다시 생성
-          </button>
-        </div>
-      )}
-    </Sheet>
-  );
-}
-
-/* ══════════════════ AI 퀴즈 시트 ══════════════════ */
-function AIQuizSheet({ onClose, notices }) {
-  const [status,  setStatus]  = useState("idle");
-  const [quizzes, setQuizzes] = useState([]);
-  const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [showResult, setShowResult] = useState(false);
-
-  const run = async () => {
-    setStatus("loading");
-    setAnswers({}); setCurrent(0); setShowResult(false);
-    let key = "";
-    try { key = localStorage.getItem("sbx_apikey")||""; } catch(e) {}
-    if (!key) { setStatus("error"); return; }
-
-    const recentNotices = (notices||[]).slice(0,12).map(n=>
-      `[${n.category}] ${n.title}: ${(n.content||"").replace(/<[^>]+>/g,"").slice(0,250)}`
-    ).join("\n");
-
-    const prompt = `다음 스타벅스 매장 공지들을 바탕으로 파트너가 꼭 알아야 할 내용으로 퀴즈 5개를 만들어주세요.
-
-=== 공지 ===
-${recentNotices}
-
-JSON만 반환하세요(마크다운 없이):
-[
-  {
-    "q": "질문 내용",
-    "options": ["선택지A","선택지B","선택지C","선택지D"],
-    "answer": 0,
-    "explanation": "정답 해설 1-2줄"
-  }
-]
-answer는 0부터 시작하는 정답 인덱스입니다.`;
-
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "x-api-key": key,
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
-        body: JSON.stringify({
-          model:"claude-haiku-4-5-20251001", max_tokens:1500,
-          messages:[{ role:"user", content:prompt }]
-        })
-      });
-      if (!resp.ok) throw new Error("API "+resp.status);
-      const data = await resp.json();
-      const text = data.content?.map(b=>b.text||"").join("").trim();
-      const json = JSON.parse(text.replace(/```json|```/g,"").trim());
-      setQuizzes(json);
-      setStatus("done");
-    } catch(e) {
-      setStatus("error");
-    }
-  };
-
-  useEffect(()=>{ run(); }, []);
-
-  const score = quizzes.length ? quizzes.filter((q,i)=>answers[i]===q.answer).length : 0;
-  const q = quizzes[current];
-  const answered = answers[current] !== undefined;
-  const isCorrect = answered && answers[current] === q?.answer;
-
-  return (
-    <Sheet title="📝 공지 퀴즈" onClose={onClose} tall>
-      {status==="loading" && (
-        <div style={{ textAlign:"center", padding:"40px 0" }}>
-          <div style={{ fontSize:40, marginBottom:12, animation:"spin 1.5s linear infinite", display:"inline-block" }}>⚙️</div>
-          <div style={{ fontSize:14, color:T.l2, fontFamily:F }}>퀴즈를 만들고 있어요...</div>
-        </div>
-      )}
-      {status==="error" && (
-        <div style={{ textAlign:"center", padding:24 }}>
-          <div style={{ fontSize:14, color:T.red, fontFamily:F, marginBottom:12 }}>
-            퀴즈 생성 실패. API 키를 확인해주세요.
-          </div>
-          <button onClick={run} style={{ padding:"10px 20px", borderRadius:10, border:"none",
-            background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontWeight:700 }}>다시 시도</button>
-        </div>
-      )}
-      {status==="done" && !showResult && q && (
-        <div>
-          {/* 진행바 */}
-          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8, alignItems:"center" }}>
-            <span style={{ fontSize:12, color:T.l3, fontFamily:F }}>{current+1} / {quizzes.length}</span>
-            <span style={{ fontSize:12, color:T.green, fontFamily:F, fontWeight:700 }}>
-              {Object.keys(answers).filter(i=>answers[i]===quizzes[i]?.answer).length}개 정답
-            </span>
-          </div>
-          <div style={{ height:4, background:T.border0, borderRadius:4, marginBottom:20 }}>
-            <div style={{ height:4, width:((current+1)/quizzes.length*100)+"%",
-              background:"linear-gradient(90deg,"+T.green+",#1E3932)",
-              borderRadius:4, transition:"width .3s" }}/>
-          </div>
-          {/* 질문 */}
-          <div style={{ background:T.card, borderRadius:16, padding:"18px 18px",
-            marginBottom:16, boxShadow:"0 2px 16px rgba(30,57,50,0.08)" }}>
-            <div style={{ fontSize:15, fontWeight:700, color:T.l1, fontFamily:F, lineHeight:1.6 }}>
-              Q{current+1}. {q.q}
-            </div>
-          </div>
-          {/* 선택지 */}
-          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
-            {q.options.map(function(opt,i){
-              const sel = answers[current]===i;
-              const correct = i===q.answer;
-              let bg = T.card, border = T.border0, col = T.l1;
-              if (answered) {
-                if (correct)        { bg="#E8F7EE"; border=T.green; col=T.green; }
-                else if (sel)       { bg="#FEE8E8"; border=T.red;   col=T.red;   }
-              } else if (sel)       { bg=T.greenLight; border=T.green; }
-              return (
-                <button key={i} disabled={answered}
-                  onClick={()=>{ setAnswers(prev=>({...prev,[current]:i})); }}
-                  style={{ background:bg, border:"1.5px solid "+border, borderRadius:12,
-                    padding:"13px 16px", textAlign:"left", cursor:answered?"default":"pointer",
-                    color:col, fontSize:14, fontFamily:F, fontWeight:sel||correct&&answered?700:400,
-                    transition:"all .15s", display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ width:22, height:22, borderRadius:"50%",
-                    background:answered&&correct?T.green:answered&&sel?T.red:T.border0,
-                    color:answered&&(correct||sel)?"#fff":T.l3,
-                    display:"inline-flex", alignItems:"center", justifyContent:"center",
-                    fontSize:11, fontWeight:700, flexShrink:0 }}>
-                    {answered&&correct?"✓":answered&&sel?"✗":["A","B","C","D"][i]}
-                  </span>
-                  {opt}
-                </button>
-              );
-            })}
-          </div>
-          {/* 해설 */}
-          {answered && (
-            <div style={{ background:isCorrect?"#E8F7EE":"#FEE8E8", borderRadius:12,
-              padding:"12px 16px", marginBottom:16,
-              border:"1px solid "+(isCorrect?T.green:T.red) }}>
-              <div style={{ fontSize:13, fontWeight:700, color:isCorrect?T.green:T.red,
-                fontFamily:F, marginBottom:4 }}>{isCorrect?"✓ 정답!":"✗ 오답"}</div>
-              <div style={{ fontSize:12, color:T.l2, fontFamily:F, lineHeight:1.6 }}>{q.explanation}</div>
-            </div>
-          )}
-          {/* 다음/완료 버튼 */}
-          {answered && (
-            <GreenBtn full onClick={()=>{
-              if (current < quizzes.length-1) { setCurrent(c=>c+1); }
-              else { setShowResult(true); }
-            }}>
-              {current < quizzes.length-1 ? "다음 문제 →" : "결과 보기"}
-            </GreenBtn>
-          )}
-        </div>
-      )}
-      {/* 결과 화면 */}
-      {showResult && (
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:60, marginBottom:12 }}>
-            {score===quizzes.length?"🏆":score>=3?"🌟":"📚"}
-          </div>
-          <div style={{ fontSize:24, fontWeight:800, color:T.l1, fontFamily:F, marginBottom:4 }}>
-            {score} / {quizzes.length} 정답
-          </div>
-          <div style={{ fontSize:14, color:T.l2, fontFamily:F, marginBottom:24 }}>
-            {score===quizzes.length?"완벽해요! 모든 내용을 숙지했어요 👏":
-             score>=3?"잘 했어요! 틀린 내용을 한번 더 확인해보세요":
-             "공지를 다시 한번 읽어보는 게 좋을 것 같아요 📖"}
-          </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <button onClick={run} style={{ flex:1, padding:"13px", borderRadius:12,
-              border:"1px solid "+T.border1, background:T.card, color:T.l2,
-              fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:600 }}>🔄 다시 풀기</button>
-            <button onClick={onClose} style={{ flex:1, padding:"13px", borderRadius:12,
-              border:"none", background:"linear-gradient(135deg,#00704A,#1E3932)", color:"#fff",
-              fontSize:14, cursor:"pointer", fontFamily:F, fontWeight:700 }}>완료</button>
-          </div>
-        </div>
-      )}
-    </Sheet>
-  );
-}
-
-function AIChatSheet({ onClose, notices }) {
-  const [messages, setMessages] = useState([
-    { role:"assistant", text:"안녕하세요! 공지 내용에 대해 질문하거나 검색해보세요 😊" }
-  ]);
-  const [input, setInput]   = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef();
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
-  }, [messages]);
-
-  const [apiKey, setApiKey] = useState(() => {
-    try { return localStorage.getItem("sbx_apikey") || ""; } catch(e) { return ""; }
-  });
-  const [showKeyInput, setShowKeyInput] = useState(false);
-
-  const saveKey = (k) => {
-    setApiKey(k);
-    try { localStorage.setItem("sbx_apikey", k); } catch(e) {}
-  };
-
-  const send = async () => {
-    const q = input.trim();
-    if (!q || loading) return;
-
-    let key = apiKey;
-    if (!key) { try { key = localStorage.getItem("sbx_apikey")||""; } catch(e) { key = ""; } }
-    if (!key) {
-      setShowKeyInput(true);
-      setMessages(prev => [...prev, { role:"assistant",
-        text:"AI 기능을 사용하려면 Anthropic API 키가 필요해요. 아래에 입력해주세요." }]);
-      return;
-    }
-
-    setInput("");
-    setMessages(prev => [...prev, { role:"user", text:q }]);
-    setLoading(true);
-
-    try {
-      const noticeText = notices.slice(0, 20).map(n =>
-        "[" + n.date + "] " + n.title + ": " + (n.content || "").replace(/<[^>]+>/g, "").slice(0, 300)
-      ).join("\n");
-
-      const systemPrompt = "당신은 스타벅스 매장 운영 도우미 AI입니다.\n"
-        + "아래는 최근 매장 공지 목록입니다. 이 내용을 바탕으로 질문에 친절하게 답해주세요.\n"
-        + "공지에 없는 내용이면 솔직하게 모른다고 말해주세요.\n\n"
-        + "=== 공지 목록 ===\n" + noticeText;
-
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "x-api-key": key,
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
-        body: JSON.stringify({
-          model:"claude-haiku-4-5-20251001",
-          max_tokens:1000,
-          system: systemPrompt,
-          messages:[{ role:"user", content:q }]
-        })
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(()=>({}));
-        const msg = err.error?.message || ("오류 "+resp.status);
-        if (resp.status === 401) {
-          setShowKeyInput(true);
-          setMessages(prev=>[...prev,{role:"assistant",text:"API 키가 올바르지 않아요. 다시 확인해주세요."}]);
-        } else {
-          setMessages(prev=>[...prev,{role:"assistant",text:"오류: "+msg}]);
-        }
-        setLoading(false); return;
-      }
-      const data = await resp.json();
-      const answer = data.content?.map(b => b.text||"").join("").trim() || "응답을 받지 못했어요.";
-      setMessages(prev => [...prev, { role:"assistant", text:answer }]);
-    } catch(e) {
-      setMessages(prev => [...prev, { role:"assistant",
-        text:"네트워크 오류가 발생했어요. 인터넷 연결을 확인하고 다시 시도해주세요." }]);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <Sheet title="AI 공지 검색" onClose={onClose} tall>
-      {/* 메시지 목록 */}
-      <div style={{ flex:1, overflowY:"auto", marginBottom:12, display:"flex", flexDirection:"column", gap:10, minHeight:300, maxHeight:440 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start" }}>
-            {m.role==="assistant" && (
-              <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg," + T.green + ",#28a864)",
-                display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0, marginRight:8, marginTop:2 }}>
-                🤖
-              </div>
-            )}
-            <div style={{
-              maxWidth:"78%", padding:"10px 14px", borderRadius: m.role==="user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-              background: m.role==="user"
-                ? "linear-gradient(135deg," + T.green + ",#28a864)"
-                : T.glass2,
-              color: m.role==="user" ? "#001808" : T.l1,
-              fontSize:14, lineHeight:1.6, fontFamily:F,
-              border: m.role==="user" ? "none" : "1px solid " + T.border1,
-              whiteSpace:"pre-wrap"
-            }}>
-              {m.text}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg," + T.green + ",#28a864)",
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>🤖</div>
-            <div style={{ background:T.glass2, border:"1px solid " + T.border1, borderRadius:"18px 18px 18px 4px",
-              padding:"10px 16px", display:"flex", gap:5, alignItems:"center" }}>
-              {[0,1,2].map(i => (
-                <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:T.green,
-                  animation:"bounce .8s " + (i*0.15) + "s infinite alternate" }}/>
-              ))}
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef}/>
-      </div>
-      <style>{`@keyframes bounce{from{transform:translateY(0)}to{transform:translateY(-5px)}}`}</style>
-
-      {/* API 키 입력 */}
-      {showKeyInput && (
-        <div style={{ marginBottom:10, padding:"12px 14px", background:T.greenLight,
-          borderRadius:12, border:"1px solid "+T.greenBorder }}>
-          <div style={{ fontSize:12, color:T.green, fontWeight:700, fontFamily:F, marginBottom:6 }}>
-            🔑 Anthropic API 키 입력
-          </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <input
-              type="password"
-              placeholder="sk-ant-..."
-              defaultValue={apiKey}
-              id="apikey-input"
-              style={{ ...fBase, flex:1, marginBottom:0, fontSize:13 }}
-            />
-            <button onClick={()=>{
-                const v = document.getElementById("apikey-input").value.trim();
-                if(v){ saveKey(v); setShowKeyInput(false);
-                  setMessages(prev=>[...prev,{role:"assistant",text:"API 키가 저장됐어요! 이제 질문해보세요 😊"}]); }
-              }}
-              style={{ padding:"0 14px", borderRadius:10, border:"none", background:T.green,
-                color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
-              저장
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 입력창 */}
-      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key==="Enter" && !e.shiftKey && send()}
-          placeholder="공지 내용에 대해 질문하세요..."
-          style={{ ...fBase, flex:1, borderRadius:20, marginBottom:0 }}
-          disabled={loading}
-        />
-        <button onClick={send} disabled={!input.trim()||loading}
-          style={{ width:44, height:44, borderRadius:"50%", border:"none", flexShrink:0,
-            background: input.trim()&&!loading ? "linear-gradient(135deg,"+T.green+",#1E3932)" : "#E8F0EB",
-            color: input.trim()&&!loading ? "#fff" : T.l3,
-            fontSize:20, cursor: input.trim()&&!loading ? "pointer" : "default",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow: input.trim()&&!loading ? "0 3px 12px rgba(0,112,74,0.3)" : "none" }}>
-          ›
-        </button>
-      </div>
+      <GreenBtn full onClick={handleSave}>저장하기</GreenBtn>
     </Sheet>
   );
 }
