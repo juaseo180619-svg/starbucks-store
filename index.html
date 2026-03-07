@@ -2395,7 +2395,7 @@ function AIChatSheet({ onClose, notices }) {
       ).join("\n");
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:800,
           messages:[{ role:"user", content:"스타벅스 매장 공지 목록:\n"+ctx+"\n\n질문: "+query }]
@@ -2444,7 +2444,7 @@ function AIBriefingSheet({ onClose, notices, events }) {
         .map(e=>"• "+e.date+" "+e.title).join("\n");
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:600,
           messages:[{ role:"user", content:
@@ -2502,7 +2502,7 @@ function AIQuizSheet({ onClose, notices }) {
       const prompt = "공지 내용으로 퀴즈 1문제를 만들어줘:\n"+ctx+"\n\n반드시 JSON만 반환해: "+fmt;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:400,
           messages:[{ role:"user", content: prompt }]
