@@ -2498,14 +2498,14 @@ function AIQuizSheet({ onClose, notices }) {
       const ctx = (notices||[]).slice(0,15).map(n=>
         n.title+(n.body?": "+n.body.replace(/<[^>]*>/g,"").slice(0,80):"")
       ).join("\n");
+      const fmt = '{"question":"질문","options":["A","B","C","D"],"answer":0,"explanation":"설명"}';
+      const prompt = "공지 내용으로 퀴즈 1문제를 만들어줘:\n"+ctx+"\n\n반드시 JSON만 반환해: "+fmt;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:400,
-          messages:[{ role:"user", content:
-            "공지 내용으로 퀴즈 1문제를 만들어줘:\n"+ctx+
-            "\n\n반드시 JSON만 반환해: {question:"질문",options:["A","B","C","D"],answer:0,explanation:"설명"}" }]
+          messages:[{ role:"user", content: prompt }]
         })
       });
       const d = await res.json();
