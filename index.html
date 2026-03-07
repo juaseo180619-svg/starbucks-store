@@ -2286,31 +2286,6 @@ function NRow({ n, onClick, onDelete }) {
   const meta=CAT[n.category]||CAT["기타"];
   return (
     <div style={{ position:"relative" }}>
-      <div onClick={onClick} style={{ padding:"14px 16px", paddingRight:onDelete?"56px":"16px",
-        cursor:"pointer", display:"flex", alignItems:"flex-start", gap:12, transition:"background .15s" }}
-        onMouseEnter={e=>e.currentTarget.style.background=T.glassHover}
-        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-      <div style={{ width:3, alignSelf:"stretch", borderRadius:2,
-        background:n._read?T.l4:meta.color, flexShrink:0, minHeight:40 }}/>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:4 }}>
-          <span style={{ fontSize:15, fontWeight:n._read?400:600, color:n._read?T.l2:T.l1,
-            fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</span>
-          <span style={{ fontSize:12, color:T.l3, flexShrink:0, fontFamily:F }}>{n.date}</span>
-        </div>
-        <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
-          display:"-webkit-box", WebkitLineClamp:1, WebkitBoxOrient:"vertical", marginBottom:6 }}
-          dangerouslySetInnerHTML={{ __html: (n.content||"").replace(/<[^>]+>/g,"").slice(0,80) }}
-        />
-        <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-          <Pill label={n.category} color={meta.color} dim={meta.dim}/>
-          {n.pinned&&<Pill label="고정" color={T.gold} dim={T.goldDim}/>}
-          {n.author==="AI 분석"&&<Pill label="✨ AI" color={T.green} dim={T.greenDim}/>}
-        </div>
-      </div>
-      <span style={{ color:T.l4, fontSize:16, flexShrink:0, paddingTop:2 }}>›</span>
-    </div>
-    </div>
       {onDelete && (
         <button onClick={e=>{e.stopPropagation();onDelete();}} style={{
           position:"absolute", right:10, top:"50%", transform:"translateY(-50%)",
@@ -2318,6 +2293,30 @@ function NRow({ n, onClick, onDelete }) {
           color:"#DC2626", fontSize:12, fontWeight:700, cursor:"pointer",
           padding:"4px 8px", zIndex:5, borderRadius:7, lineHeight:1, fontFamily:F }}>삭제</button>
       )}
+      <div onClick={onClick} style={{ padding:"14px 16px", paddingRight:onDelete?"56px":"16px",
+        cursor:"pointer", display:"flex", alignItems:"flex-start", gap:12, transition:"background .15s" }}
+        onMouseEnter={e=>e.currentTarget.style.background=T.glassHover}
+        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+        <div style={{ width:3, alignSelf:"stretch", borderRadius:2,
+          background:n._read?T.l4:meta.color, flexShrink:0, minHeight:40 }}/>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:4 }}>
+            <span style={{ fontSize:15, fontWeight:n._read?400:600, color:n._read?T.l2:T.l1,
+              fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</span>
+            <span style={{ fontSize:12, color:T.l3, flexShrink:0, fontFamily:F }}>{n.date}</span>
+          </div>
+          <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
+            display:"-webkit-box", WebkitLineClamp:1, WebkitBoxOrient:"vertical", marginBottom:6 }}
+            dangerouslySetInnerHTML={{ __html: (n.content||"").replace(/<[^>]+>/g,"").slice(0,80) }}
+          />
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+            <Pill label={n.category} color={meta.color} dim={meta.dim}/>
+            {n.pinned&&<Pill label="고정" color={T.gold} dim={T.goldDim}/>}
+            {n.author==="AI 분석"&&<Pill label="✨ AI" color={T.green} dim={T.greenDim}/>}
+          </div>
+        </div>
+        <span style={{ color:T.l4, fontSize:16, flexShrink:0, paddingTop:2 }}>›</span>
+      </div>
     </div>
   );
 }
