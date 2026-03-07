@@ -323,7 +323,7 @@ const Pill = ({label,color,dim}) => (
 );
 const Sep = () => <div style={{ height:1, background:"rgba(0,0,0,0.06)", margin:"0 16px" }}/>;
 
-function Sheet({ onClose, title, children, tall, full }) {
+function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
   const [expanded, setExpanded] = useState(!!full);
   const [dragging, setDragging] = useState(false);
   const [startY, setStartY] = useState(0);
@@ -353,7 +353,7 @@ function Sheet({ onClose, title, children, tall, full }) {
       backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
       display:"flex", alignItems:"flex-end", justifyContent:"center",
       touchAction:"none" }}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      onClick={e=>e.target===e.currentTarget&&!noOutsideClose&&onClose()}>
       <div ref={sheetRef}
         style={{ background:"rgba(245,250,247,0.98)",
           backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
@@ -1727,7 +1727,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
   ];
 
   return (
-    <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} tall>
+    <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} tall noOutsideClose>
       <style>{`.rich-editor b,.rich-editor strong{font-weight:800}.rich-editor mark{padding:1px 2px;border-radius:3px}`}</style>
 
       <input
