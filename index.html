@@ -234,14 +234,19 @@ const GistSync = {
 
   /** 자동 push - debounce 2초 */
   _timer: null,
+  _lastPush: 0,
   autoPush: () => {
     clearTimeout(GistSync._timer);
+    // 변경 즉시 pull 차단 시작 (push 예정 상태)
+    GistSync._lastPush = Date.now();
     GistSync._timer = setTimeout(async ()=>{
       if(!GistSync.getToken()) return;
       if(!GistSync.getGistId()) {
         await GistSync.findExisting().catch(()=>{});
       }
-      GistSync.push().catch(()=>{});
+      await GistSync.push().catch(()=>{});
+      // push 완료 시각 갱신 (이후 20초간 pull 스킵)
+      GistSync._lastPush = Date.now();
     }, 5000);
   }
 };
@@ -568,6 +573,8 @@ function App() {
   // ── Gist 자동 pull (앱 시작시 + 2분마다) ──
   const doPull = useCallback(async (silent=true) => {
     if (!GistSync.getToken()) return;
+    // push 후 20초 이내면 pull 스킵 (충돌 방지)
+    if (Date.now() - GistSync._lastPush < 20000) return;
     // Gist ID 없으면 먼저 탐색
     if (!GistSync.getGistId()) {
       const found = await GistSync.findExisting().catch(()=>null);
