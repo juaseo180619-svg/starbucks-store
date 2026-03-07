@@ -249,18 +249,21 @@ const GistSync = {
 function useShared(key, seed) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => {
+  // loadRef로 안정화 - 리렌더마다 새 참조 생성 방지
+  const loadRef = useRef(null);
+  loadRef.current = async () => {
     try { const r = await window.storage.get(key, true); setData(r ? JSON.parse(r.value) : seed); }
     catch { setData(seed); }
     finally { setLoading(false); }
-  }, [key]);
-  useEffect(() => { load(); }, [load]);
-  // 자동 동기화 이벤트 수신 → reload 없이 state 갱신
+  };
+  // 최초 1회만 로드
+  useEffect(() => { loadRef.current(); }, [key]);
+  // sbx-sync 이벤트 수신 - loadRef 사용으로 무한루프 없음
   useEffect(() => {
-    const handler = () => load();
+    const handler = () => loadRef.current();
     window.addEventListener("sbx-sync", handler);
     return () => window.removeEventListener("sbx-sync", handler);
-  }, [load]);
+  }, [key]);
   const save = useCallback(async (next) => {
     const val = typeof next === "function" ? next(data||seed) : next;
     setData(val);
