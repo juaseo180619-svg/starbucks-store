@@ -252,7 +252,18 @@ function useShared(key, seed) {
   // loadRef로 안정화 - 리렌더마다 새 참조 생성 방지
   const loadRef = useRef(null);
   loadRef.current = async () => {
-    try { const r = await window.storage.get(key, true); setData(r ? JSON.parse(r.value) : seed); }
+    try {
+      const r = await window.storage.get(key, true);
+      if (r) {
+        setData(JSON.parse(r.value));
+      } else {
+        // localStorage에 없으면 seed 저장 후 사용 (데이터 손실 방지)
+        setData(seed);
+        if (seed !== null && seed !== undefined) {
+          window.storage.set(key, JSON.stringify(seed), true).catch(()=>{});
+        }
+      }
+    }
     catch { setData(seed); }
     finally { setLoading(false); }
   };
@@ -585,7 +596,7 @@ function App() {
 
   useEffect(()=>{
     doPull(true);
-    const iv = setInterval(()=>doPull(true), 30*1000);
+    const iv = setInterval(()=>doPull(true), 15*1000);
     return ()=>clearInterval(iv);
   }, [doPull]);
 
@@ -1499,29 +1510,34 @@ function App() {
           <div style={{ fontSize:15, color:T.l2, lineHeight:1.9, fontFamily:F, marginBottom:28 }}
             dangerouslySetInnerHTML={{ __html: viewNotice.content || "" }}
           />
-          <div style={{ display:"flex", gap:10, marginTop:0 }}>
-            <button onClick={()=>togglePin(viewNotice.id)} style={{
-              flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
-              fontSize:15, fontWeight:700, transition:"all .2s",
-              border:"1px solid "+(viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1),
-              background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
-              color:viewNotice.pinned?T.gold:T.l2,
-              backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-            }}>
-              <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
-              {viewNotice.pinned?"고정 해제":"상단 고정"}
-            </button>
-            <button onClick={()=>{ setEditNotice(viewNotice); setViewNotice(null); }} style={{
-              flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
-              fontSize:15, fontWeight:700, transition:"all .2s",
-              border:"1px solid "+T.border1,
-              background:T.glass2, color:T.l2,
-              backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-            }}>
-              <span style={{ fontSize:18 }}>✏️</span>수정
-            </button>
+          {/* sticky 하단 버튼 */}
+          <div style={{ position:"sticky", bottom:-44, zIndex:20,
+            marginLeft:-22, marginRight:-22, paddingLeft:22, paddingRight:22,
+            paddingTop:12, paddingBottom:16,
+            background:"rgba(245,250,247,0.97)", backdropFilter:"blur(12px)",
+            WebkitBackdropFilter:"blur(12px)", borderTop:"1px solid "+T.border0 }}>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>togglePin(viewNotice.id)} style={{
+                flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+                fontSize:15, fontWeight:700, transition:"all .2s",
+                border:"1px solid "+(viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1),
+                background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
+                color:viewNotice.pinned?T.gold:T.l2,
+                display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+              }}>
+                <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
+                {viewNotice.pinned?"고정 해제":"상단 고정"}
+              </button>
+              <button onClick={()=>{ setEditNotice(viewNotice); setViewNotice(null); }} style={{
+                flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+                fontSize:15, fontWeight:700, transition:"all .2s",
+                border:"1px solid "+T.border1,
+                background:T.glass2, color:T.l2,
+                display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+              }}>
+                <span style={{ fontSize:18 }}>✏️</span>수정
+              </button>
+            </div>
           </div>
         </Sheet>
       )}
