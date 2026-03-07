@@ -1797,6 +1797,56 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
 
         <div style={{ width:1, height:22, background:T.border1 }}/>
 
+        {/* 글자 크기 프리셋 */}
+        {[
+          { label:"제목",   fs:"22px", fw:"800", tip:"제목" },
+          { label:"소제목", fs:"17px", fw:"700", tip:"소제목" },
+          { label:"본문",   fs:"15px", fw:"400", tip:"본문" },
+        ].map(p => (
+          <button key={p.label} onMouseDown={e => {
+              e.preventDefault();
+              const sel = window.getSelection();
+              if (!sel || !sel.rangeCount) return;
+              const range = sel.getRangeAt(0);
+              // 선택 텍스트 감싸기
+              if (!sel.isCollapsed) {
+                const span = document.createElement("span");
+                span.style.fontSize = p.fs;
+                span.style.fontWeight = p.fw;
+                try { range.surroundContents(span); }
+                catch {
+                  // surroundContents 실패시 (부분 선택) extractContents 사용
+                  const frag = range.extractContents();
+                  span.appendChild(frag);
+                  range.insertNode(span);
+                }
+              } else {
+                // 커서만 있을 때 - 현재 블록 전체에 적용
+                let node = range.startContainer;
+                if (node.nodeType === 3) node = node.parentElement;
+                while (node && node !== editorRef.current &&
+                  !["P","DIV","H1","H2","H3","LI"].includes(node.tagName)) {
+                  node = node.parentElement;
+                }
+                if (node && node !== editorRef.current) {
+                  node.style.fontSize = p.fs;
+                  node.style.fontWeight = p.fw;
+                }
+              }
+              editorRef.current.focus();
+            }}
+            title={p.tip}
+            style={{ padding:"0 9px", height:30, borderRadius:7,
+              border:"1px solid "+T.border1, background:T.glass2,
+              color:T.l1, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:F,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              whiteSpace:"nowrap" }}>
+            {p.label}
+          </button>
+        ))}
+
+        <div style={{ width:1, height:22, background:T.border1 }}/>
+
         {/* 들여쓰기 - 선택 텍스트 줄에 margin-left 16px */}
         <button onMouseDown={e => {
             e.preventDefault();
