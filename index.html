@@ -2398,6 +2398,116 @@ function TRow({ t, done, onToggle, onDelete, showAuthor }) {
 }
 
 // ─── AI Chat Sheet ───
+
+// ─── Gist 설정 모달 ───
+function GistSetupModal({ onClose, currentToken, currentGistId, onSave }) {
+  const [token, setToken] = useState(currentToken||"");
+  const [gistId, setGistId] = useState(currentGistId||"");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const handleSave = async () => {
+    if (!token.trim()) { setMsg("GitHub 토큰을 입력해주세요."); return; }
+    setSaving(true);
+    setMsg("");
+    try {
+      localStorage.setItem("sbx_gist_token", token.trim());
+      let gid = gistId.trim();
+      if (!gid) {
+        // 기존 Gist 탐색
+        const found = await GistSync.findExisting().catch(()=>null);
+        gid = found || "";
+      }
+      if (gid) {
+        localStorage.setItem("sbx_gist_id", gid);
+        setGistId(gid);
+        setMsg("✓ 저장됐어요! Gist ID: "+gid.slice(0,8)+"...");
+      } else {
+        // 없으면 새로 생성
+        await GistSync.push();
+        gid = GistSync.getGistId();
+        setGistId(gid);
+        setMsg("✓ 새 Gist 생성됨! ID: "+(gid||"").slice(0,8)+"...");
+      }
+      setTimeout(()=>onSave(token.trim(), gid), 800);
+    } catch(e) {
+      setMsg("❌ 오류: 토큰을 확인해주세요.");
+    }
+    setSaving(false);
+  };
+
+  const handleDisconnect = () => {
+    localStorage.removeItem("sbx_gist_token");
+    localStorage.removeItem("sbx_gist_id");
+    onSave("", "");
+  };
+
+  return (
+    <Sheet title="🔗 Gist 동기화 설정" onClose={onClose}>
+      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:16, lineHeight:1.6 }}>
+        GitHub Gist를 통해 팀원들과 공지·캘린더를 공유해요. 각자 본인의 GitHub 토큰을 입력하고, 같은 Gist ID를 사용하면 돼요.
+      </p>
+
+      <Field label="GitHub Personal Access Token"
+        value={token} onChange={setToken}
+        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
+
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>
+          Gist ID <span style={{color:T.l4}}>(팀장이 공유한 ID — 없으면 자동 생성)</span>
+        </div>
+        <input value={gistId} onChange={e=>setGistId(e.target.value)}
+          placeholder="비워두면 새로 생성됩니다"
+          style={{ width:"100%", padding:"13px 15px", borderRadius:12,
+            border:"1px solid "+T.border1, background:"#F7FAF8",
+            fontSize:15, fontFamily:F, color:T.l1, outline:"none" }}/>
+      </div>
+
+      {gistId && (
+        <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
+          background:"rgba(0,112,74,0.06)", border:"1px solid rgba(0,112,74,0.15)" }}>
+          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:4 }}>팀원에게 공유할 Gist ID</div>
+          <div style={{ fontSize:14, fontWeight:700, color:T.green, fontFamily:F,
+            wordBreak:"break-all" }}>{gistId}</div>
+        </div>
+      )}
+
+      {msg && (
+        <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
+          background: msg.startsWith("❌")?"rgba(220,38,38,0.06)":"rgba(0,112,74,0.06)",
+          border:"1px solid "+(msg.startsWith("❌")?"rgba(220,38,38,0.2)":"rgba(0,112,74,0.2)") }}>
+          <div style={{ fontSize:13, color: msg.startsWith("❌")?T.red:T.green, fontFamily:F }}>
+            {msg}
+          </div>
+        </div>
+      )}
+
+      <GreenBtn full onClick={handleSave} disabled={saving}>
+        {saving ? "⏳ 저장 중..." : "저장하기"}
+      </GreenBtn>
+
+      {(currentToken||token) && (
+        <button onClick={handleDisconnect} style={{
+          width:"100%", marginTop:10, padding:"11px", borderRadius:12,
+          border:"1px solid rgba(220,38,38,0.2)", background:"rgba(220,38,38,0.05)",
+          color:"#DC2626", fontSize:14, fontFamily:F, cursor:"pointer" }}>
+          연결 해제
+        </button>
+      )}
+
+      <div style={{ marginTop:16, padding:"12px 14px", borderRadius:12,
+        background:T.glass1, border:"1px solid "+T.border0 }}>
+        <div style={{ fontSize:12, color:T.l3, fontFamily:F, lineHeight:1.8 }}>
+          📌 <b>토큰 발급 방법</b><br/>
+          github.com → Settings → Developer settings<br/>
+          → Personal access tokens → Tokens (classic)<br/>
+          → Generate new token → <b>gist</b> 권한만 체크
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
 function AIChatSheet({ onClose, notices }) {
   const [query, setQuery] = useState("");
   const [answer, setAnswer] = useState("");
