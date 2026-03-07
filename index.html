@@ -242,20 +242,25 @@ const GistSync = {
         await GistSync.findExisting().catch(()=>{});
       }
       GistSync.push().catch(()=>{});
-    }, 2000);
+    }, 5000);
   }
 };
 
 function useShared(key, seed) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      try { const r = await window.storage.get(key, true); setData(r ? JSON.parse(r.value) : seed); }
-      catch { setData(seed); }
-      finally { setLoading(false); }
-    })();
+  const load = useCallback(async () => {
+    try { const r = await window.storage.get(key, true); setData(r ? JSON.parse(r.value) : seed); }
+    catch { setData(seed); }
+    finally { setLoading(false); }
   }, [key]);
+  useEffect(() => { load(); }, [load]);
+  // 자동 동기화 이벤트 수신 → reload 없이 state 갱신
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener("sbx-sync", handler);
+    return () => window.removeEventListener("sbx-sync", handler);
+  }, [load]);
   const save = useCallback(async (next) => {
     const val = typeof next === "function" ? next(data||seed) : next;
     setData(val);
@@ -566,9 +571,10 @@ function App() {
       setSyncStatus("ok");
       const after = ["sbx6_notices","sbx6_events","sbx6_categories","sbx_teamtasks"]
         .map(k=>localStorage.getItem("sh_"+k)).join("|");
-      // silent여도 데이터가 달라졌으면 reload
-      if (before !== after) window.location.reload();
-      else if (!silent) window.location.reload();
+      // 데이터가 달라졌으면 커스텀 이벤트로 state 갱신 (reload 없이)
+      if (before !== after) {
+        window.dispatchEvent(new Event("sbx-sync"));
+      }
     } catch(e) {
       setSyncStatus("error");
     }
@@ -576,7 +582,7 @@ function App() {
 
   useEffect(()=>{
     doPull(true);
-    const iv = setInterval(()=>doPull(true), 2*60*1000);
+    const iv = setInterval(()=>doPull(true), 30*1000);
     return ()=>clearInterval(iv);
   }, [doPull]);
 
@@ -954,7 +960,7 @@ function App() {
             </div>
           </div>
 
-          {/* 오른쪽: 날짜 - 심플 */}
+          {/* 오른쪽: 날짜 + 동기화 상태 */}
           <div style={{ textAlign:"right" }}>
             <div style={{ fontSize:22, fontWeight:800, color:T.l1, fontFamily:F,
               letterSpacing:-0.8, lineHeight:1.1 }}>
@@ -963,6 +969,15 @@ function App() {
             <div style={{ fontSize:11, color:T.l3, fontFamily:F, marginTop:1 }}>
               {["일","월","화","수","목","금","토"][now.getDay()]}요일
             </div>
+            {GistSync.getToken() && (
+              <div style={{ fontSize:10, fontFamily:F, marginTop:2,
+                color:syncStatus==="syncing"?T.orange:syncStatus==="error"?T.red:T.green,
+                display:"flex", alignItems:"center", justifyContent:"flex-end", gap:3 }}>
+                {syncStatus==="syncing" ? "🔄 동기화 중" :
+                 syncStatus==="error"   ? "⚠ 동기화 실패" :
+                 lastSync               ? "✓ "+lastSync : ""}
+              </div>
+            )}
           </div>
         </div>
 
