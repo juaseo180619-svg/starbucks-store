@@ -2250,17 +2250,27 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
           var wStart = validDays[0], wEnd = validDays[validDays.length-1];
 
           var weekBars = [];
+          var mPfx = cY+"-"+String(cM+1).padStart(2,"0")+"-";
           monthEvents.forEach(function(ev) {
-            var evS = parseInt((ev.date||"").slice(8,10)||"0");
-            var evE = parseInt(((ev.endDate&&ev.endDate.length>=10?ev.endDate:ev.date)||"").slice(8,10)||"0");
+            var sDate = ev.date||"";
+            var eDate = (ev.endDate&&ev.endDate.length>=10?ev.endDate:ev.date)||"";
+            // 시작일이 이번 달보다 이전이면 1일로 간주
+            var evS = sDate.slice(0,7) < mPfx.slice(0,7) ? 1
+                    : parseInt(sDate.slice(8,10)||"0");
+            // 종료일이 이번 달보다 이후이면 31일로 간주 (월말까지 표시)
+            var evE = eDate.slice(0,7) > mPfx.slice(0,7) ? 31
+                    : parseInt(eDate.slice(8,10)||"0");
             if (evS > wEnd || evE < wStart) return;
             var clampS = Math.max(evS, wStart);
             var clampE = Math.min(evE, wEnd);
             var colS = weekRow.indexOf(clampS);
             var colE = weekRow.indexOf(clampE);
-            if (colS < 0 || colE < 0) return;
+            if (colS < 0) colS = 0;
+            if (colE < 0) colE = weekRow.filter(function(x){return x!==null;}).length - 1;
+            // 시작/끝이 이 주에 없으면 첫날~마지막날로 clamp
             weekBars.push({ ev:ev, colS:colS, colE:colE,
-              startsHere: evS>=wStart, endsHere: evE<=wEnd, slot:null });
+              startsHere: evS>=wStart && sDate.slice(0,7)===mPfx.slice(0,7),
+              endsHere: evE<=wEnd && eDate.slice(0,7)===mPfx.slice(0,7), slot:null });
           });
           weekBars.forEach(function(bar) {
             var slot=0, busy=[];
