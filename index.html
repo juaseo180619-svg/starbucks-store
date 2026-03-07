@@ -726,6 +726,11 @@ function App() {
     setNf({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
     setAddNotice(false);
   };
+  const deleteNoticeWithEvents = (nid) => {
+    saveNotices(p=>(p||[]).filter(x=>x.id!==nid));
+    saveEvents(p=>(p||[]).filter(e=>e.noticeId!==nid));
+  };
+
   const submitNoticeRich = (data) => {
     if (!data.title.trim()) return;
     const now_id = Date.now();
@@ -734,7 +739,8 @@ function App() {
     if (data.noticeDate) {
       const newEv = {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
-        endDate:data.noticeEndDate||data.noticeDate, category:data.category, memo:"공지 연동"
+        endDate:data.noticeEndDate||data.noticeDate, category:data.category, memo:"공지 연동",
+        noticeId:"n"+now_id
       };
       saveEvents(prev => [...(prev||events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
     }
@@ -1337,7 +1343,7 @@ function App() {
                 .map((n,i,arr)=>(
                   <div key={n.id}>
                     <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
-                      onDelete={()=>saveNotices(p=>(p||[]).filter(x=>x.id!==n.id))}/>
+                      onDelete={()=>deleteNoticeWithEvents(n.id)}/>
                     {i<arr.length-1&&<Sep/>}
                   </div>
                 ))}
