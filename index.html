@@ -331,7 +331,7 @@ background:dim||color+“18”, color, fontFamily:F, letterSpacing:0.2, whiteSpa
 );
 const Sep = () => <div style={{ height:1, background:“rgba(0,0,0,0.06)”, margin:“0 16px” }}/>;
 
-function Sheet({ onClose, title, children, tall, full, noOutsideClose, footer }) {
+function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
 const [expanded, setExpanded] = useState(!!full);
 const [dragging, setDragging] = useState(false);
 const [startY, setStartY] = useState(0);
@@ -370,20 +370,20 @@ borderLeft:“1px solid “+T.border0, borderRight:“1px solid “+T.border0,
 borderRadius: expanded ? “0” : “26px 26px 0 0”,
 width:“100%”, maxWidth:430,
 height: maxH,
-display:“flex”, flexDirection:“column”,
+overflowY:“auto”, overflowX:“hidden”, paddingBottom:44,
 touchAction:“pan-y”,
 transform: dragDY > 0 ? “translateY(”+Math.min(dragDY,120)+“px)” : “none”,
 transition: dragging ? “none” : “height .35s cubic-bezier(.32,0,.67,0), border-radius .35s, transform .2s”,
 boxShadow:“0 -20px 60px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.09)” }}>
 {/* 드래그 핸들 */}
-<div style={{ display:“flex”, justifyContent:“center”, padding:“14px 0 0”, cursor:“grab”, flexShrink:0 }}
+<div style={{ display:“flex”, justifyContent:“center”, padding:“14px 0 0”, cursor:“grab” }}
 onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
 onMouseDown={e=>{setDragging(true);setStartY(e.clientY);}}
 onMouseMove={e=>{if(dragging)setDragDY(e.clientY-startY);}}
 onMouseUp={()=>{if(dragDY<-60)setExpanded(true);else if(dragDY>80){if(expanded)setExpanded(false);else onClose();}setDragging(false);setDragDY(0);}}>
 <div style={{ width:44, height:5, borderRadius:3, background:T.glass3 }}/>
 </div>
-<div style={{ display:“flex”, justifyContent:“space-between”, alignItems:“center”, padding:“12px 22px 18px”, flexShrink:0 }}>
+<div style={{ display:“flex”, justifyContent:“space-between”, alignItems:“center”, padding:“12px 22px 18px” }}>
 <span style={{ fontSize:20, fontWeight:700, color:T.l1, fontFamily:F }}>{title}</span>
 <div style={{ display:“flex”, gap:8, alignItems:“center” }}>
 <button onClick={onClose} style={{ background:T.glass2, border:“1px solid “+T.border1,
@@ -391,18 +391,7 @@ borderRadius:“50%”, width:30, height:30, cursor:“pointer”, color:T.l2,
 fontSize:14, display:“flex”, alignItems:“center”, justifyContent:“center” }}>✕</button>
 </div>
 </div>
-{/* 스크롤 영역 */}
-<div style={{ flex:1, overflowY:“auto”, overflowX:“hidden”, padding:“0 22px”,
-paddingBottom: footer ? 0 : 44 }}>{children}</div>
-{/* 하단 고정 footer */}
-{footer && (
-<div style={{ flexShrink:0, padding:“10px 22px”,
-paddingBottom:“max(16px, env(safe-area-inset-bottom, 16px))”,
-background:“rgba(245,250,247,0.98)”,
-borderTop:“1px solid “+T.border0 }}>
-{footer}
-</div>
-)}
+<div style={{ padding:“0 22px” }}>{children}</div>
 </div>
 </div>
 );
@@ -1516,31 +1505,7 @@ justifyContent:isPC?“center”:“flex-start” }}>
 
   {/* ══ MODALS ══ */}
   {viewNotice&&(
-    <Sheet title="" onClose={()=>setViewNotice(null)} full
-      footer={
-        <div style={{ display:"flex", gap:10 }}>
-          <button onClick={()=>togglePin(viewNotice.id)} style={{
-            flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
-            fontSize:15, fontWeight:700, transition:"all .2s",
-            border:"1px solid "+(viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1),
-            background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
-            color:viewNotice.pinned?T.gold:T.l2,
-            display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-          }}>
-            <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
-            {viewNotice.pinned?"고정 해제":"상단 고정"}
-          </button>
-          <button onClick={()=>{ setEditNotice(viewNotice); setViewNotice(null); }} style={{
-            flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
-            fontSize:15, fontWeight:700, transition:"all .2s",
-            border:"1px solid "+T.border1,
-            background:T.glass2, color:T.l2,
-            display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-          }}>
-            <span style={{ fontSize:18 }}>✏️</span>수정
-          </button>
-        </div>
-      }>
+    <Sheet title="" onClose={()=>setViewNotice(null)} full>
       <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
         <Pill label={viewNotice.category}
           color={(CAT[viewNotice.category]||CAT["기타"]).color}
@@ -1555,9 +1520,31 @@ justifyContent:isPC?“center”:“flex-start” }}>
         {viewNotice.date}{viewNotice.author&&` · ${viewNotice.author}`}
       </div>
       <div style={{ height:1, background:T.border0, marginBottom:20 }}/>
-      <div style={{ fontSize:15, color:T.l2, lineHeight:1.9, fontFamily:F, marginBottom:28 }}
+      <div style={{ fontSize:15, color:T.l2, lineHeight:1.9, fontFamily:F, marginBottom:24 }}
         dangerouslySetInnerHTML={{ __html: viewNotice.content || "" }}
       />
+      <div style={{ display:"flex", gap:10, marginBottom:8 }}>
+        <button onClick={()=>togglePin(viewNotice.id)} style={{
+          flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+          fontSize:15, fontWeight:700, transition:"all .2s",
+          border:"1px solid "+(viewNotice.pinned?"rgba(255,214,10,0.35)":T.border1),
+          background:viewNotice.pinned?"rgba(255,214,10,0.10)":T.glass2,
+          color:viewNotice.pinned?T.gold:T.l2,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+        }}>
+          <span style={{ fontSize:18 }}>{viewNotice.pinned?"📌":"📍"}</span>
+          {viewNotice.pinned?"고정 해제":"상단 고정"}
+        </button>
+        <button onClick={()=>{ setEditNotice(viewNotice); setViewNotice(null); }} style={{
+          flex:1, padding:"14px", borderRadius:14, cursor:"pointer", fontFamily:F,
+          fontSize:15, fontWeight:700, transition:"all .2s",
+          border:"1px solid "+T.border1,
+          background:T.glass2, color:T.l2,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+        }}>
+          <span style={{ fontSize:18 }}>✏️</span>수정
+        </button>
+      </div>
     </Sheet>
   )}
 
@@ -1747,23 +1734,7 @@ const highlights = [
 ];
 
 return (
-<Sheet title={initial ? “공지 수정” : “공지 작성”} onClose={onClose} tall noOutsideClose
-footer={
-<div>
-<div style={{ display:“flex”, alignItems:“center”, gap:10, marginBottom:10,
-padding:“10px 14px”, background:T.glass1, border:“1px solid “+T.border0, borderRadius:12 }}>
-<input type=“checkbox” id=“richpin2” checked={pinned}
-onChange={e => setPinned(e.target.checked)}
-style={{ width:18, height:18, accentColor:T.green, cursor:“pointer” }}/>
-<label htmlFor=“richpin2” style={{ fontSize:14, color:T.l1, cursor:“pointer”, userSelect:“none”, fontFamily:F }}>
-상단 고정
-</label>
-</div>
-<GreenBtn full onClick={handleSave} disabled={!title.trim()}>
-{initial ? “수정 완료” : “등록하기”}
-</GreenBtn>
-</div>
-}>
+<Sheet title={initial ? “공지 수정” : “공지 작성”} onClose={onClose} tall noOutsideClose>
 <style>{`.rich-editor b,.rich-editor strong{font-weight:800}.rich-editor mark{padding:1px 2px;border-radius:3px}`}</style>
 
 ```
@@ -2209,6 +2180,19 @@ return (
   </div>
 
   <GreenBtn full onClick={handleSave}>저장하기</GreenBtn>
+  {/* 하단 버튼 영역 */}
+  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12,
+    padding:"10px 14px", background:T.glass1, border:"1px solid "+T.border0, borderRadius:12 }}>
+    <input type="checkbox" id="richpin" checked={pinned}
+      onChange={e => setPinned(e.target.checked)}
+      style={{ width:18, height:18, accentColor:T.green, cursor:"pointer" }}/>
+    <label htmlFor="richpin" style={{ fontSize:14, color:T.l1, cursor:"pointer", userSelect:"none", fontFamily:F }}>
+      상단 고정
+    </label>
+  </div>
+  <GreenBtn full onClick={handleSave} disabled={!title.trim()}>
+    {initial ? "수정 완료" : "등록하기"}
+  </GreenBtn>
 </Sheet>
 ```
 
