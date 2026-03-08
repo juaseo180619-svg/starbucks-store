@@ -1773,16 +1773,18 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
         <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>
           날짜 <span style={{ color:T.l4 }}>(선택 · 캘린더에 자동 추가)</span>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          <div style={{ flex:1 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div>
             <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>시작일</div>
             <input type="date" value={noticeDate} onChange={e=>setNoticeDate(e.target.value)}
-              style={{ ...fBase, marginBottom:0 }}/>
+              style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0,
+                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box" }}/>
           </div>
-          <div style={{ flex:1 }}>
+          <div>
             <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>종료일</div>
             <input type="date" value={noticeEndDate} onChange={e=>setNoticeEndDate(e.target.value)}
-              min={noticeDate} style={{ ...fBase, marginBottom:0 }}/>
+              min={noticeDate} style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0,
+                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box" }}/>
           </div>
         </div>
       </div>
@@ -1932,6 +1934,31 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
 
         <div style={{ width:1, height:22, background:T.border1 }}/>
 
+        {/* 구분선 */}
+        <button onMouseDown={e => {
+            e.preventDefault();
+            const sel = window.getSelection();
+            if (!sel || !sel.rangeCount) return;
+            const range = sel.getRangeAt(0);
+            range.collapse(false);
+            const hr = document.createElement("hr");
+            hr.style.border = "none";
+            hr.style.borderTop = "1.5px solid #C8DDD4";
+            hr.style.margin = "10px 0";
+            range.insertNode(hr);
+            // hr 뒤로 커서 이동
+            const br = document.createElement("br");
+            hr.parentNode.insertBefore(br, hr.nextSibling);
+            const r2 = document.createRange();
+            r2.setStartAfter(br); r2.collapse(true);
+            sel.removeAllRanges(); sel.addRange(r2);
+            editorRef.current.focus();
+          }}
+          title="구분선"
+          style={{ width:30, height:30, borderRadius:7, border:"1px solid "+T.border1,
+            background:T.glass2, color:T.l2, fontSize:13, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>—</button>
+
         {/* 이미지 */}
         <button onMouseDown={e => { e.preventDefault(); imgRef.current.click(); }}
           title="이미지 삽입"
@@ -1950,14 +1977,19 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
         suppressContentEditableWarning
         className="rich-editor"
         data-placeholder="공지 내용을 입력하세요..."
+        onPaste={e => {
+          e.preventDefault();
+          const text = e.clipboardData.getData("text/plain");
+          if (text) { document.execCommand("insertText", false, text); }
+        }}
         style={{ ...fBase, minHeight:160, fontSize:15, lineHeight:1.8, padding:"12px 14px",
           whiteSpace:"pre-wrap", overflowY:"auto", marginBottom:10 }}
       />
 
       {/* 하단 고정 영역 - sticky */}
-      <div style={{ position:"sticky", bottom:-44, zIndex:20,
+      <div style={{ position:"sticky", bottom:0, zIndex:20,
         marginLeft:-22, marginRight:-22, paddingLeft:22, paddingRight:22,
-        paddingTop:10, paddingBottom:16,
+        paddingTop:10, paddingBottom:"max(16px, env(safe-area-inset-bottom, 16px))",
         background:"rgba(245,250,247,0.97)", backdropFilter:"blur(12px)",
         WebkitBackdropFilter:"blur(12px)",
         borderTop:"1px solid "+T.border0 }}>
