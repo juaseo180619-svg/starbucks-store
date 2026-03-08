@@ -1040,7 +1040,7 @@ function App() {
       </div>}
 
 {/* == CONTENT == */}
-      <div style={{ position:"relative", zIndex:1, paddingTop:isPC?0:110 }}>
+      <div style={{ position:"relative", zIndex:1, paddingTop:isPC?0:130 }}>
 
         {/* -- HOME -- */}
         {tab==="home"&&(
@@ -1771,14 +1771,16 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
           <div>
             <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>시작일</div>
             <input type="date" value={noticeDate} onChange={e=>setNoticeDate(e.target.value)}
-              style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0,
-                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box" }}/>
+              style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0, height:50,
+                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box",
+                display:"block", lineHeight:"normal" }}/>
           </div>
           <div>
             <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>종료일</div>
             <input type="date" value={noticeEndDate} onChange={e=>setNoticeEndDate(e.target.value)}
-              min={noticeDate} style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0,
-                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box" }}/>
+              min={noticeDate} style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0, height:50,
+                WebkitAppearance:"none", appearance:"none", boxSizing:"border-box",
+                display:"block", lineHeight:"normal" }}/>
           </div>
         </div>
       </div>
