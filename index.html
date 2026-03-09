@@ -58,7 +58,12 @@
 
 
 /* ─── Fonts ─────────────────────────────────────── */
-
+(() => {
+  const l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap";
+  document.head.appendChild(l);
+})();
 const F = "'Noto Sans KR', -apple-system, sans-serif";
 
 /* ─── Design Tokens ─────────────────────────────── */
@@ -318,7 +323,6 @@ function usePersonal(key, seed) {
 }
 
 /* --- Utils --- */
-const todayStr = () => new Date().toISOString().slice(0,10);
 const fmtShort = d => new Date(d).toLocaleDateString("ko-KR",{month:"short",day:"numeric"});
 const WDAYS = ["일","월","화","수","목","금","토"];
 const glassBox = (extra={}) => ({
@@ -543,13 +547,6 @@ function ProfileSetup({ onComplete, existing }) {
 /* ================== AI ANALYZE SHEET ================== */
 
 /* ======================== MAIN APP ======================== */
-/* ─── glassBox helper ────────────────────────────── */
-const glassBox = (extra={}) => ({
-  background:T.card, borderRadius:18,
-  boxShadow:T.sh1,
-  border:"1px solid "+T.b0, ...extra
-});
-
 /* ─── Quick Action Pill ──────────────────────────── */
 function QChip({ icon, label, onClick, color }) {
   return (
