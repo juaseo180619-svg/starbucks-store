@@ -333,22 +333,27 @@ function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
   const [dragging, setDragging] = useState(false);
   const [startY, setStartY] = useState(0);
   const [dragDY, setDragDY] = useState(0);
-  const [vpH, setVpH] = useState(null);
-  const [vpOffsetTop, setVpOffsetTop] = useState(0);
+  const [vpH, setVpH] = useState(() => window.visualViewport ? window.visualViewport.height : window.innerHeight);
   const sheetRef = useRef();
-  const isPC = typeof window !== "undefined" && window.innerWidth >= 768;
+  const isPC = window.innerWidth >= 768;
 
+  // body를 fixed로 고정 → iOS 키보드 등장 시 페이지 밀림 완전 차단
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    document.body.style.cssText = "position:fixed;top:-"+scrollY+"px;left:0;right:0;overflow:hidden;";
+    return () => {
+      document.body.style.cssText = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+
+  // visualViewport 높이 추적 (키보드 등장/소멸)
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const update = () => {
-      setVpH(vv.height);
-      setVpOffsetTop(vv.offsetTop || 0);
-    };
+    const update = () => setVpH(vv.height);
     vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    update();
-    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
+    return () => vv.removeEventListener("resize", update);
   }, []);
 
   const handleTouchStart = (e) => { setDragging(true); setStartY(e.touches[0].clientY); setDragDY(0); };
@@ -360,17 +365,12 @@ function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
     setDragDY(0);
   };
 
-  const screenH = vpH || window.innerHeight;
   const ratio = expanded ? 1 : (tall ? 0.93 : 0.82);
-  const maxH = Math.min(screenH * ratio, screenH - (expanded ? 0 : 10));
-  // iOS 키보드 등장 시 viewport offset 보정
-  const overlayTop = vpOffsetTop > 0 ? vpOffsetTop : 0;
-  const overlayH = vpH || "100%";
+  const maxH = Math.min(vpH * ratio, vpH - (expanded ? 0 : 10));
 
   return (
-    <div style={{ position:"fixed", left:0, right:0,
-      top: overlayTop, height: overlayH,
-      zIndex:700, background:"rgba(0,0,0,0.55)",
+    <div style={{ position:"fixed", inset:0, zIndex:700,
+      background:"rgba(0,0,0,0.55)",
       backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
       display:"flex", alignItems:"flex-end", justifyContent:"center",
       touchAction:"none" }}
@@ -386,9 +386,8 @@ function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
           display:"flex", flexDirection:"column",
           touchAction:"pan-y",
           transform: dragDY > 0 ? "translateY("+Math.min(dragDY,120)+"px)" : "none",
-          transition: dragging ? "none" : "height .25s ease-out, border-radius .35s, transform .2s",
+          transition: dragging ? "none" : "height .2s ease-out, border-radius .35s, transform .2s",
           boxShadow:"0 -20px 60px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.09)" }}>
-        {/* 드래그 핸들 */}
         <div style={{ display:"flex", justifyContent:"center", padding:"14px 0 0", cursor:"grab", flexShrink:0 }}
           onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
           onMouseDown={e=>{setDragging(true);setStartY(e.clientY);}}
