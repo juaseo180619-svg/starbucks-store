@@ -1719,72 +1719,103 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
     { bg:"#5BA8FF", text:"#001835", label:"파랑" },
   ];
 
+  const btnS = { padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
+    background:T.glass1, color:T.l1, cursor:"pointer", fontFamily:F, fontSize:13 };
+
+  const insertHR = () => {
+    const sel=window.getSelection(); if(!sel||!sel.rangeCount) return;
+    const r=sel.getRangeAt(0);
+    const hr=document.createElement("hr");
+    hr.style.cssText="border:none;border-top:1.5px solid #C8DDD4;margin:10px 0";
+    const br=document.createElement("br");
+    r.collapse(false); r.insertNode(br); r.insertNode(hr);
+    r.setStartAfter(br); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+  };
+
+  const applyFontSize = (size, weight) => {
+    document.execCommand("fontSize","false","7");
+    const sel=window.getSelection();
+    if(sel&&sel.rangeCount){
+      const r=sel.getRangeAt(0);
+      (r.commonAncestorContainer.parentElement?.querySelectorAll("font[size='7']")||[])
+        .forEach(n=>{
+          const sp=document.createElement("span");
+          sp.style.fontSize=size; sp.style.fontWeight=weight;
+          sp.innerHTML=n.innerHTML; n.replaceWith(sp);
+        });
+    }
+  };
+
   const ToolbarContent = () => (
     <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
-      {[
-        { cmd:"bold",      label:"B", style:{ fontWeight:800 } },
-        { cmd:"italic",    label:"I", style:{ fontStyle:"italic" } },
-        { cmd:"underline", label:"U", style:{ textDecoration:"underline" } },
-      ].map(({cmd,label,style:st})=>(
-        <button key={cmd} onMouseDown={e=>{e.preventDefault();document.execCommand(cmd);}}
-          style={{ padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
-            background:T.glass1, color:T.l1, cursor:"pointer", fontFamily:F, fontSize:14, ...st }}>
-          {label}
-        </button>
-      ))}
-      {[
-        { size:"20px", weight:"700", label:"제목" },
-        { size:"17px", weight:"600", label:"소제목" },
-        { size:"15px", weight:"400", label:"본문" },
-      ].map(({size,weight,label})=>(
-        <button key={label} onMouseDown={e=>{
-          e.preventDefault();
-          document.execCommand("fontSize","false","7");
-          const sel=window.getSelection();
-          if(sel&&sel.rangeCount){
-            const r=sel.getRangeAt(0);
-            const nodes=r.commonAncestorContainer.parentElement?.querySelectorAll("font[size='7']")||[];
-            nodes.forEach(n=>{
-              const sp=document.createElement("span");
-              sp.style.fontSize=size; sp.style.fontWeight=weight;
-              sp.innerHTML=n.innerHTML; n.replaceWith(sp);
-            });
-          }
-        }} style={{ padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
-          background:T.glass1, color:T.l1, cursor:"pointer", fontFamily:F, fontSize:13 }}>
-          {label}
-        </button>
-      ))}
-      <button onMouseDown={e=>{e.preventDefault();
-        const a=prompt("링크 URL"); if(a)document.execCommand("createLink",false,a);
-      }} style={{ padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
-        background:T.glass1, color:T.l1, cursor:"pointer", fontFamily:F, fontSize:13 }}>→</button>
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("undo");}}
-        style={{ padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
-          background:T.glass1, color:T.l1, cursor:"pointer", fontFamily:F, fontSize:13 }}>←</button>
+      {/* 서식: 굵게/기울임/밑줄 */}
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("bold");}}
+        style={{ ...btnS, fontWeight:800 }}>B</button>
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("italic");}}
+        style={{ ...btnS, fontStyle:"italic" }}>I</button>
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("underline");}}
+        style={{ ...btnS, textDecoration:"underline" }}>U</button>
+      {/* 취소선 */}
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("strikeThrough");}}
+        style={{ ...btnS, textDecoration:"line-through" }}>S</button>
+
+      {/* 구분선 */}
+      <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+
+      {/* 글자 크기 */}
+      <button onMouseDown={e=>{e.preventDefault();applyFontSize("20px","700");}}
+        style={{ ...btnS }}>제목</button>
+      <button onMouseDown={e=>{e.preventDefault();applyFontSize("17px","600");}}
+        style={{ ...btnS }}>소제목</button>
+      <button onMouseDown={e=>{e.preventDefault();applyFontSize("15px","400");}}
+        style={{ ...btnS }}>본문</button>
+
+      {/* 구분선 */}
+      <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+
+      {/* 들여쓰기 / 내어쓰기 */}
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("indent");}}
+        title="들여쓰기"
+        style={{ ...btnS, fontSize:15 }}>⇥</button>
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("outdent");}}
+        title="내어쓰기"
+        style={{ ...btnS, fontSize:15 }}>⇤</button>
+
+      {/* 구분선 */}
+      <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+
+      {/* 형광펜 */}
       {["#FFEB3B","#A5D6A7","#EF9A9A","#90CAF9"].map(bg=>(
         <button key={bg} onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,bg);}}
-          style={{ width:26, height:26, borderRadius:6, background:bg,
-            border:"1px solid rgba(0,0,0,0.1)", cursor:"pointer", flexShrink:0 }}/>
+          style={{ width:24, height:24, borderRadius:5, background:bg,
+            border:"1px solid rgba(0,0,0,0.12)", cursor:"pointer", flexShrink:0 }}/>
       ))}
       <button onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,"transparent");}}
-        style={{ padding:"5px 7px", borderRadius:7, border:"1px solid "+T.border1,
-          background:T.glass1, color:T.l3, cursor:"pointer", fontFamily:F, fontSize:12 }}>x</button>
+        style={{ ...btnS, color:T.l3, fontSize:11 }}>지우기</button>
+
+      {/* 구분선 */}
+      <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
+
+      {/* 가로선 삽입 */}
+      <button onMouseDown={e=>{e.preventDefault();insertHR();}}
+        title="가로선" style={{ ...btnS, color:T.l3 }}>—</button>
+
+      {/* 링크 삽입 */}
       <button onMouseDown={e=>{
         e.preventDefault();
-        const sel=window.getSelection(); if(!sel||!sel.rangeCount) return;
-        const r=sel.getRangeAt(0);
-        const hr=document.createElement("hr");
-        hr.style.cssText="border:none;border-top:1.5px solid #C8DDD4;margin:10px 0";
-        const br=document.createElement("br");
-        r.collapse(false); r.insertNode(br); r.insertNode(hr);
-        r.setStartAfter(br); r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r);
-      }} style={{ padding:"5px 9px", borderRadius:7, border:"1px solid "+T.border1,
-        background:T.glass1, color:T.l3, cursor:"pointer", fontFamily:F, fontSize:14 }}>—</button>
+        const url = prompt("링크 주소를 입력하세요 (예: https://...)");
+        if(url && url.trim()) document.execCommand("createLink", false, url.trim());
+      }} title="링크 삽입" style={{ ...btnS }}>🔗</button>
+
+      {/* 이미지 삽입 */}
       <button onMouseDown={e=>{e.preventDefault();imgRef.current&&imgRef.current.click();}}
-        style={{ padding:"5px 7px", borderRadius:7, border:"1px solid "+T.border1,
-          background:T.glass1, color:T.l2, cursor:"pointer", fontFamily:F, fontSize:14 }}>🖼</button>
+        title="이미지" style={{ ...btnS }}>🖼</button>
+
+      {/* 실행취소 */}
+      <button onMouseDown={e=>{e.preventDefault();document.execCommand("undo");}}
+        title="실행취소" style={{ ...btnS }}>↩</button>
+
       <input ref={imgRef} type="file" accept="image/*" style={{ display:"none" }}
         onChange={e=>{
           const file=e.target.files[0]; if(!file)return;
