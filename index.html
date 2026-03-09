@@ -2,6 +2,7 @@
 <html lang="ko"><head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="Store"/>
@@ -24,10 +25,10 @@
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
     .rich-editor mark{padding:1px 3px;border-radius:3px}
     @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
     @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
     @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(16px)}}
     @keyframes spin{to{transform:rotate(360deg)}}
-    @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
     .fi{animation:fadeUp .28s cubic-bezier(.22,1,.36,1) both}
     button:active{transform:scale(0.96);transition:transform .1s}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}
@@ -87,6 +88,8 @@ const T = {
   get glass2(){ return this.card2; }, get glass3(){ return this.card3; },
   get orange(){ return this.amber; }, get orangeDim(){ return this.aDim; },
   get purple(){ return this.violet; }, get purpleDim(){ return this.vDim; },
+  get goldDim(){ return this.goDim; }, get redDim(){ return this.rDim; },
+  get glassHover(){ return "rgba(0,112,74,0.05)"; },
 };
 
 /* ─── Category System ────────────────────────────── */
@@ -1692,7 +1695,7 @@ function App() {
         />
       )}
       </div>
-{/* 메인 콘텐츠 영역 끝 */}
+      </div>
     </div>
   );
 }
@@ -3415,10 +3418,8 @@ ${roleTk||"(없음)"}
                     background:T.card2, border:"1px solid "+T.b0, display:"flex", gap:5, alignItems:"center" }}>
                     {[0,1,2].map(i=>(
                       <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.t3,
-                        animation:`bounce .9s ${i*0.15}s infinite`,
-                        "@keyframes bounce":{} }}/>
+                        animation:`bounce .9s ${i*0.15}s infinite` }}/>
                     ))}
-                    <style>{`@keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}`}</style>
                   </div>
                 </div>
               )}
