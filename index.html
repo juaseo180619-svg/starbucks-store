@@ -2105,6 +2105,8 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
   const [newItem, setNewItem] = useState("");
   const [bufEdit, setBufEdit] = useState({});
   const [bufMode, setBufMode] = useState(false);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
   const [statsItem, setStatsItem] = useState(() => items && items[0] ? items[0] : "우유");
 
   const DOW_KR = ["일","월","화","수","목","금","토"];
@@ -2181,15 +2183,17 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
 
   // 발주 추천량
   function getRecommend(item) {
+    // 발주 → 이틀 후 입고 (ex. 월→수)
+    // 입고 당일(+2일) 사용량을 커버하도록 계산
     const today = inputDate;
     const todayRec = records.find(r => r.date === today);
     const currentStock = todayRec ? todayRec.items[item]?.closing ?? 0 : 0;
     const dow = new Date(today + "T00:00:00").getDay();
-    const tomorrowDow = (dow + 1) % 7;
-    const avg = parseFloat(getAvgByDow(item, tomorrowDow)) || 0;
+    const deliveryDow = (dow + 2) % 7; // 입고 요일 (+2일)
+    const avg = parseFloat(getAvgByDow(item, deliveryDow)) || 0;
     const buf = parseFloat(buffers[item]) || 2;
     const rec = Math.max(0, Math.ceil(avg + buf - currentStock));
-    return { rec, avg, buf, currentStock };
+    return { rec, avg, buf, currentStock, deliveryDow };
   }
 
   // 주차별 요일 통계 (최근 8주)
@@ -2297,14 +2301,14 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
         <div>
           <div style={{ background:T.greenDim, border:"1px solid "+T.greenBorder,
             borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:13, color:T.green, fontFamily:F }}>
-            📅 기준: {inputDate} ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일) 마감 기준<br/>
-            내일({DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+1)%7]}) 예상 사용량 + 버퍼 재고로 계산
+            📅 발주일: {inputDate} ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일)<br/>
+            📦 입고 예정: {DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+2)%7]}요일 기준 사용량으로 계산
           </div>
           <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
             boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
             <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 1fr",
               padding:"10px 14px", background:T.greenDim, gap:4 }}>
-              {["품목","현재고","예상사용","버퍼","권장발주"].map(h=>(
+              {["품목","현재고","입고일사용","버퍼","권장발주"].map(h=>(
                 <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
               ))}
             </div>
@@ -2432,7 +2436,26 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
               📋 품목 관리
             </div>
             {items.map((item, idx)=>(
-              <div key={item} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <div key={item}
+                draggable
+                onDragStart={()=>setDragIdx(idx)}
+                onDragOver={e=>{e.preventDefault();setDragOverIdx(idx);}}
+                onDrop={()=>{
+                  if(dragIdx===null||dragIdx===idx) return;
+                  const arr = [...items];
+                  const [moved] = arr.splice(dragIdx,1);
+                  arr.splice(idx,0,moved);
+                  onSaveItems(arr);
+                  setDragIdx(null); setDragOverIdx(null);
+                }}
+                onDragEnd={()=>{setDragIdx(null);setDragOverIdx(null);}}
+                onTouchStart={e=>{setDragIdx(idx);}}
+                style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8,
+                  opacity: dragIdx===idx ? 0.4 : 1,
+                  border: dragOverIdx===idx&&dragIdx!==idx ? "2px solid "+T.green : "2px solid transparent",
+                  borderRadius:12, transition:"border .1s" }}>
+                <div style={{ padding:"10px 8px", color:T.l3, cursor:"grab", fontSize:18, userSelect:"none",
+                  flexShrink:0 }}>⠿</div>
                 <div style={{ flex:1, padding:"10px 14px", borderRadius:10, background:T.glass2,
                   border:"1px solid "+T.border0, fontSize:14, color:T.l1, fontFamily:F }}>
                   {item}
@@ -2441,18 +2464,21 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
                   if(!window.confirm(`"${item}" 품목을 삭제할까요?`)) return;
                   onSaveItems(items.filter((_,i)=>i!==idx));
                 }} style={{ padding:"8px 10px", borderRadius:8, border:"1px solid #ff6b6b44",
-                  background:"#ff6b6b11", color:"#e05252", cursor:"pointer", fontFamily:F, fontSize:12 }}>삭제</button>
+                  background:"#ff6b6b11", color:"#e05252", cursor:"pointer", fontFamily:F, fontSize:12,
+                  flexShrink:0 }}>삭제</button>
               </div>
             ))}
-            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+            <div style={{ display:"flex", gap:8, marginTop:10, alignItems:"center" }}>
               <input value={newItem} onChange={e=>setNewItem(e.target.value)}
                 placeholder="새 품목명 입력"
                 onKeyDown={e=>{ if(e.key==="Enter"&&newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
                 style={{ flex:1, padding:"10px 14px", borderRadius:10, border:"1px solid "+T.border1,
-                  background:T.card, fontSize:14, fontFamily:F, color:T.l1, outline:"none" }}/>
+                  background:T.card, fontSize:14, fontFamily:F, color:T.l1, outline:"none",
+                  height:44 }}/>
               <button onClick={()=>{ if(newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
-                style={{ padding:"10px 16px", borderRadius:10, border:"none",
-                  background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontSize:14, fontWeight:600 }}>추가</button>
+                style={{ padding:"0 18px", borderRadius:10, border:"none", height:44, flexShrink:0,
+                  background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontSize:14, fontWeight:600,
+                  whiteSpace:"nowrap" }}>추가</button>
             </div>
           </div>
 
