@@ -873,6 +873,7 @@ function App() {
           borderRight:"1px solid rgba(0,112,74,0.08)",
           display:"flex", flexDirection:"column",
           position:"sticky", top:0, height:"100vh", flexShrink:0,
+          overflowY:"auto", overflowX:"hidden",
           boxShadow:"2px 0 24px rgba(0,112,74,0.07)" }}>
           {/* 브랜드 */}
           <div style={{ padding:"26px 22px 18px", borderBottom:"1px solid rgba(0,112,74,0.07)" }}>
@@ -950,7 +951,7 @@ function App() {
             ))}
           </nav>
           {/* AI + 검색 버튼 */}
-          <div style={{ padding:"10px 10px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
+          <div style={{ padding:"12px 18px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
             <button onClick={()=>{setAiInitTab("chat");setShowAI(true);}} style={{
               width:"100%", padding:"10px 12px", borderRadius:11, border:"none",
               background:"linear-gradient(135deg,rgba(0,112,74,0.12),rgba(30,57,50,0.08))",
@@ -967,7 +968,7 @@ function App() {
             </button>
           </div>
           {/* 동기화 */}
-          <div style={{ padding:"10px 10px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
+          <div style={{ padding:"12px 18px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
 
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
               <span style={{ fontSize:12, fontWeight:700, color:T.l1, fontFamily:F }}>
@@ -992,13 +993,13 @@ function App() {
                       const t=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
                       localStorage.setItem("sbx_last_sync",t); setLastSync(t);
                     } catch(e){ setSyncStatus("error"); } }}
-                  style={{ padding:"8px 0", borderRadius:8, border:"1px solid "+T.border1,
+                  style={{ width:"100%", padding:"8px 0", borderRadius:8, border:"1px solid "+T.border1,
                     background:T.card, color:T.green, fontSize:12, cursor:"pointer",
                     fontFamily:F, fontWeight:700 }}>
                   ⬆ 지금 업로드
                 </button>
                 <button onClick={()=>setShowGistSetup(true)}
-                  style={{ padding:"6px 0", borderRadius:8, border:"none",
+                  style={{ width:"100%", padding:"6px 0", borderRadius:8, border:"none",
                     background:"none", color:T.l3, fontSize:11, cursor:"pointer", fontFamily:F }}>
                   ⚙ Gist 설정 변경
                 </button>
@@ -3602,7 +3603,9 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
 
   return (
     <Sheet title="🔍 전체 검색" onClose={onClose}>
-      <div style={{ position:"sticky", top:0, background:T.card, paddingBottom:12, zIndex:1 }}>
+      <div style={{ position:"sticky", top:0, zIndex:1,
+        margin:"0 -22px", padding:"0 22px 12px",
+        background:T.card, borderBottom:"1px solid "+T.border0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8,
           border:"1.5px solid "+T.brandBorder, borderRadius:14, padding:"0 14px",
           background:"#fff" }}>
