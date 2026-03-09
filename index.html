@@ -1678,6 +1678,15 @@ function App() {
           onClose={()=>setEditNotice(null)}
           onSave={(data)=>{
             saveNotices((notices||[]).map(n => n.id===editNotice.id ? {...n,...data} : n));
+            // 캘린더 이벤트도 날짜 동기화
+            if (data.noticeDate) {
+              saveEvents(p=>(p||[]).map(e => e.noticeId===editNotice.id
+                ? {...e, title:data.title, date:data.noticeDate, endDate:data.noticeEndDate||data.noticeDate, category:data.category}
+                : e));
+            } else {
+              // 날짜 삭제된 경우 연동 이벤트 제거
+              saveEvents(p=>(p||[]).filter(e=>e.noticeId!==editNotice.id));
+            }
             setEditNotice(null);
           }}
         />
@@ -1734,7 +1743,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
 
   const handleSave = () => {
     if (!title.trim()) return;
-    const content = editorRef.current.innerHTML;
+    const content = editorRef.current ? editorRef.current.innerHTML : "";
     onSave({ title: title.trim(), category, content, pinned, noticeDate, noticeEndDate });
   };
 
