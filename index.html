@@ -146,7 +146,8 @@ const SEED_EVENTS = [
 const GIST_FILENAME = "starbucks_store_data.json";
 const SYNC_KEYS = [
   "sbx6_notices","sbx6_events","sbx6_categories",
-  "sbx_teamtasks","sbx6_profile"
+  "sbx_teamtasks","sbx6_profile",
+  "sbx_order_records","sbx_order_items","sbx_order_buffers"
 ];
 
 const GistSync = {
@@ -613,6 +614,11 @@ function App() {
   const [roleTasks, saveRoleTasks, rL] = useShared(roleTaskKey, []);
   /* 개인 할일 */
   const [tasks, saveTasks, tL] = usePersonal(taskKey, []);
+  /* 발주계산기 */
+  const DEFAULT_ORDER_ITEMS = ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"];
+  const [orderRecords, saveOrderRecords] = useShared("sbx_order_records", []);
+  const [orderItems,   saveOrderItems]   = useShared("sbx_order_items",   DEFAULT_ORDER_ITEMS);
+  const [orderBuffers, saveOrderBuffers] = useShared("sbx_order_buffers", {});
 
   const [tab, setTab] = useState("home");
   const [taskMode,    setTaskMode]    = useState("personal"); // "personal" | "role"
@@ -850,6 +856,7 @@ function App() {
               { id:"notices",  icon:"📢", label:"공지",   badge:0      },
               { id:"calendar", icon:"📅", label:"캘린더", badge:0      },
               { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
+              { id:"order",    icon:"🧮", label:"발주",   badge:0      },
               { id:"memo",     icon:"📓", label:"메모",   badge:0      },
             ].map(t=>(
               <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -993,6 +1000,7 @@ function App() {
             { id:"notices",  label:"공지",   badge:0 },
             { id:"calendar", label:"캘린더", badge:0 },
             { id:"tasks",    label:"할일",   badge:pending },
+            { id:"order",    label:"발주",   badge:0 },
             { id:"memo",     label:"메모",   badge:0 },
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1340,6 +1348,7 @@ function App() {
         {tab==="calendar"&&(
           <CalendarTab
             events={events||[]}
+            notices={notices||[]}
             calDate={calDate}
             setCalDate={setCalDate}
             selDay={selDay}
@@ -1348,7 +1357,8 @@ function App() {
             CAT={CAT}
             onAddEvent={()=>setAddEvent(true)}
             onDeleteEvent={(id)=>saveEvents(p=>(p||[]).filter(e=>e.id!==id))}
-            onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||(categories||DEFAULT_CATS)[0]||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
+            onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
+            onViewNotice={(n)=>setViewNotice(n)}
           />
         )}
 
@@ -1478,6 +1488,20 @@ function App() {
         {tab==="memo"&&(
           <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
             <MemoTab memos={memoNotes||[]} onSave={saveMemoNotes}/>
+          </div>
+        )}
+
+        {/* -- ORDER CALCULATOR -- */}
+        {tab==="order"&&(
+          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
+            <OrderTab
+              records={orderRecords||[]}
+              items={orderItems||DEFAULT_ORDER_ITEMS}
+              buffers={orderBuffers||{}}
+              onSaveRecords={saveOrderRecords}
+              onSaveItems={saveOrderItems}
+              onSaveBuffers={saveOrderBuffers}
+            />
           </div>
         )}
 
@@ -2071,6 +2095,398 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
   );
 }
 
+/* ===================== ORDER TAB ===================== */
+function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveBuffers }) {
+  const [mode, setMode] = useState("input"); // "input"|"recommend"|"stats"|"settings"
+  const [inputDate, setInputDate] = useState(() => {
+    const d = new Date(); return d.toISOString().slice(0,10);
+  });
+  const [form, setForm] = useState({});
+  const [newItem, setNewItem] = useState("");
+  const [bufEdit, setBufEdit] = useState({});
+  const [bufMode, setBufMode] = useState(false);
+  const [statsItem, setStatsItem] = useState(() => items && items[0] ? items[0] : "우유");
+
+  const DOW_KR = ["일","월","화","수","목","금","토"];
+
+  // 날짜 바뀌면 form 초기화: 전일 마감재고 자동 로드
+  useEffect(() => {
+    const prevDate = getPrevDate(inputDate);
+    const prevRec = records.find(r => r.date === prevDate);
+    const init = {};
+    items.forEach(item => {
+      const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
+      init[item] = { prev: String(prevClosing), received: "", closing: "" };
+    });
+    setForm(init);
+  }, [inputDate, records.length, items.join(",")]);
+
+  function getPrevDate(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0,10);
+  }
+
+  function calcUsed(prev, received, closing) {
+    const p = parseFloat(prev)||0, r = parseFloat(received)||0, c = parseFloat(closing)||0;
+    if (prev===""&&received===""&&closing==="") return null;
+    return Math.max(0, p + r - c);
+  }
+
+  function handleFieldChange(item, field, val) {
+    setForm(f => ({ ...f, [item]: { ...(f[item]||{}), [field]: val } }));
+  }
+
+  function handleSaveRecord() {
+    const dow = new Date(inputDate + "T00:00:00").getDay();
+    const itemData = {};
+    items.forEach(item => {
+      const f = form[item] || {};
+      const used = calcUsed(f.prev, f.received, f.closing);
+      itemData[item] = {
+        prev:     parseFloat(f.prev)    || 0,
+        received: parseFloat(f.received)|| 0,
+        closing:  parseFloat(f.closing) || 0,
+        used:     used !== null ? used : 0,
+      };
+    });
+    const newRec = { date: inputDate, dow, items: itemData };
+    const exists = records.findIndex(r => r.date === inputDate);
+    let updated;
+    if (exists >= 0) {
+      updated = records.map((r,i) => i===exists ? newRec : r);
+    } else {
+      updated = [...records, newRec].sort((a,b) => a.date.localeCompare(b.date));
+    }
+    onSaveRecords(updated);
+    alert("저장되었습니다 ✓");
+  }
+
+  // 요일별 평균 사용량 계산
+  function getAvgByDow(item, dow) {
+    const vals = records.filter(r => r.dow === dow && r.items[item]?.used > 0)
+      .map(r => r.items[item].used);
+    if (!vals.length) return null;
+    return (vals.reduce((a,b)=>a+b,0) / vals.length).toFixed(1);
+  }
+
+  // 전주 같은 요일 사용량
+  function getLastWeekSame(item, dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() - 7);
+    const lastWeekDate = d.toISOString().slice(0,10);
+    const rec = records.find(r => r.date === lastWeekDate);
+    return rec ? rec.items[item]?.used ?? null : null;
+  }
+
+  // 발주 추천량
+  function getRecommend(item) {
+    const today = inputDate;
+    const todayRec = records.find(r => r.date === today);
+    const currentStock = todayRec ? todayRec.items[item]?.closing ?? 0 : 0;
+    const dow = new Date(today + "T00:00:00").getDay();
+    const tomorrowDow = (dow + 1) % 7;
+    const avg = parseFloat(getAvgByDow(item, tomorrowDow)) || 0;
+    const buf = parseFloat(buffers[item]) || 2;
+    const rec = Math.max(0, Math.ceil(avg + buf - currentStock));
+    return { rec, avg, buf, currentStock };
+  }
+
+  // 주차별 요일 통계 (최근 8주)
+  function getWeeklyStats(item) {
+    const sorted = [...records].sort((a,b)=>b.date.localeCompare(a.date));
+    // 주 그룹화
+    const weeks = [];
+    sorted.forEach(r => {
+      const d = new Date(r.date + "T00:00:00");
+      const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
+      const wk = mon.toISOString().slice(0,10);
+      let w = weeks.find(x=>x.week===wk);
+      if (!w) { w = { week:wk, days:{} }; weeks.push(w); }
+      w.days[r.dow] = r.items[item]?.used ?? null;
+    });
+    return weeks.slice(0,8).reverse();
+  }
+
+  const btnStyle = (active) => ({
+    padding:"8px 16px", borderRadius:10, border:"none", cursor:"pointer",
+    fontFamily:F, fontSize:13, fontWeight:active?700:500,
+    background: active ? T.green : T.glass1,
+    color: active ? "#fff" : T.l2,
+    transition:"all .15s"
+  });
+
+  const inputStyle = {
+    width:"100%", padding:"8px 10px", borderRadius:8,
+    border:"1px solid "+T.border1, background:T.card,
+    fontSize:14, fontFamily:F, color:T.l1,
+    textAlign:"center", outline:"none"
+  };
+
+  return (
+    <div>
+      {/* 모드 탭 */}
+      <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+        {[["input","📝 재고 입력"],["recommend","📦 발주 추천"],["stats","📊 통계"],["settings","⚙️ 설정"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setMode(id)} style={btnStyle(mode===id)}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── 재고 입력 ── */}
+      {mode==="input"&&(
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+            <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)}
+              style={{ ...inputStyle, width:"auto", textAlign:"left", padding:"8px 12px" }}/>
+            <span style={{ fontSize:13, color:T.l3, fontFamily:F }}>
+              ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일)
+            </span>
+          </div>
+
+          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
+            {/* 헤더 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 0.8fr",
+              padding:"10px 14px", background:T.greenDim, gap:6 }}>
+              {["품목","전일재고","당일입고","마감재고","사용량"].map(h=>(
+                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {/* 행 */}
+            {items.map((item, idx) => {
+              const f = form[item] || { prev:"", received:"", closing:"" };
+              const used = calcUsed(f.prev, f.received, f.closing);
+              return (
+                <div key={item} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 0.8fr",
+                  padding:"10px 14px", gap:6, alignItems:"center",
+                  background: idx%2===0 ? T.glass2 : T.card,
+                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none" }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.l1, fontFamily:F }}>{item}</div>
+                  {["prev","received","closing"].map(field=>(
+                    <input key={field} type="number" min="0" step="0.5"
+                      value={f[field]||""}
+                      onChange={e=>handleFieldChange(item, field, e.target.value)}
+                      placeholder="0"
+                      style={{ ...inputStyle, fontSize:14,
+                        background: field==="prev" ? T.glass3 : T.card }}/>
+                  ))}
+                  <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
+                    color: used!==null ? T.green : T.l4, fontFamily:F }}>
+                    {used!==null ? used : "-"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:12 }}>
+            💡 전일재고는 어제 저장된 마감재고가 자동으로 입력돼요
+          </div>
+          <button onMouseDown={e=>{e.preventDefault();handleSaveRecord();}}
+            style={{ width:"100%", padding:"14px", borderRadius:14, border:"none",
+              background:"linear-gradient(135deg,#00704A,#1E3932)",
+              color:"#fff", fontSize:15, fontWeight:700, fontFamily:F,
+              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,112,74,0.30)" }}>
+            저장하기
+          </button>
+        </div>
+      )}
+
+      {/* ── 발주 추천 ── */}
+      {mode==="recommend"&&(
+        <div>
+          <div style={{ background:T.greenDim, border:"1px solid "+T.greenBorder,
+            borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:13, color:T.green, fontFamily:F }}>
+            📅 기준: {inputDate} ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일) 마감 기준<br/>
+            내일({DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+1)%7]}) 예상 사용량 + 버퍼 재고로 계산
+          </div>
+          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 1fr",
+              padding:"10px 14px", background:T.greenDim, gap:4 }}>
+              {["품목","현재고","예상사용","버퍼","권장발주"].map(h=>(
+                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {items.map((item, idx) => {
+              const { rec, avg, buf, currentStock } = getRecommend(item);
+              return (
+                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 1fr",
+                  padding:"10px 14px", gap:4, alignItems:"center",
+                  background: idx%2===0 ? T.glass2 : T.card,
+                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none" }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.l1, fontFamily:F }}>{item}</div>
+                  <div style={{ textAlign:"center", fontSize:13, color:T.l2, fontFamily:F }}>{currentStock}</div>
+                  <div style={{ textAlign:"center", fontSize:13, color:T.l2, fontFamily:F }}>{avg||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:13, color:T.l3, fontFamily:F }}>{buf}</div>
+                  <div style={{ textAlign:"center", fontSize:15, fontWeight:800,
+                    color: rec>0 ? T.green : T.l4, fontFamily:F }}>
+                    {rec>0 ? "▶ "+rec : "충분"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginTop:10 }}>
+            * 버퍼 재고는 설정 탭에서 품목별로 조정할 수 있어요
+          </div>
+        </div>
+      )}
+
+      {/* ── 통계 ── */}
+      {mode==="stats"&&(
+        <div>
+          <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+            {items.map(item=>(
+              <button key={item} onClick={()=>setStatsItem(item)}
+                style={{ padding:"6px 12px", borderRadius:20, border:"1px solid "+(statsItem===item?T.green:T.border1),
+                  background: statsItem===item ? T.greenDim : T.glass1,
+                  color: statsItem===item ? T.green : T.l2,
+                  fontSize:12, fontWeight:statsItem===item?700:400, cursor:"pointer", fontFamily:F }}>
+                {item}
+              </button>
+            ))}
+          </div>
+
+          {/* 요일별 평균 */}
+          <div style={{ background:T.card, borderRadius:16, padding:"14px",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:10 }}>
+              📊 요일별 평균 사용량 — {statsItem}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6 }}>
+              {[0,1,2,3,4,5,6].map(dow=>{
+                const avg = getAvgByDow(statsItem, dow);
+                const maxAvg = Math.max(...[0,1,2,3,4,5,6].map(d=>parseFloat(getAvgByDow(statsItem,d))||0));
+                const ratio = maxAvg>0 ? (parseFloat(avg)||0)/maxAvg : 0;
+                return (
+                  <div key={dow} style={{ textAlign:"center" }}>
+                    <div style={{ fontSize:11, fontWeight:600, color:dow===0?T.red:dow===6?T.blue:T.l3,
+                      fontFamily:F, marginBottom:4 }}>{DOW_KR[dow]}</div>
+                    <div style={{ height:60, background:T.glass3, borderRadius:6, position:"relative",
+                      overflow:"hidden", marginBottom:4 }}>
+                      <div style={{ position:"absolute", bottom:0, left:0, right:0,
+                        height:(ratio*100)+"%",
+                        background: "linear-gradient(to top,"+T.green+","+T.green+"88)",
+                        borderRadius:6, transition:"height .3s" }}/>
+                    </div>
+                    <div style={{ fontSize:12, fontWeight:700, color:T.l1, fontFamily:F }}>
+                      {avg||"-"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 주차별 테이블 */}
+          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
+            <div style={{ padding:"12px 14px 8px", fontSize:13, fontWeight:700, color:T.l1, fontFamily:F }}>
+              주차별 기록 — {statsItem}
+            </div>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
+                <thead>
+                  <tr style={{ background:T.greenDim }}>
+                    <th style={{ padding:"8px 10px", textAlign:"left", color:T.green, fontWeight:700 }}>주차</th>
+                    {[0,1,2,3,4,5,6].map(d=>(
+                      <th key={d} style={{ padding:"8px 6px", textAlign:"center",
+                        color:d===0?T.red:d===6?T.blue:T.green, fontWeight:700 }}>{DOW_KR[d]}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {getWeeklyStats(statsItem).map((wk, wi)=>(
+                    <tr key={wk.week} style={{ background:wi%2===0?T.glass2:T.card }}>
+                      <td style={{ padding:"8px 10px", color:T.l2, fontWeight:500 }}>
+                        {wk.week.slice(5)}
+                      </td>
+                      {[0,1,2,3,4,5,6].map(d=>(
+                        <td key={d} style={{ padding:"8px 6px", textAlign:"center",
+                          color: wk.days[d]!=null ? T.l1 : T.l4, fontWeight: wk.days[d]!=null?600:400 }}>
+                          {wk.days[d]!=null ? wk.days[d] : "·"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {getWeeklyStats(statsItem).length===0&&(
+                    <tr><td colSpan={8} style={{ padding:"20px", textAlign:"center", color:T.l3 }}>
+                      아직 기록이 없어요
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 설정 ── */}
+      {mode==="settings"&&(
+        <div>
+          {/* 품목 관리 */}
+          <div style={{ background:T.card, borderRadius:16, padding:"16px",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:12 }}>
+              📋 품목 관리
+            </div>
+            {items.map((item, idx)=>(
+              <div key={item} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                <div style={{ flex:1, padding:"10px 14px", borderRadius:10, background:T.glass2,
+                  border:"1px solid "+T.border0, fontSize:14, color:T.l1, fontFamily:F }}>
+                  {item}
+                </div>
+                <button onClick={()=>{
+                  if(!window.confirm(`"${item}" 품목을 삭제할까요?`)) return;
+                  onSaveItems(items.filter((_,i)=>i!==idx));
+                }} style={{ padding:"8px 10px", borderRadius:8, border:"1px solid #ff6b6b44",
+                  background:"#ff6b6b11", color:"#e05252", cursor:"pointer", fontFamily:F, fontSize:12 }}>삭제</button>
+              </div>
+            ))}
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <input value={newItem} onChange={e=>setNewItem(e.target.value)}
+                placeholder="새 품목명 입력"
+                onKeyDown={e=>{ if(e.key==="Enter"&&newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
+                style={{ flex:1, padding:"10px 14px", borderRadius:10, border:"1px solid "+T.border1,
+                  background:T.card, fontSize:14, fontFamily:F, color:T.l1, outline:"none" }}/>
+              <button onClick={()=>{ if(newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
+                style={{ padding:"10px 16px", borderRadius:10, border:"none",
+                  background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontSize:14, fontWeight:600 }}>추가</button>
+            </div>
+          </div>
+
+          {/* 버퍼 재고 설정 */}
+          <div style={{ background:T.card, borderRadius:16, padding:"16px",
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
+            <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:6 }}>
+              🛡 품목별 버퍼 재고
+            </div>
+            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:12 }}>
+              발주 추천 시 추가하는 안전 재고량이에요
+            </div>
+            {items.map(item=>(
+              <div key={item} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                <div style={{ flex:1, fontSize:14, color:T.l1, fontFamily:F }}>{item}</div>
+                <input type="number" min="0" step="0.5"
+                  value={bufEdit[item]!==undefined ? bufEdit[item] : (buffers[item]??2)}
+                  onChange={e=>setBufEdit(b=>({...b,[item]:e.target.value}))}
+                  onBlur={()=>{
+                    if(bufEdit[item]!==undefined){
+                      onSaveBuffers({...buffers,[item]:parseFloat(bufEdit[item])||0});
+                    }
+                  }}
+                  style={{ width:70, padding:"8px 10px", borderRadius:8, border:"1px solid "+T.border1,
+                    background:T.glass2, fontSize:14, fontFamily:F, color:T.l1, textAlign:"center", outline:"none" }}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MemoTab({ memos, onSave }) {
   const [input, setInput] = useState("");
   const [editId, setEditId] = useState(null);
@@ -2263,7 +2679,7 @@ function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors 
 
 
 /* ================== CALENDAR TAB ================== */
-function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent, onDeleteEvent, onEditEvent }) {
+function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent, onDeleteEvent, onEditEvent, onViewNotice }) {
   var cY = calDate.getFullYear();
   var cM = calDate.getMonth();
   var firstDow = new Date(cY, cM, 1).getDay();
@@ -2456,10 +2872,17 @@ function CalendarTab({ events, calDate, setCalDate, selDay, setSelDay, todayStr,
         {selDayEvents.length===0
           ? <EmptyRow text="이 날에 일정이 없어요"/>
           : selDayEvents.map(function(e,i){
+              var linkedNotice = e.noticeId && notices ? notices.find(function(n){ return n.id===e.noticeId; }) : null;
               return (
                 <div key={e.id} style={{ position:"relative" }}>
                   <ERow e={e}/>
                   <div style={{ display:"flex", gap:6, padding:"0 16px 10px", justifyContent:"flex-end" }}>
+                    {linkedNotice&&(
+                      <button onClick={()=>onViewNotice&&onViewNotice(linkedNotice)} style={{
+                        padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
+                        border:"1px solid "+T.greenBorder, background:T.greenDim, color:T.green,
+                        cursor:"pointer", fontWeight:600 }}>📢 공지 보기</button>
+                    )}
                     <button onClick={()=>onEditEvent&&onEditEvent(e)} style={{
                       padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
                       border:"1px solid "+T.border1, background:T.glass1, color:T.l2, cursor:"pointer" }}>수정</button>
