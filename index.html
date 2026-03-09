@@ -2033,6 +2033,9 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
   const [inputDate, setInputDate] = useState(() => {
     const d = new Date(); return d.toISOString().slice(0,10);
   });
+  useEffect(() => {
+    setInputDate(new Date().toISOString().slice(0,10));
+  }, []);
   const [form, setForm] = useState({});
   const [newItem, setNewItem] = useState("");
   const [bufEdit, setBufEdit] = useState({});
@@ -3031,6 +3034,36 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
                 </div>
               </div>
               <div style={{ marginTop:"auto", paddingTop:12 }}>
+                {/* AI 편집 버튼 - PC */}
+                {title.trim() && (
+                  <button onClick={async()=>{
+                    const currentText = editorRef.current ? editorRef.current.innerText : "";
+                    if (!currentText.trim()) { alert("먼저 내용을 입력해주세요"); return; }
+                    setAiDrafting(true);
+                    try {
+                      const res = await fetch("https://api.anthropic.com/v1/messages", {
+                        method:"POST",
+                        headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+                        body:JSON.stringify({
+                          model:"claude-sonnet-4-20250514", max_tokens:800,
+                          messages:[{role:"user",content:"스타벅스 매장 공지 내용을 가독성 좋게 편집해주세요.\n제목: "+title+"\n카테고리: "+category+"\n\n[현재 내용]\n"+currentText+"\n\n규칙:\n- 적절한 이모지 활용 (과하지 않게, 섹션 제목 앞에)\n- 줄바꿈과 단락 정돈\n- 중요 정보는 간결하게\n- 날짜/시간/기간 강조\n- HTML 형식으로 반환 (<b>, <br>, <ul>, <li> 사용 가능)\n- 내용만 반환, 설명 없이"}]
+                        })
+                      });
+                      const d = await res.json();
+                      const edited = (d.content||[]).map(b=>b.text||"").join("");
+                      if (edited && editorRef.current) {
+                        editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
+                      }
+                    } catch(e) { alert("AI API 키를 확인해주세요"); }
+                    setAiDrafting(false);
+                  }} style={{
+                    width:"100%", padding:"9px 14px", borderRadius:10, border:"1px solid "+T.brandBorder,
+                    background:T.brandDim, color:T.brand, cursor:"pointer", fontFamily:F,
+                    fontSize:12, fontWeight:600, display:"flex", alignItems:"center",
+                    justifyContent:"center", gap:6, marginBottom:8 }}>
+                    {aiDrafting ? <><Spin size={13} color={T.brand}/> AI 편집 중...</> : <>✨ AI로 내용 다듬기</>}
+                  </button>
+                )}
                 <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10,
                   padding:"10px 14px", background:T.glass1, border:"1px solid "+T.border0, borderRadius:12 }}>
                   <input type="checkbox" id="richpin-pc" checked={pinned}
@@ -3603,7 +3636,7 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
     <Sheet title="🔍 전체 검색" onClose={onClose} noPadding>
       {/* 검색 입력창 - 상단 고정 */}
       <div style={{ padding:"14px 22px 12px", borderBottom:"1px solid "+T.border0,
-        background:T.card, flexShrink:0 }}>
+        flexShrink:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8,
           border:"1.5px solid "+T.brandBorder, borderRadius:14, padding:"0 14px",
           background:"#fff", boxShadow:"0 1px 6px rgba(0,112,74,0.07)" }}>
