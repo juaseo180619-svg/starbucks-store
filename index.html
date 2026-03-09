@@ -328,124 +328,43 @@ const Pill = ({label,color,dim}) => (
 );
 const Sep = () => <div style={{ height:1, background:"rgba(0,0,0,0.06)", margin:"0 16px" }}/>;
 
-function Sheet({ onClose, title, children, tall, full, noOutsideClose }) {
-  const [expanded, setExpanded] = useState(!!full);
-  const [dragging, setDragging] = useState(false);
-  const [startY, setStartY] = useState(0);
-  const [dragDY, setDragDY] = useState(0);
+function Sheet({ onClose, title, children, noOutsideClose }) {
   const overlayRef = useRef();
-  const sheetRef  = useRef();
-  const expandedRef = useRef(!!full);
   const isPC = window.innerWidth >= 768;
 
-  // ── 핵심: DOM 직접 조작으로 즉시 반응 (React 재렌더 없음) ──────────
+  // body 스크롤 잠금
   useEffect(() => {
-    // 1) body 스크롤 완전 잠금
-    const savedY = window.scrollY;
-    const savedStyle = document.body.style.cssText;
-    document.body.style.cssText =
-      "position:fixed;top:-"+savedY+"px;left:0;right:0;overflow:hidden;width:100%;";
-
-    // 2) visualViewport 변화 → 오버레이·시트 크기 즉시 적용
-    const applyVP = () => {
-      const vv = window.visualViewport;
-      const vpTop  = vv ? vv.offsetTop  : 0;
-      const vpH    = vv ? vv.height     : window.innerHeight;
-      if (overlayRef.current) {
-        overlayRef.current.style.top    = vpTop + "px";
-        overlayRef.current.style.height = vpH + "px";
-      }
-      if (sheetRef.current) {
-        const exp = expandedRef.current;
-        const ratio = exp ? 1 : (tall ? 0.93 : 0.82);
-        const h = Math.min(vpH * ratio, vpH - (exp ? 0 : 10));
-        sheetRef.current.style.height = h + "px";
-      }
-    };
-
-    const vv = window.visualViewport;
-    if (vv) {
-      vv.addEventListener("resize", applyVP);
-      vv.addEventListener("scroll", applyVP);
-      applyVP();
-    }
-
-    return () => {
-      document.body.style.cssText = savedStyle;
-      window.scrollTo(0, savedY);
-      if (vv) {
-        vv.removeEventListener("resize", applyVP);
-        vv.removeEventListener("scroll", applyVP);
-      }
-    };
+    const y = window.scrollY;
+    document.body.style.cssText = "position:fixed;top:-"+y+"px;left:0;right:0;overflow:hidden;width:100%;";
+    return () => { document.body.style.cssText = ""; window.scrollTo(0, y); };
   }, []);
-
-  // expanded 변경 시에도 즉시 높이 갱신
-  useEffect(() => {
-    expandedRef.current = expanded;
-    if (!sheetRef.current) return;
-    const vpH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-    const ratio = expanded ? 1 : (tall ? 0.93 : 0.82);
-    sheetRef.current.style.height = Math.min(vpH * ratio, vpH - (expanded ? 0 : 10)) + "px";
-    if (overlayRef.current) {
-      overlayRef.current.style.borderRadius = expanded ? "0" : "";
-    }
-  }, [expanded]);
-
-  const handleTouchStart = (e) => { setDragging(true); setStartY(e.touches[0].clientY); setDragDY(0); };
-  const handleTouchMove  = (e) => { if (!dragging) return; setDragDY(e.touches[0].clientY - startY); };
-  const handleTouchEnd   = () => {
-    setDragging(false);
-    if (dragDY < -60) setExpanded(true);
-    else if (dragDY > 80) { if (expanded) setExpanded(false); else onClose(); }
-    setDragDY(0);
-  };
-
-  // 초기 높이 계산 (첫 렌더)
-  const vpH0   = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  const ratio0 = (!!full) ? 1 : (tall ? 0.93 : 0.82);
-  const initH  = Math.min(vpH0 * ratio0, vpH0 - (!!full ? 0 : 10));
 
   return (
     <div ref={overlayRef}
-      style={{ position:"fixed", left:0, right:0, top:0,
-        height: window.innerHeight,
-        zIndex:700, background:"rgba(0,0,0,0.55)",
+      style={{ position:"fixed", inset:0, zIndex:700,
+        background:"rgba(0,0,0,0.55)",
         backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-        display:"flex", alignItems:"flex-end", justifyContent:"center",
-        touchAction:"none" }}
+        display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e=>e.target===e.currentTarget&&!noOutsideClose&&onClose()}>
-      <div ref={sheetRef}
-        style={{ background:"rgba(245,250,247,0.98)",
-          backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
-          borderTop:"2px solid "+T.green,
-          borderLeft:"1px solid "+T.border0, borderRight:"1px solid "+T.border0,
-          borderRadius: expanded ? "0" : "26px 26px 0 0",
-          width:"100%", maxWidth: isPC ? 800 : 430,
-          height: initH,
-          display:"flex", flexDirection:"column",
-          touchAction:"pan-y",
-          transform: dragDY > 0 ? "translateY("+Math.min(dragDY,120)+"px)" : "none",
-          transition: dragging ? "none" : "height .2s ease-out, border-radius .35s, transform .2s",
-          boxShadow:"0 -20px 60px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.09)" }}>
-        <div style={{ display:"flex", justifyContent:"center", padding:"14px 0 0", cursor:"grab", flexShrink:0 }}
-          onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
-          onMouseDown={e=>{setDragging(true);setStartY(e.clientY);}}
-          onMouseMove={e=>{if(dragging)setDragDY(e.clientY-startY);}}
-          onMouseUp={()=>{if(dragDY<-60)setExpanded(true);else if(dragDY>80){if(expanded)setExpanded(false);else onClose();}setDragging(false);setDragDY(0);}}>
-          <div style={{ width:44, height:5, borderRadius:3, background:T.glass3 }}/>
-        </div>
+      <div style={{
+        background:"rgba(245,250,247,0.98)",
+        backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
+        borderTop:"2px solid "+T.green,
+        borderLeft:"1px solid "+T.border0, borderRight:"1px solid "+T.border0,
+        width:"100%", maxWidth: isPC ? 800 : 430,
+        height:"100%",
+        display:"flex", flexDirection:"column",
+        boxShadow:"0 -20px 60px rgba(0,0,0,0.7)" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-          padding:"12px 22px 18px", flexShrink:0 }}>
+          padding:"16px 22px 14px", flexShrink:0,
+          borderBottom:"1px solid "+T.border0 }}>
           <span style={{ fontSize:20, fontWeight:700, color:T.l1, fontFamily:F }}>{title}</span>
-          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={onClose} style={{ background:T.glass2, border:"1px solid "+T.border1,
-              borderRadius:"50%", width:30, height:30, cursor:"pointer", color:T.l2,
-              fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
-          </div>
+          <button onClick={onClose} style={{ background:T.glass2, border:"1px solid "+T.border1,
+            borderRadius:"50%", width:32, height:32, cursor:"pointer", color:T.l2,
+            fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
         </div>
         <div style={{ flex:1, overflowY:"auto", overflowX:"hidden",
-          padding:"0 22px", paddingBottom:16 }}>{children}</div>
+          padding:"16px 22px", paddingBottom:32 }}>{children}</div>
       </div>
     </div>
   );
@@ -1801,7 +1720,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
   ];
 
   return (
-    <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} full noOutsideClose>
+    <Sheet title={initial ? "공지 수정" : "공지 작성"} onClose={onClose} noOutsideClose>
       <style>{`.rich-editor b,.rich-editor strong{font-weight:800}.rich-editor mark{padding:1px 2px;border-radius:3px}`}</style>
 
       {/* PC: 2단 레이아웃, 모바일: 단일 스크롤 */}
