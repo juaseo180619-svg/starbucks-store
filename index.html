@@ -967,7 +967,7 @@ function App() {
             </button>
           </div>
           {/* 동기화 */}
-          <div style={{ padding:"12px 18px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
+          <div style={{ padding:"10px 10px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
 
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
               <span style={{ fontSize:12, fontWeight:700, color:T.l1, fontFamily:F }}>
@@ -983,7 +983,7 @@ function App() {
             {gistToken && gistId ? (
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <button onClick={()=>doPull(false)}
-                  style={{ padding:"8px 0", borderRadius:8, border:"none",
+                  style={{ width:"100%", padding:"8px 0", borderRadius:8, border:"none",
                     background:"linear-gradient(135deg,"+T.green+",#1E3932)", color:"#fff",
                     fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
                   ⬇ 지금 가져오기
@@ -1078,7 +1078,8 @@ function App() {
           background:"rgba(255,255,255,0.97)", backdropFilter:"blur(20px)",
           WebkitBackdropFilter:"blur(20px)",
           borderTop:"1px solid rgba(0,112,74,0.09)",
-          display:"flex", height:58,
+          display:"flex", height:"calc(58px + env(safe-area-inset-bottom))",
+          paddingBottom:"env(safe-area-inset-bottom)",
           boxShadow:"0 -4px 20px rgba(24,41,31,0.08)" }}>
           {[
             { id:"home",     icon:"🏠", label:"홈" },
@@ -1090,7 +1091,7 @@ function App() {
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
               flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-              justifyContent:"center", gap:2, border:"none", cursor:"pointer",
+              justifyContent:"flex-start", paddingTop:8, gap:2, border:"none", cursor:"pointer",
               background:"transparent", position:"relative",
               transition:"all .18s" }}>
               <div style={{ position:"relative" }}>
@@ -1119,7 +1120,7 @@ function App() {
         margin:isPC?"0":"0 auto", width:"100%",
         background:T.bg, minHeight:"100vh",
         boxShadow:isPC?"0 0 60px rgba(0,0,0,0.08)":"none",
-        paddingTop:isPC?0:60, paddingBottom:isPC?0:66 }}>
+        paddingTop:isPC?0:60, paddingBottom:isPC?0:"calc(66px + env(safe-area-inset-bottom))" }}>
 
         {/* ──── 홈 탭 ──────────────────────────────── */}
         {tab==="home" && (
@@ -1255,9 +1256,9 @@ function App() {
                             ) : (
                               <span style={{ fontSize:12, fontWeight:isSel?700:400, color:isSel?T.brand:col }}>{d}</span>
                             )}
-                            {hasEv && <div style={{ position:"absolute", bottom:2, left:"50%",
+                            {hasEv && <div style={{ position:"absolute", bottom:isTod?-6:2, left:"50%",
                               transform:"translateX(-50%)", width:4, height:4, borderRadius:"50%",
-                              background:isTod?"rgba(255,255,255,0.8)":T.brand }}/>}
+                              background:T.brand }}/>}
                           </div>
                         );
                       })}
@@ -3112,33 +3113,37 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
             </div>
 
             
-            {/* AI 초안 작성 */}
+            {/* AI 편집 */}
             {title.trim() && (
-              <div style={{ padding:"0 0 0 0", flexShrink:0 }}>
+              <div style={{ flexShrink:0 }}>
                 <button onClick={async()=>{
+                  const currentHTML = editorRef.current ? editorRef.current.innerHTML : "";
+                  const currentText = editorRef.current ? editorRef.current.innerText : "";
+                  if (!currentText.trim()) { alert("먼저 내용을 입력해주세요"); return; }
                   setAiDrafting(true);
                   try {
                     const res = await fetch("https://api.anthropic.com/v1/messages", {
                       method:"POST",
                       headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
                       body:JSON.stringify({
-                        model:"claude-sonnet-4-20250514", max_tokens:600,
-                        messages:[{role:"user",content:"스타벅스 매장 공지를 작성해주세요.\n제목: "+title+"\n카테고리: "+category+"\n\n- 직원이 이해하기 쉽게\n- 날짜/절차/주의사항 포함(해당 시)\n- 200자 내외\n- 인사말 없이 내용부터\n\n공지 내용만 반환하세요."}]
+                        model:"claude-sonnet-4-20250514", max_tokens:800,
+                        messages:[{role:"user",content:"스타벅스 매장 공지 내용을 가독성 좋게 편집해주세요.\n제목: "+title+"\n카테고리: "+category+"\n\n[현재 내용]\n"+currentText+"\n\n규칙:\n- 적절한 이모지 활용 (과하지 않게, 섹션 제목 앞에)\n- 줄바꿈과 단락 정돈\n- 중요 정보는 간결하게\n- 날짜/시간/기간 강조\n- HTML 형식으로 반환 (<b>, <br>, <ul>, <li> 사용 가능)\n- 내용만 반환, 설명 없이"}]
                       })
                     });
                     const d = await res.json();
-                    const draft = (d.content||[]).map(b=>b.text||"").join("");
-                    if (draft && editorRef.current) {
-                      editorRef.current.innerHTML = draft.replace(/\n/g,"<br>");
+                    const edited = (d.content||[]).map(b=>b.text||"").join("");
+                    if (edited && editorRef.current) {
+                      editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
                     }
                   } catch(e) { alert("AI API 키를 확인해주세요"); }
                   setAiDrafting(false);
                 }} style={{
                   width:"100%", padding:"10px 14px", border:"none",
-                  background:T.brandDim, borderTop:"1px solid "+T.brandBorder,
+                  background:"linear-gradient(135deg,rgba(0,112,74,0.10),rgba(0,112,74,0.06))",
+                  borderTop:"1px solid "+T.brandBorder,
                   color:T.brand, cursor:"pointer", fontFamily:F, fontSize:13, fontWeight:600,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                  {aiDrafting ? <><Spin size={14} color={T.brand}/> AI가 작성 중...</> : <>✨ AI로 공지 초안 작성</>}
+                  {aiDrafting ? <><Spin size={14} color={T.brand}/> AI가 편집 중...</> : <>✨ AI로 내용 다듬기</>}
                 </button>
               </div>
             )}
@@ -3600,7 +3605,7 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
       <div style={{ position:"sticky", top:0, background:T.card, paddingBottom:12, zIndex:1 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8,
           border:"1.5px solid "+T.brandBorder, borderRadius:14, padding:"0 14px",
-          background:T.brandDim }}>
+          background:"#fff" }}>
           <span style={{ fontSize:16 }}>🔍</span>
           <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)}
             placeholder="공지, 일정, 할일 검색..."
