@@ -3606,7 +3606,7 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
         background:T.card, flexShrink:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8,
           border:"1.5px solid "+T.brandBorder, borderRadius:14, padding:"0 14px",
-          background:"#fff" }}>
+          background:"#fff", boxShadow:"0 1px 6px rgba(0,112,74,0.07)" }}>
           <span style={{ fontSize:16 }}>🔍</span>
           <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)}
             placeholder="공지, 일정, 할일 검색..."
