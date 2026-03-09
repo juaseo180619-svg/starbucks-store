@@ -1568,6 +1568,7 @@ function App() {
       {addNotice&&(
         <RichNoticeSheet
           categories={categories}
+          notices={notices}
           onClose={()=>setAddNotice(false)}
           onSave={(data)=>{ submitNoticeRich(data); setAddNotice(false); }}
         />
@@ -1677,6 +1678,7 @@ function App() {
       {editNotice&&(
         <RichNoticeSheet
           categories={categories}
+          notices={notices}
           initial={editNotice}
           onClose={()=>setEditNotice(null)}
           onSave={(data)=>{
@@ -2749,7 +2751,7 @@ function GistSetupModal({ onClose, currentToken, currentGistId, onSave }) {
 
 
 /* ─── Rich Notice Editor ──────────────────────── */
-function RichNoticeSheet({ onClose, onSave, initial, categories }) {
+function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const cats = categories && categories.length ? categories : DEFAULT_CATS;
   const [aiDrafting, setAiDrafting] = useState(false);
   const [title, setTitle]       = useState(initial ? initial.title : "");
@@ -3046,7 +3048,10 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
                         headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
                         body:JSON.stringify({
                           model:"claude-sonnet-4-20250514", max_tokens:800,
-                          messages:[{role:"user",content:"스타벅스 매장 공지 내용을 가독성 좋게 편집해주세요.\n제목: "+title+"\n카테고리: "+category+"\n\n[현재 내용]\n"+currentText+"\n\n규칙:\n- 적절한 이모지 활용 (과하지 않게, 섹션 제목 앞에)\n- 줄바꿈과 단락 정돈\n- 중요 정보는 간결하게\n- 날짜/시간/기간 강조\n- HTML 형식으로 반환 (<b>, <br>, <ul>, <li> 사용 가능)\n- 내용만 반환, 설명 없이"}]
+                          messages:[{role:"user",content:(()=>{
+                          const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 공지 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
+                          return "스타벅스 매장 공지를 아래 [기존 공지 스타일]을 참고해 동일한 톤/이모지/들여쓰기/줄간격 스타일로 편집해주세요.\n\n[기존 공지 스타일 참고]\n"+(styleExamples||"스타벅스 매장 스타일로 작성해주세요")+"\n\n[편집할 공지]\n제목: "+title+"\n카테고리: "+category+"\n내용:\n"+currentText+"\n\n[규칙]\n- 기존 공지와 동일한 이모지 패턴 사용\n- 줄바꿈/들여쓰기 스타일 유지\n- HTML 형식 반환 (<b>, <br>, <ul>, <li> 허용)\n- 내용만 반환, 설명 없이";
+                        })()}]
                         })
                       });
                       const d = await res.json();
@@ -3098,6 +3103,16 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
               <div ref={editorRef} contentEditable suppressContentEditableWarning
                 className="rich-editor" data-placeholder="공지 내용을 입력하세요..."
                 onPaste={e=>{e.preventDefault();const t=e.clipboardData.getData("text/plain");if(t)document.execCommand("insertText",false,t);}}
+                onKeyDown={e=>{
+                  const meta = e.metaKey||e.ctrlKey;
+                  if(!meta) return;
+                  const k=e.key.toLowerCase();
+                  if(k==="z"&&!e.shiftKey){e.preventDefault();document.execCommand("undo");}
+                  else if((k==="z"&&e.shiftKey)||(k==="y")){e.preventDefault();document.execCommand("redo");}
+                  else if(k==="b"){e.preventDefault();document.execCommand("bold");}
+                  else if(k==="i"){e.preventDefault();document.execCommand("italic");}
+                  else if(k==="u"){e.preventDefault();document.execCommand("underline");}
+                }}
                 style={{ ...fBase, flex:1, minHeight:200, fontSize:15, lineHeight:1.9, padding:"14px 16px",
                   whiteSpace:"pre-wrap", overflowY:"auto" }}/>
             </div>
@@ -3159,7 +3174,10 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
                       headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
                       body:JSON.stringify({
                         model:"claude-sonnet-4-20250514", max_tokens:800,
-                        messages:[{role:"user",content:"스타벅스 매장 공지 내용을 가독성 좋게 편집해주세요.\n제목: "+title+"\n카테고리: "+category+"\n\n[현재 내용]\n"+currentText+"\n\n규칙:\n- 적절한 이모지 활용 (과하지 않게, 섹션 제목 앞에)\n- 줄바꿈과 단락 정돈\n- 중요 정보는 간결하게\n- 날짜/시간/기간 강조\n- HTML 형식으로 반환 (<b>, <br>, <ul>, <li> 사용 가능)\n- 내용만 반환, 설명 없이"}]
+                        messages:[{role:"user",content:(()=>{
+                          const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
+                          return "스타벅스 매장 공지를 아래 [기존 공지 스타일]을 참고해 동일한 톤/이모지/들여쓰기/줄간격 스타일로 편집해주세요.\n\n[기존 공지 스타일 참고]\n"+(styleExamples||"스타벅스 매장 스타일로 작성해주세요")+"\n\n[편집할 공지]\n제목: "+title+"\n카테고리: "+category+"\n내용:\n"+currentText+"\n\n[규칙]\n- 기존 공지와 동일한 이모지 패턴 사용\n- 줄바꿈/들여쓰기 스타일 유지\n- HTML 형식 반환 (<b>, <br>, <ul>, <li> 허용)\n- 내용만 반환, 설명 없이";
+                        })()}]
                       })
                     });
                     const d = await res.json();
@@ -3192,6 +3210,16 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
             <div ref={editorRef} contentEditable suppressContentEditableWarning
               className="rich-editor" data-placeholder="공지 내용을 입력하세요..."
               onPaste={e=>{e.preventDefault();const t=e.clipboardData.getData("text/plain");if(t)document.execCommand("insertText",false,t);}}
+              onKeyDown={e=>{
+                const meta=e.metaKey||e.ctrlKey;
+                if(!meta) return;
+                const k=e.key.toLowerCase();
+                if(k==="z"&&!e.shiftKey){e.preventDefault();document.execCommand("undo");}
+                else if((k==="z"&&e.shiftKey)||(k==="y")){e.preventDefault();document.execCommand("redo");}
+                else if(k==="b"){e.preventDefault();document.execCommand("bold");}
+                else if(k==="i"){e.preventDefault();document.execCommand("italic");}
+                else if(k==="u"){e.preventDefault();document.execCommand("underline");}
+              }}
               style={{ ...fBase, flex:1, minHeight:0, fontSize:15, lineHeight:1.8,
                 padding:"12px 22px", overflowY:"auto" }}/>
 
