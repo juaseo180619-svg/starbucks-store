@@ -1747,18 +1747,35 @@ function RichNoticeSheet({ onClose, onSave, initial, categories }) {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
     let r = sel.getRangeAt(0);
-    // 선택 없으면(커서만) → 현재 커서 줄(블록) 전체 선택
+
+    // 커서만 있을 때 → 현재 줄(블록) 전체 선택
     if (r.collapsed) {
       let node = r.startContainer;
+      // 텍스트 노드면 부모로
       if (node.nodeType === 3) node = node.parentNode;
-      // 에디터 바로 아래 자식 블록 찾기
-      while (node.parentNode && node.parentNode !== ed) node = node.parentNode;
+      // editor 바로 아래 블록 자식 찾기 (div/p/li 등)
+      // editor 자체이면 → 그냥 커서 위치 텍스트노드만 감쌈
+      if (node === ed) {
+        // editor 직접 하위에 커서: 빈 줄일 가능성, 새 span 삽입만
+        const sp = document.createElement("span");
+        sp.style.fontSize = size; sp.style.fontWeight = weight;
+        sp.innerHTML = "​"; // zero-width space
+        r.insertNode(sp);
+        r.setStartAfter(sp); r.collapse(true);
+        sel.removeAllRanges(); sel.addRange(r);
+        return;
+      }
+      // editor 하위 블록 찾기
+      let block = node;
+      while (block.parentNode && block.parentNode !== ed) block = block.parentNode;
+      // block이 ed의 직접 자식이면 그것만 선택
       const newR = document.createRange();
-      newR.selectNodeContents(node);
+      newR.selectNodeContents(block);
       sel.removeAllRanges(); sel.addRange(newR);
       r = newR;
     }
-    // 중첩 font-size 방지: 추출 후 기존 스타일 제거 후 새 span으로 감싸기
+
+    // 기존 font-size 중첩 방지
     const frag = r.extractContents();
     const stripSize = (n) => {
       if (n.style) { n.style.fontSize = ""; n.style.fontWeight = ""; }
