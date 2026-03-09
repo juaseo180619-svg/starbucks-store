@@ -2898,7 +2898,11 @@ function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, 
         {selDayEvents.length===0
           ? <EmptyRow text="이 날에 일정이 없어요"/>
           : selDayEvents.map(function(e,i){
-              var linkedNotice = e.noticeId && notices ? notices.find(function(n){ return n.id===e.noticeId; }) : null;
+              var linkedNotice = notices ? (
+                e.noticeId
+                  ? notices.find(function(n){ return n.id===e.noticeId; })
+                  : notices.find(function(n){ return n.title===e.title; })
+              ) : null;
               return (
                 <div key={e.id} style={{ position:"relative" }}>
                   <ERow e={e}/>
