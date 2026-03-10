@@ -2753,54 +2753,88 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     sel.removeAllRanges(); sel.addRange(r);
   };
 
+  const lastEnterRef = useRef(null); // 엔터 두번 감지용
+
+  /* ── 에디터 블록 유틸 ── */
+  // 노드에서 ed 직계 자식 블록 찾기
+  const getEdBlock = (node, ed) => {
+    let n = node && node.nodeType === 3 ? node.parentNode : node;
+    while (n && n.parentNode && n.parentNode !== ed) n = n.parentNode;
+    return (n && n !== ed && n.parentNode === ed) ? n : null;
+  };
+
+  // 선택 범위 내 ed 직계 블록 목록 수집
+  const getSelectedBlocks = (ed) => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return [];
+    const range = sel.getRangeAt(0);
+    const startBlock = getEdBlock(range.startContainer, ed);
+    const endBlock   = getEdBlock(range.endContainer,   ed);
+    if (!startBlock) return [];
+    const blocks = [];
+    let cur = startBlock;
+    while (cur) {
+      if (cur.nodeType === 1) blocks.push(cur);
+      if (cur === endBlock) break;
+      cur = cur.nextSibling;
+    }
+    return blocks.length ? blocks : (startBlock ? [startBlock] : []);
+  };
+
+  /* ── 커스텀 들여쓰기 (paddingLeft 직접 조작 — execCommand indent 대체) ── */
+  const customIndent = (dir) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus();
+    const blocks = getSelectedBlocks(ed);
+    if (!blocks.length) return;
+    blocks.forEach(block => {
+      const curr = parseInt(block.style.paddingLeft) || 0;
+      block.style.paddingLeft = dir === "in"
+        ? (curr + 24) + "px"
+        : Math.max(0, curr - 24) + "px";
+    });
+  };
+
+  /* ── 폰트 크기 적용 — 선택 범위에만 span 래핑 ── */
   const applyFontSize = (size, weight) => {
     const ed = editorRef.current;
     if (!ed) return;
     ed.focus();
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
-    let r = sel.getRangeAt(0);
+    let range = sel.getRangeAt(0);
 
-    // 커서만 있을 때 → 현재 줄(블록) 전체 선택
-    if (r.collapsed) {
-      let node = r.startContainer;
-      // 텍스트 노드면 부모로
-      if (node.nodeType === 3) node = node.parentNode;
-      // editor 바로 아래 블록 자식 찾기 (div/p/li 등)
-      // editor 자체이면 → 그냥 커서 위치 텍스트노드만 감쌈
-      if (node === ed) {
-        // editor 직접 하위에 커서: 빈 줄일 가능성, 새 span 삽입만
-        const sp = document.createElement("span");
-        sp.style.fontSize = size; sp.style.fontWeight = weight;
-        sp.innerHTML = "​"; // zero-width space
-        r.insertNode(sp);
-        r.setStartAfter(sp); r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r);
-        return;
-      }
-      // editor 하위 블록 찾기
-      let block = node;
-      while (block.parentNode && block.parentNode !== ed) block = block.parentNode;
-      // block이 ed의 직접 자식이면 그것만 선택
+    // 선택 없을 때(커서만) → 현재 블록 전체 선택
+    if (range.collapsed) {
+      const block = getEdBlock(range.startContainer, ed);
+      if (!block) return;
       const newR = document.createRange();
       newR.selectNodeContents(block);
-      sel.removeAllRanges(); sel.addRange(newR);
-      r = newR;
+      sel.removeAllRanges();
+      sel.addRange(newR);
+      range = sel.getRangeAt(0);
     }
 
-    // 기존 font-size 중첩 방지
-    const frag = r.extractContents();
-    const stripSize = (n) => {
+    // 선택 범위에서 기존 fontSize/fontWeight 제거 후 span 래핑
+    const frag = range.extractContents();
+    const strip = (n) => {
       if (n.style) { n.style.fontSize = ""; n.style.fontWeight = ""; }
-      n.childNodes && n.childNodes.forEach(stripSize);
+      n.childNodes && n.childNodes.forEach(strip);
     };
-    stripSize(frag);
+    strip(frag);
     const sp = document.createElement("span");
-    sp.style.fontSize = size; sp.style.fontWeight = weight;
+    sp.style.fontSize = size;
+    sp.style.fontWeight = weight;
     sp.appendChild(frag);
-    r.insertNode(sp);
-    r.setStartAfter(sp); r.collapse(true);
-    sel.removeAllRanges(); sel.addRange(r);
+    range.insertNode(sp);
+    // 커서를 span 뒤로 이동
+    const newR = document.createRange();
+    newR.setStartAfter(sp);
+    newR.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newR);
+    ed.focus();
   };
 
   const ToolbarContent = () => (
@@ -2831,11 +2865,11 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
       <div style={{ width:1, height:22, background:T.border1, margin:"0 2px" }}/>
 
       {/* 들여쓰기 / 내어쓰기 */}
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("indent");}}
-        title="들여쓰기"
+      <button onMouseDown={e=>{e.preventDefault();customIndent("in");}}
+        title="들여쓰기 (Tab)"
         style={{ ...btnS, fontSize:15 }}>⇥</button>
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("outdent");}}
-        title="내어쓰기"
+      <button onMouseDown={e=>{e.preventDefault();customIndent("out");}}
+        title="내어쓰기 (Shift+Tab)"
         style={{ ...btnS, fontSize:15 }}>⇤</button>
 
       {/* 구분선 */}
@@ -2968,7 +3002,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                           model:"claude-sonnet-4-20250514", max_tokens:800,
                           messages:[{role:"user",content:(()=>{
                           const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 공지 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
-                          return "스타벅스 매장 공지를 아래 [기존 공지 스타일]을 참고해 동일한 톤/이모지/들여쓰기/줄간격 스타일로 편집해주세요.\n\n[기존 공지 스타일 참고]\n"+(styleExamples||"스타벅스 매장 스타일로 작성해주세요")+"\n\n[편집할 공지]\n제목: "+title+"\n카테고리: "+category+"\n내용:\n"+currentText+"\n\n[규칙]\n- 기존 공지와 동일한 이모지 패턴 사용\n- 줄바꿈/들여쓰기 스타일 유지\n- HTML 형식 반환 (<b>, <br>, <ul>, <li> 허용)\n- 내용만 반환, 설명 없이";
+                          return "아래 공지를 가독성 위주로 HTML 형식으로 편집해줘.\\n\\n★ 절대 규칙:\\n- 원본의 모든 텍스트 내용을 반드시 빠짐없이 유지 (단 한 글자도 삭제/생략/요약 금지)\\n- 내용 추가도 금지, 오직 서식만 변경 가능\\n\\n✅ 허용 서식 개선:\\n- 줄바꿈 정리, 항목별 <ul><li> 구조화\\n- 핵심 단어에 <b> 강조 추가\\n- 이모지로 항목 구분 (기존 이모지 유지)\\n\\n[공지 제목]\\n"+title+"\\n\\n[공지 내용 — 이 내용 전체를 반드시 유지할 것]\\n"+currentText+"\\n\\nHTML로만 반환 (마크다운 코드블록 없이)";
                         })()}]
                         })
                       });
@@ -3022,14 +3056,52 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                 className="rich-editor" data-placeholder="공지 내용을 입력하세요..."
                 onPaste={e=>{e.preventDefault();const t=e.clipboardData.getData("text/plain");if(t)document.execCommand("insertText",false,t);}}
                 onKeyDown={e=>{
-                  const meta = e.metaKey||e.ctrlKey;
-                  if(!meta) return;
-                  const k=e.key.toLowerCase();
-                  if(k==="z"&&!e.shiftKey){e.preventDefault();document.execCommand("undo");}
-                  else if((k==="z"&&e.shiftKey)||(k==="y")){e.preventDefault();document.execCommand("redo");}
-                  else if(k==="b"){e.preventDefault();document.execCommand("bold");}
-                  else if(k==="i"){e.preventDefault();document.execCommand("italic");}
-                  else if(k==="u"){e.preventDefault();document.execCommand("underline");}
+                  const meta = e.metaKey || e.ctrlKey;
+                  const k = e.key;
+
+                  // ── 단축키 (Cmd/Ctrl + 키) ──
+                  if (meta) {
+                    const kl = k.toLowerCase();
+                    if (kl === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); return; }
+                    if ((kl === "z" && e.shiftKey) || kl === "y") { e.preventDefault(); document.execCommand("redo"); return; }
+                    if (kl === "b") { e.preventDefault(); document.execCommand("bold"); return; }
+                    if (kl === "i") { e.preventDefault(); document.execCommand("italic"); return; }
+                    if (kl === "u") { e.preventDefault(); document.execCommand("underline"); return; }
+                  }
+
+                  // ── Tab: 들여쓰기 / Shift+Tab: 내어쓰기 ──
+                  if (k === "Tab") {
+                    e.preventDefault();
+                    if (e.shiftKey) customIndent("out");
+                    else customIndent("in");
+                    lastEnterRef.current = null;
+                    return;
+                  }
+
+                  // ── Enter 두번 연속 → 현재 줄 들여쓰기 해제 ──
+                  if (k === "Enter") {
+                    if (lastEnterRef.current === "Enter") {
+                      // 두번째 엔터: 기본동작 막고 현재 블록 outdent
+                      const ed = editorRef.current;
+                      if (ed) {
+                        const sel = window.getSelection();
+                        if (sel && sel.rangeCount) {
+                          const block = getEdBlock(sel.getRangeAt(0).startContainer, ed);
+                          if (block && parseInt(block.style.paddingLeft) > 0) {
+                            e.preventDefault();
+                            block.style.paddingLeft = Math.max(0,
+                              (parseInt(block.style.paddingLeft) || 0) - 24) + "px";
+                            lastEnterRef.current = null;
+                            return;
+                          }
+                        }
+                      }
+                    }
+                    lastEnterRef.current = "Enter";
+                    return;
+                  }
+
+                  lastEnterRef.current = null;
                 }}
                 style={{ ...fBase, flex:1, minHeight:200, fontSize:15, lineHeight:1.9, padding:"14px 16px",
                   whiteSpace:"pre-wrap", overflowY:"auto" }}/>
@@ -3094,7 +3166,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                         model:"claude-sonnet-4-20250514", max_tokens:800,
                         messages:[{role:"user",content:(()=>{
                           const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
-                          return "스타벅스 매장 공지를 아래 [기존 공지 스타일]을 참고해 동일한 톤/이모지/들여쓰기/줄간격 스타일로 편집해주세요.\n\n[기존 공지 스타일 참고]\n"+(styleExamples||"스타벅스 매장 스타일로 작성해주세요")+"\n\n[편집할 공지]\n제목: "+title+"\n카테고리: "+category+"\n내용:\n"+currentText+"\n\n[규칙]\n- 기존 공지와 동일한 이모지 패턴 사용\n- 줄바꿈/들여쓰기 스타일 유지\n- HTML 형식 반환 (<b>, <br>, <ul>, <li> 허용)\n- 내용만 반환, 설명 없이";
+                          return "아래 공지를 가독성 위주로 HTML 형식으로 편집해줘.\\n\\n★ 절대 규칙:\\n- 원본의 모든 텍스트 내용을 반드시 빠짐없이 유지 (단 한 글자도 삭제/생략/요약 금지)\\n- 내용 추가도 금지, 오직 서식만 변경 가능\\n\\n✅ 허용 서식 개선:\\n- 줄바꿈 정리, 항목별 <ul><li> 구조화\\n- 핵심 단어에 <b> 강조 추가\\n- 이모지로 항목 구분 (기존 이모지 유지)\\n\\n[공지 제목]\\n"+title+"\\n\\n[공지 내용 — 이 내용 전체를 반드시 유지할 것]\\n"+currentText+"\\n\\nHTML로만 반환 (마크다운 코드블록 없이)";
                         })()}]
                       })
                     });
@@ -3129,15 +3201,53 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
               className="rich-editor" data-placeholder="공지 내용을 입력하세요..."
               onPaste={e=>{e.preventDefault();const t=e.clipboardData.getData("text/plain");if(t)document.execCommand("insertText",false,t);}}
               onKeyDown={e=>{
-                const meta=e.metaKey||e.ctrlKey;
-                if(!meta) return;
-                const k=e.key.toLowerCase();
-                if(k==="z"&&!e.shiftKey){e.preventDefault();document.execCommand("undo");}
-                else if((k==="z"&&e.shiftKey)||(k==="y")){e.preventDefault();document.execCommand("redo");}
-                else if(k==="b"){e.preventDefault();document.execCommand("bold");}
-                else if(k==="i"){e.preventDefault();document.execCommand("italic");}
-                else if(k==="u"){e.preventDefault();document.execCommand("underline");}
-              }}
+                  const meta = e.metaKey || e.ctrlKey;
+                  const k = e.key;
+
+                  // ── 단축키 (Cmd/Ctrl + 키) ──
+                  if (meta) {
+                    const kl = k.toLowerCase();
+                    if (kl === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); return; }
+                    if ((kl === "z" && e.shiftKey) || kl === "y") { e.preventDefault(); document.execCommand("redo"); return; }
+                    if (kl === "b") { e.preventDefault(); document.execCommand("bold"); return; }
+                    if (kl === "i") { e.preventDefault(); document.execCommand("italic"); return; }
+                    if (kl === "u") { e.preventDefault(); document.execCommand("underline"); return; }
+                  }
+
+                  // ── Tab: 들여쓰기 / Shift+Tab: 내어쓰기 ──
+                  if (k === "Tab") {
+                    e.preventDefault();
+                    if (e.shiftKey) customIndent("out");
+                    else customIndent("in");
+                    lastEnterRef.current = null;
+                    return;
+                  }
+
+                  // ── Enter 두번 연속 → 현재 줄 들여쓰기 해제 ──
+                  if (k === "Enter") {
+                    if (lastEnterRef.current === "Enter") {
+                      // 두번째 엔터: 기본동작 막고 현재 블록 outdent
+                      const ed = editorRef.current;
+                      if (ed) {
+                        const sel = window.getSelection();
+                        if (sel && sel.rangeCount) {
+                          const block = getEdBlock(sel.getRangeAt(0).startContainer, ed);
+                          if (block && parseInt(block.style.paddingLeft) > 0) {
+                            e.preventDefault();
+                            block.style.paddingLeft = Math.max(0,
+                              (parseInt(block.style.paddingLeft) || 0) - 24) + "px";
+                            lastEnterRef.current = null;
+                            return;
+                          }
+                        }
+                      }
+                    }
+                    lastEnterRef.current = "Enter";
+                    return;
+                  }
+
+                  lastEnterRef.current = null;
+                }}
               style={{ ...fBase, flex:1, minHeight:0, fontSize:15, lineHeight:1.8,
                 padding:"12px 22px", overflowY:"auto" }}/>
 
