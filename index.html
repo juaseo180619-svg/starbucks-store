@@ -781,15 +781,19 @@ function App() {
   const submitNoticeRich = (data) => {
     if (!data.title.trim()) return;
     const now_id = Date.now();
-    saveNotices(p=>[{ id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" }, ...(p||[])]);
+    // 현재 notices에 신규 공지 추가
+    const newNotice = { id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" };
+    saveNotices([newNotice, ...(notices||[])]);
     // 날짜 입력 시 캘린더에 자동 추가
+    // 함수형 업데이트 대신 현재 events 직접 참조 (stale closure 방지)
     if (data.noticeDate) {
       const newEv = {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
         endDate:data.noticeEndDate||data.noticeDate, category:data.category, memo:"공지 연동",
         noticeId:"n"+now_id
       };
-      saveEvents(prev => [...(prev||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
+      const updatedEvents = [...(events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date));
+      saveEvents(updatedEvents);
     }
   };
   const submitEvent = () => {
@@ -1660,14 +1664,25 @@ function App() {
           onClose={()=>setEditNotice(null)}
           onSave={(data)=>{
             saveNotices((notices||[]).map(n => n.id===editNotice.id ? {...n,...data} : n));
-            // 캘린더 이벤트도 날짜 동기화
+            // 캘린더 이벤트도 날짜 동기화 (events 직접 참조)
             if (data.noticeDate) {
-              saveEvents(p=>(p||[]).map(e => e.noticeId===editNotice.id
-                ? {...e, title:data.title, date:data.noticeDate, endDate:data.noticeEndDate||data.noticeDate, category:data.category}
-                : e));
+              const alreadyLinked = (events||[]).some(e => e.noticeId===editNotice.id);
+              if (alreadyLinked) {
+                saveEvents((events||[]).map(e => e.noticeId===editNotice.id
+                  ? {...e, title:data.title, date:data.noticeDate, endDate:data.noticeEndDate||data.noticeDate, category:data.category}
+                  : e));
+              } else {
+                // 기존에 연동 이벤트 없으면 신규 추가
+                const newEv = {
+                  id:"ev"+Date.now(), title:data.title, date:data.noticeDate,
+                  endDate:data.noticeEndDate||data.noticeDate, category:data.category,
+                  memo:"공지 연동", noticeId:editNotice.id
+                };
+                saveEvents([...(events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
+              }
             } else {
-              // 날짜 삭제된 경우 연동 이벤트 제거
-              saveEvents(p=>(p||[]).filter(e=>e.noticeId!==editNotice.id));
+              // 날짜 삭제 → 연동 이벤트 제거
+              saveEvents((events||[]).filter(e=>e.noticeId!==editNotice.id));
             }
             setEditNotice(null);
           }}
