@@ -697,6 +697,7 @@ function App() {
   const [showBriefing,setShowBriefing]= useState(false);
   const [showQuiz,    setShowQuiz]    = useState(false);
   const [showGistSetup,setShowGistSetup]=useState(false);
+  const [showSyncSheet,setShowSyncSheet]=useState(false);
   const [showSearch,  setShowSearch]  = useState(false);
   const [showAI,      setShowAI]      = useState(false);
   const [aiInitTab,   setAiInitTab]   = useState("chat");
@@ -1045,12 +1046,16 @@ function App() {
           </div>
           {/* 오른쪽: 날짜 + 아이콘 버튼 */}
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            {GistSync.getToken() && (
-              <div style={{ fontSize:10, fontFamily:F,
-                color:syncStatus==="syncing"?T.amber:syncStatus==="error"?T.red:T.brand }}>
-                {syncStatus==="syncing"?"🔄":syncStatus==="error"?"⚠":lastSync?"✓ "+lastSync:""}
-              </div>
-            )}
+            <button onClick={()=>setShowSyncSheet(true)} style={{
+              height:36, borderRadius:11, border:"1px solid "+T.b1,
+              background:T.card2, display:"flex", alignItems:"center",
+              justifyContent:"center", gap:4, cursor:"pointer",
+              padding:"0 10px", minWidth:36 }}>
+              <span style={{ fontSize:15 }}>🔄</span>
+              {syncStatus==="syncing" && <span style={{ fontSize:10, color:T.amber, fontFamily:F }}>...</span>}
+              {syncStatus==="error"   && <span style={{ fontSize:10, color:T.red,   fontFamily:F }}>!</span>}
+              {syncStatus==="ok" && lastSync && <span style={{ fontSize:10, color:T.brand, fontFamily:F }}>✓</span>}
+            </button>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontSize:20, fontWeight:900, color:T.t1, fontFamily:F, letterSpacing:-0.8, lineHeight:1.1 }}>
                 {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
@@ -1639,6 +1644,62 @@ function App() {
         tasks={tasks||[]} roleTasks={roleTasks||[]}
         onViewNotice={n=>{readNotice(n.id);setViewNotice(n);setShowSearch(false);}}
         setTab={t=>{setTab(t);setViewNotice(null);}}/>}
+      {/* 모바일 동기화 Sheet */}
+      {showSyncSheet&&(
+        <Sheet title="🔄 동기화" onClose={()=>setShowSyncSheet(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+              padding:"12px 16px", background:T.card2, borderRadius:12,
+              border:"1px solid "+T.border0 }}>
+              <span style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F }}>
+                {gistToken&&gistId?"🔄 자동 동기화 설정됨":"💾 동기화 미설정"}
+              </span>
+              {gistToken&&gistId&&(
+                <span style={{ fontSize:11, color:syncStatus==="ok"?T.brand:syncStatus==="error"?T.red:T.t3,
+                  fontFamily:F, fontWeight:600 }}>
+                  {syncStatus==="syncing"?"동기화중...":syncStatus==="ok"?"✓ "+lastSync:syncStatus==="error"?"⚠ 실패":""}
+                </span>
+              )}
+            </div>
+            {gistToken&&gistId ? (
+              <>
+                <button onClick={()=>doPull(false)} style={{
+                  width:"100%", padding:"14px", borderRadius:12, border:"none",
+                  background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")", color:"#fff",
+                  fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
+                  ⬇ 지금 가져오기
+                </button>
+                <button onClick={async()=>{ setSyncStatus("syncing"); try{ await GistSync.push(); setSyncStatus("ok");
+                  const t=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+                  localStorage.setItem("sbx_last_sync",t); setLastSync(t);
+                  } catch(e){ setSyncStatus("error"); } }}
+                  style={{ width:"100%", padding:"14px", borderRadius:12,
+                    border:"1px solid "+T.border1, background:T.card, color:T.brand,
+                    fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
+                  ⬆ 지금 업로드
+                </button>
+                <button onClick={()=>{setShowSyncSheet(false);setShowGistSetup(true);}} style={{
+                  width:"100%", padding:"10px", borderRadius:10, border:"none",
+                  background:"none", color:T.t3, fontSize:13, cursor:"pointer", fontFamily:F }}>
+                  ⚙ Gist 설정 변경
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize:13, color:T.t3, fontFamily:F, lineHeight:1.7, padding:"0 4px" }}>
+                  GitHub Gist 연동으로 PC↔모바일 간 공지, 일정, 할일을 자동 동기화할 수 있어요.
+                </div>
+                <button onClick={()=>{setShowSyncSheet(false);setShowGistSetup(true);}} style={{
+                  width:"100%", padding:"14px", borderRadius:12, border:"none",
+                  background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")", color:"#fff",
+                  fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
+                  🔗 동기화 설정하기
+                </button>
+              </>
+            )}
+          </div>
+        </Sheet>
+      )}
       {showGistSetup&&(
         <GistSetupModal
           onClose={()=>setShowGistSetup(false)}
