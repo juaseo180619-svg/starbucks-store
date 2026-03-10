@@ -337,10 +337,10 @@ function ProfileSetup({ onComplete, existing, onClose }) {
   const isEdit = !!existing;
 
   const ROLES = ["점장","부점장","SSV","바리스타"];
-  const ROLE_C = { "점장":T.violet,"부점장":T.blue,"SSV":T.brand,"바리스타":T.amber };
-  const ROLE_BG = { "점장":T.vDim,"부점장":T.bDim,"SSV":T.brandDim,"바리스타":T.aDim };
+  const ROLE_C  = { "점장":T.violet,"부점장":T.blue,"SSV":T.brand,"바리스타":T.amber };
+  const ROLE_BG = { "점장":T.vDim,  "부점장":T.bDim,"SSV":T.brandDim,"바리스타":T.aDim };
   const AVATARS = ["☕","🌿","⭐","🍵","🌸","🔥","🎯","💚","🍃","✨","🦋","🌙","🎪","🧊","🌺","🍀"];
-  const rc = ROLE_COLOR[role] || ROLE_COLOR["바리스타"];
+  const rc = { color: ROLE_C[role]||T.brand, bg: ROLE_BG[role]||T.brandDim };
 
   const submit = () => {
     if (!nickname.trim()) return;
@@ -393,7 +393,7 @@ function ProfileSetup({ onComplete, existing, onClose }) {
             <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>직급</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {ROLES.map(r => {
-                const rc2 = ROLE_COLOR[r]; const sel = role === r;
+                const rc2 = { color: ROLE_C[r]||T.brand, bg: ROLE_BG[r]||T.brandDim }; const sel = role === r;
                 return (
                   <button key={r} onClick={()=>setRole(r)} style={{
                     padding:"12px 8px", borderRadius:12,
@@ -979,8 +979,18 @@ function App() {
             </div>
           </div>
 
-          {/* 오른쪽: ☰메뉴 + 날짜 */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+          {/* 오른쪽: 날짜 + ☰메뉴 */}
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+            {/* 날짜 */}
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
+              <span style={{ fontSize:17, fontWeight:800, color:T.t1, fontFamily:F, lineHeight:1.1 }}>
+                {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
+              </span>
+              <span style={{ fontSize:10, color:T.t3, fontFamily:F, fontWeight:500 }}>
+                {["일","월","화","수","목","금","토"][now.getDay()]}요일
+              </span>
+            </div>
+
             {/* ☰ 메뉴 */}
             <div style={{ position:"relative" }}>
               <button onClick={e=>{e.stopPropagation();setShowMoreMenu(v=>!v);}} style={{
@@ -1015,16 +1025,6 @@ function App() {
                   </button>
                 </div>
               )}
-            </div>
-
-            {/* 날짜 */}
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
-              <span style={{ fontSize:17, fontWeight:800, color:T.t1, fontFamily:F, lineHeight:1.1 }}>
-                {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
-              </span>
-              <span style={{ fontSize:10, color:T.t3, fontFamily:F, fontWeight:500 }}>
-                {["일","월","화","수","목","금","토"][now.getDay()]}요일
-              </span>
             </div>
           </div>
 
