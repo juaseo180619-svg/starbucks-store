@@ -146,175 +146,61 @@ const SEED_EVENTS = [
 ];
 const todayStr = () => new Date().toISOString().slice(0,10);
 
-/* ─── Gist Sync Engine ──────────────────────────── */
-const GIST_FILENAME = "starbucks_store_data.json";
-const SYNC_KEYS = [
-  "sbx6_notices","sbx6_events","sbx6_categories",
-  "sbx_teamtasks","sbx6_profile",
-  "sbx_order_records","sbx_order_items","sbx_order_buffers"
-];
-
-const GistSync = {
-  getToken: () => { try { return localStorage.getItem("sbx_gist_token")||""; } catch(e){return "";} },
-  getGistId: () => { try { return localStorage.getItem("sbx_gist_id")||""; } catch(e){return "";} },
-  setGistId: (id) => { try { localStorage.setItem("sbx_gist_id", id); } catch(e){} },
-
-  /** 현재 localStorage → Gist 에 업로드 (push) */
-  push: async () => {
-    const token = GistSync.getToken();
-    if (!token) throw new Error("NO_TOKEN");
-    const payload = {};
-    SYNC_KEYS.forEach(k=>{
-      const v = localStorage.getItem("sh_"+k) || localStorage.getItem("pr_"+k) || localStorage.getItem(k);
-      if(v) payload[k] = v;
-    });
-    // profile도 포함
-    const pv = localStorage.getItem("sbx_profile");
-    if(pv) payload["sbx_profile"] = pv;
-
-    const body = {
-      description:"Starbucks Store App Data - "+new Date().toISOString(),
-      public:false,
-      files:{ [GIST_FILENAME]: { content: JSON.stringify(payload) } }
-    };
-    const gistId = GistSync.getGistId();
-    const url = gistId
-      ? "https://api.github.com/gists/"+gistId
-      : "https://api.github.com/gists";
-    const method = gistId ? "PATCH" : "POST";
-    const resp = await fetch(url, {
-      method, headers:{ Authorization:"token "+token, "Content-Type":"application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(()=>({}));
-      throw new Error(err.message||("HTTP "+resp.status));
-    }
-    const data = await resp.json();
-    GistSync.setGistId(data.id);
-    return data.id;
-  },
-
-  /** Gist → localStorage 에 덮어쓰기 (pull) */
-  pull: async () => {
-    const token = GistSync.getToken();
-    if (!token) throw new Error("NO_TOKEN");
-    const gistId = GistSync.getGistId();
-    if (!gistId) throw new Error("NO_GIST");
-    const resp = await fetch("https://api.github.com/gists/"+gistId, {
-      headers:{ Authorization:"token "+token }
-    });
-    if (!resp.ok) throw new Error("HTTP "+resp.status);
-    const data = await resp.json();
-    const content = data.files?.[GIST_FILENAME]?.content;
-    if (!content) throw new Error("EMPTY");
-    const payload = JSON.parse(content);
-    Object.entries(payload).forEach(([k,v])=>{
-      // 공유 데이터는 sh_, 개인은 pr_
-      if(SYNC_KEYS.includes(k)) localStorage.setItem("sh_"+k, v);
-      else localStorage.setItem(k, v);
-    });
-    if(payload["sbx_profile"]) localStorage.setItem("sbx_profile", payload["sbx_profile"]);
-    return Object.keys(payload).length;
-  },
-
-  /** 내 Gist 목록에서 StarbucksStore Gist 찾기 */
-  findExisting: async () => {
-    const token = GistSync.getToken();
-    if (!token) return null;
-    let page = 1;
-    while (page <= 5) {
-      const resp = await fetch("https://api.github.com/gists?per_page=30&page="+page, {
-        headers:{ Authorization:"token "+token }
-      });
-      if (!resp.ok) break;
-      const list = await resp.json();
-      if (!list.length) break;
-      const found = list.find(g => g.files && g.files[GIST_FILENAME]);
-      if (found) { GistSync.setGistId(found.id); return found.id; }
-      page++;
-    }
-    return null;
-  },
-
-  /** 자동 push - debounce 2초 */
-  _timer: null,
-  _lastPush: 0,
-  autoPush: () => {
-    clearTimeout(GistSync._timer);
-    // 변경 즉시 pull 차단 시작 (push 예정 상태)
-    GistSync._lastPush = Date.now();
-    GistSync._timer = setTimeout(async ()=>{
-      if(!GistSync.getToken()) return;
-      if(!GistSync.getGistId()) {
-        await GistSync.findExisting().catch(()=>{});
-      }
-      await GistSync.push().catch(()=>{});
-      // push 완료 시각 갱신 (이후 20초간 pull 스킵)
-      GistSync._lastPush = Date.now();
-    }, 5000);
-  }
+/* ─── Firebase ──────────────────────────────────── */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBAOiMIsiF0Y2AFK0L1lddlMKvnvAjBbV8",
+  authDomain: "starbucks-store-479ce.firebaseapp.com",
+  projectId: "starbucks-store-479ce",
+  storageBucket: "starbucks-store-479ce.firebasestorage.app",
+  messagingSenderId: "927355746594",
+  appId: "1:927355746594:web:3a6279d4aff6b6cb4b0d7b"
 };
+if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.firestore();
 
 
 /* ─── Hooks ─────────────────────────────────────── */
-function useShared(key, seed) {
-  const [data, setData] = useState(null);
+/* 매장 공유 데이터 - Firebase Firestore 실시간 동기화 */
+function useStoreData(storeId, key, seed) {
+  const [data, setData] = useState(seed);
   const [loading, setLoading] = useState(true);
-  // loadRef로 안정화 - 리렌더마다 새 참조 생성 방지
-  const loadRef = useRef(null);
-  loadRef.current = async () => {
-    try {
-      const r = await window.storage.get(key, true);
-      if (r) {
-        setData(JSON.parse(r.value));
-      } else {
-        // localStorage에 없으면 seed 저장 후 사용 (데이터 손실 방지)
-        setData(seed);
-        if (seed !== null && seed !== undefined) {
-          window.storage.set(key, JSON.stringify(seed), true).catch(()=>{});
-        }
-      }
-    }
-    catch { setData(seed); }
-    finally { setLoading(false); }
-  };
-  // 최초 1회만 로드
-  useEffect(() => { loadRef.current(); }, [key]);
-  // sbx-sync 이벤트 수신 - loadRef 사용으로 무한루프 없음
   useEffect(() => {
-    const handler = () => loadRef.current();
-    window.addEventListener("sbx-sync", handler);
-    return () => window.removeEventListener("sbx-sync", handler);
-  }, [key]);
+    if (!storeId || !key) { setLoading(false); return; }
+    const ref = db.collection("stores").doc(storeId).collection("data").doc(key);
+    const unsub = ref.onSnapshot(
+      snap => { setData(snap.exists ? snap.data().value : seed); setLoading(false); },
+      () => { setData(seed); setLoading(false); }
+    );
+    return unsub;
+  }, [storeId, key]);
   const save = useCallback(async (next) => {
-    const val = typeof next === "function" ? next(data||seed) : next;
+    if (!storeId || !key) return;
+    const val = typeof next === "function" ? next(data) : next;
     setData(val);
-    try { await window.storage.set(key, JSON.stringify(val), true); } catch {}
-    GistSync.autoPush();
-  }, [key, data]);
+    try { await db.collection("stores").doc(storeId).collection("data").doc(key).set({ value: val }); } catch(e) {}
+  }, [storeId, key, data]);
   return [data, save, loading];
 }
 
-/* 개인 데이터 (본인만) */
-function usePersonal(key, seed) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+/* 개인 데이터 - 사번 기반 개인 저장 */
+function useUserData(empId, key, seed) {
+  const [data, setData] = useState(seed);
   useEffect(() => {
-    if (!key) { setData(seed); setLoading(false); return; }
-    (async () => {
-      try { const r = await window.storage.get(key, false); setData(r ? JSON.parse(r.value) : seed); }
-      catch { setData(seed); }
-      finally { setLoading(false); }
-    })();
-  }, [key]);
+    if (!empId || !key) return;
+    const ref = db.collection("users").doc(empId).collection("data").doc(key);
+    const unsub = ref.onSnapshot(
+      snap => { setData(snap.exists ? snap.data().value : seed); },
+      () => {}
+    );
+    return unsub;
+  }, [empId, key]);
   const save = useCallback(async (next) => {
-    if (!key) return;
+    if (!empId || !key) return;
     const val = typeof next === "function" ? next(data) : next;
     setData(val);
-    try { await window.storage.set(key, JSON.stringify(val), false); } catch {}
-  }, [key, data]);
-  return [data, save, loading];
+    try { await db.collection("users").doc(empId).collection("data").doc(key).set({ value: val }); } catch(e) {}
+  }, [empId, key, data]);
+  return [data, save];
 }
 
 /* --- Utils --- */
@@ -604,13 +490,170 @@ function Spin({ size=20, color }) {
   );
 }
 
+/* ═══════════════════ LOGIN SCREEN ══════════════════ */
+function LoginScreen({ onLogin }) {
+  const [step, setStep] = useState("id"); // "id" | "register"
+  const [empId, setEmpId] = useState("");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("바리스타");
+  const [storeId, setStoreId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const ROLES = ["점장","부점장","SSV","바리스타"];
+  const ROLE_C = { "점장":T.violet,"부점장":T.blue,"SSV":T.brand,"바리스타":T.amber };
+  const ROLE_BG = { "점장":T.vDim,"부점장":T.bDim,"SSV":T.brandDim,"바리스타":T.aDim };
+
+  const handleCheckId = async () => {
+    const id = empId.trim();
+    if (!id) return setError("사번을 입력해주세요");
+    setLoading(true); setError("");
+    try {
+      const snap = await db.collection("users").doc(id).get();
+      if (snap.exists) {
+        const userData = snap.data();
+        onLogin(userData);
+      } else {
+        setStep("register");
+      }
+    } catch(e) {
+      setError("연결 오류. 잠시 후 다시 시도해주세요.");
+    }
+    setLoading(false);
+  };
+
+  const handleRegister = async () => {
+    if (!name.trim()) return setError("이름을 입력해주세요");
+    if (!storeId.trim()) return setError("매장 코드를 입력해주세요 (예: 1234)");
+    setLoading(true); setError("");
+    try {
+      const userData = {
+        empId: empId.trim(),
+        name: name.trim(),
+        role,
+        storeId: storeId.trim(),
+        color: ROLE_C[role] || T.brand,
+        colorBg: ROLE_BG[role] || T.brandDim,
+      };
+      await db.collection("users").doc(empId.trim()).set(userData);
+      onLogin(userData);
+    } catch(e) {
+      setError("등록 오류. 잠시 후 다시 시도해주세요.");
+    }
+    setLoading(false);
+  };
+
+  const fBase = { fontFamily:F, fontSize:15, color:T.t1, background:"#fff",
+    border:"1.5px solid "+T.b1, borderRadius:12, padding:"13px 16px",
+    width:"100%", outline:"none", boxSizing:"border-box" };
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center",
+      justifyContent:"center", padding:"20px" }}>
+      <div style={{ width:"100%", maxWidth:360, background:T.card, borderRadius:20,
+        padding:"32px 28px", boxShadow:T.sh3 }}>
+
+        {/* 로고 */}
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:36, marginBottom:6 }}>☕</div>
+          <div style={{ fontSize:20, fontWeight:900, color:T.brandDark, fontFamily:F, letterSpacing:-0.5 }}>
+            매장 관리 앱
+          </div>
+          <div style={{ fontSize:13, color:T.t3, fontFamily:F, marginTop:4 }}>
+            {step==="id" ? "사번으로 로그인하세요" : "처음 사용하시는군요! 정보를 입력해주세요"}
+          </div>
+        </div>
+
+        {step === "id" ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <input
+              value={empId}
+              onChange={e=>setEmpId(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleCheckId()}
+              placeholder="사번 입력"
+              style={fBase}
+              autoFocus
+            />
+            {error && <div style={{ fontSize:12, color:T.red, fontFamily:F }}>{error}</div>}
+            <button onClick={handleCheckId} disabled={loading} style={{
+              padding:"14px", borderRadius:12, border:"none",
+              background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")",
+              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+              {loading ? "확인 중..." : "로그인"}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F, padding:"10px 14px",
+              background:T.brandDim, borderRadius:10, border:"1px solid "+T.brandBorder }}>
+              사번 <b style={{ color:T.brand }}>{empId}</b> — 처음 등록하는 계정이에요
+            </div>
+            <input
+              value={name}
+              onChange={e=>setName(e.target.value)}
+              placeholder="이름"
+              style={fBase}
+              autoFocus
+            />
+            <select value={role} onChange={e=>setRole(e.target.value)} style={{...fBase}}>
+              {ROLES.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+            <input
+              value={storeId}
+              onChange={e=>setStoreId(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleRegister()}
+              placeholder="매장 코드 (같은 매장 팀원과 동일하게)"
+              style={fBase}
+            />
+            <div style={{ fontSize:11, color:T.t3, fontFamily:F, lineHeight:1.7 }}>
+              💡 매장 코드는 팀원들과 동일하게 입력해야 데이터가 공유돼요.<br/>
+              예: 매장 번호, 지점명 등 팀에서 정한 코드
+            </div>
+            {error && <div style={{ fontSize:12, color:T.red, fontFamily:F }}>{error}</div>}
+            <button onClick={handleRegister} disabled={loading} style={{
+              padding:"14px", borderRadius:12, border:"none",
+              background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")",
+              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+              {loading ? "등록 중..." : "등록하고 시작하기"}
+            </button>
+            <button onClick={()=>{ setStep("id"); setError(""); }} style={{
+              padding:"10px", borderRadius:10, border:"none", background:"none",
+              color:T.t3, fontSize:13, cursor:"pointer", fontFamily:F }}>
+              ← 사번 다시 입력
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════ APP ══════════════════════════ */
 function App() {
-  /* 프로필 */
-  const [profile, setProfileRaw] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(true);
+  /* ─── 로그인 유저 ─── */
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { const u = localStorage.getItem("sbx_current_user"); return u ? JSON.parse(u) : null; } catch { return null; }
+  });
+  const [showLogin, setShowLogin] = useState(!currentUser);
+
+  const handleLogin = (userData) => {
+    localStorage.setItem("sbx_current_user", JSON.stringify(userData));
+    setCurrentUser(userData);
+    setShowLogin(false);
+  };
+
+  /* 프로필 = currentUser */
   const [showProfileSetup, setShowProfileSetup] = useState(false);
-  // -- 반응형: 항상 최상단에 선언 (조건부 return 전에) --
+  const profile = currentUser || { name:"", role:"바리스타", color:T.brand, colorBg:T.brandDim, empId:"" };
+  const saveProfile = async (p) => {
+    const updated = { ...currentUser, ...p };
+    try { await db.collection("users").doc(currentUser.empId).update(updated); } catch(e) {}
+    localStorage.setItem("sbx_current_user", JSON.stringify(updated));
+    setCurrentUser(updated);
+    setShowProfileSetup(false);
+  };
+
+  /* 반응형 */
   const [isPC, setIsPC] = useState(typeof window !== "undefined" ? window.innerWidth >= 768 : false);
   useEffect(()=>{
     const fn = () => setIsPC(window.innerWidth >= 768);
@@ -618,77 +661,21 @@ function App() {
     return () => window.removeEventListener("resize", fn);
   }, []);
 
-  // -- Gist 자동 pull (앱 시작시 + 2분마다) --
-  const doPull = useCallback(async (silent=true) => {
-    if (!GistSync.getToken()) return;
-    // push 후 20초 이내면 pull 스킵 (충돌 방지)
-    if (Date.now() - GistSync._lastPush < 20000) return;
-    // Gist ID 없으면 먼저 탐색
-    if (!GistSync.getGistId()) {
-      const found = await GistSync.findExisting().catch(()=>null);
-      if (!found) return; // 연결된 Gist 없음
-    }
-    if (!silent) setSyncStatus("syncing");
-    try {
-      // 변경 감지용: pull 전 스냅샷
-      const before = ["sbx6_notices","sbx6_events","sbx6_categories","sbx_teamtasks"]
-        .map(k=>localStorage.getItem("sh_"+k)).join("|");
-      await GistSync.pull();
-      const t = new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
-      localStorage.setItem("sbx_last_sync", t);
-      setLastSync(t);
-      setSyncStatus("ok");
-      const after = ["sbx6_notices","sbx6_events","sbx6_categories","sbx_teamtasks"]
-        .map(k=>localStorage.getItem("sh_"+k)).join("|");
-      // 데이터가 달라졌으면 커스텀 이벤트로 state 갱신 (reload 없이)
-      if (before !== after) {
-        window.dispatchEvent(new Event("sbx-sync"));
-      }
-    } catch(e) {
-      setSyncStatus("error");
-    }
-  }, []);
-
-  useEffect(()=>{
-    doPull(true);
-    const iv = setInterval(()=>doPull(true), 15*1000);
-    return ()=>clearInterval(iv);
-  }, [doPull]);
-
-  useEffect(() => {
-    (async () => {
-      try { const r = await window.storage.get("sbx_profile", false); setProfileRaw(r?JSON.parse(r.value):null); }
-      catch { setProfileRaw(null); }
-      finally { setProfileLoading(false); }
-    })();
-  }, []);
-
-  const saveProfile = async (p) => {
-    setProfileRaw(p);
-    try { await window.storage.set("sbx_profile", JSON.stringify(p), false); } catch {}
-    setShowProfileSetup(false);
-  };
-
-  /* 개인 할일 키 — 프로필 기반 */
-  const taskKey     = profile ? `sbx_tasks_${profile.name}_${profile.role}` : null;
-  /* 직급 공유 할일 키 — 같은 직급 전체 공유 */
-  const roleTaskKey = "sbx_teamtasks";
-
-  /* 공유 데이터 */
-  const [notices,   saveNotices,   nL] = useShared("sbx6_notices", SEED_NOTICES);
-  const [categories,  saveCategories] = useShared("sbx6_categories", DEFAULT_CATS);
-  const [catColors, saveCatColors] = useShared("sbx6_cat_colors", {});
-  const [memoNotes, saveMemoNotes] = useShared("sbx6_memos", []);
-  const [events,    saveEvents,    eL] = useShared("sbx6_events",  SEED_EVENTS);
-  const [roleTasks, saveRoleTasks, rL] = useShared(roleTaskKey, []);
-  /* 개인 할일 */
-  const [tasks, saveTasks, tL] = usePersonal(taskKey, []);
-  /* 발주계산기 */
+  /* 데이터 - Firebase Firestore */
+  const storeId = currentUser?.storeId || null;
+  const empId   = currentUser?.empId   || null;
   const DEFAULT_ORDER_ITEMS = ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"];
-  const [orderRecords, saveOrderRecords] = useShared("sbx_order_records", []);
-  const [orderItems,   saveOrderItems]   = useShared("sbx_order_items",   DEFAULT_ORDER_ITEMS);
-  const [orderBuffers, saveOrderBuffers] = useShared("sbx_order_buffers", {});
 
+  const [notices,      saveNotices,      nL] = useStoreData(storeId, "notices",      SEED_NOTICES);
+  const [categories,   saveCategories       ] = useStoreData(storeId, "categories",   DEFAULT_CATS);
+  const [catColors,    saveCatColors        ] = useStoreData(storeId, "catColors",    {});
+  const [memoNotes,    saveMemoNotes        ] = useStoreData(storeId, "memos",        []);
+  const [events,       saveEvents,       eL ] = useStoreData(storeId, "events",       SEED_EVENTS);
+  const [roleTasks,    saveRoleTasks,    rL ] = useStoreData(storeId, "teamTasks",    []);
+  const [orderRecords, saveOrderRecords     ] = useStoreData(storeId, "orderRecords", []);
+  const [orderItems,   saveOrderItems       ] = useStoreData(storeId, "orderItems",   DEFAULT_ORDER_ITEMS);
+  const [orderBuffers, saveOrderBuffers     ] = useStoreData(storeId, "orderBuffers", {});
+  const [tasks,        saveTasks            ] = useUserData(empId, "tasks", []);
   const [tab, setTab] = useState("home");
   const [taskMode,    setTaskMode]    = useState("personal"); // "personal" | "role"
   const [viewNotice,  setViewNotice]  = useState(null);
@@ -696,7 +683,6 @@ function App() {
   const [aiChat,      setAiChat]      = useState(false);
   const [showBriefing,setShowBriefing]= useState(false);
   const [showQuiz,    setShowQuiz]    = useState(false);
-  const [showGistSetup,setShowGistSetup]=useState(false);
   const [showMoreMenu,setShowMoreMenu]=useState(false);
   useEffect(()=>{
     if(!showMoreMenu) return;
@@ -708,21 +694,6 @@ function App() {
   const [showSearch,  setShowSearch]  = useState(false);
   const [showAI,      setShowAI]      = useState(false);
   const [aiInitTab,   setAiInitTab]   = useState("chat");
-  const [gistToken,   setGistToken]   = useState(()=>{ try{return localStorage.getItem("sbx_gist_token")||"";}catch(e){return "";} });
-  const [gistId,      setGistId]      = useState(()=>{ try{return localStorage.getItem("sbx_gist_id")||"";}catch(e){return "";} });
-  const [syncStatus,  setSyncStatus]  = useState("idle"); // idle|syncing|ok|error
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastAnim, setToastAnim] = useState("in"); // "in"|"out"
-  // 토스트 자동 사라지기 (fadeDown 후 hide)
-  useEffect(()=>{
-    if(syncStatus==="ok"||syncStatus==="error"){
-      setToastVisible(true); setToastAnim("in");
-      const t1=setTimeout(()=>setToastAnim("out"), 2000);
-      const t2=setTimeout(()=>{ setToastVisible(false); setSyncStatus("idle"); }, 2600);
-      return ()=>{ clearTimeout(t1); clearTimeout(t2); };
-    }
-  },[syncStatus]);
-  const [lastSync,    setLastSync]    = useState(()=>{ try{return localStorage.getItem("sbx_last_sync")||"";}catch(e){return "";} });
   const [editNotice,  setEditNotice]  = useState(null);
   const [addEvent,    setAddEvent]    = useState(false);
   const [addTask,     setAddTask]     = useState(false);
@@ -756,7 +727,7 @@ function App() {
   const [editingEventId, setEditingEventId] = useState(null);
   const [tf, setTf] = useState({ text:"", priority:"보통", dueDate:todayStr() });
 
-  const loading = profileLoading || nL || eL || tL || rL;
+  const loading = nL || eL || rL;
 
   const pendingPersonal = (tasks||[]).filter(t=>!t.done).length;
   const pendingRole     = (roleTasks||[]).filter(t=>!t.done).length;
@@ -842,18 +813,9 @@ function App() {
   const now = new Date();
 
 
-  /* 프로필 미설정 → 설정 화면 */
-  if (loading) return (
-    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${T.glass2}`,
-        borderTopColor:T.green, animation:"spin .7s linear infinite" }}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}} @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(16px)}}`}</style>
-    </div>
-  );
-
-  if (!profile) return <ProfileSetup onComplete={saveProfile}/>;
+  /* 로그인 안된 경우 - LoginScreen은 showLogin state로 처리 (App 최상단) */
+  if (showLogin) return <LoginScreen onLogin={handleLogin}/>;
   if (showProfileSetup) return <ProfileSetup onComplete={saveProfile} existing={profile}/>;
-
   /* --- 메인 UI --- */
   return (
     <div style={{ minHeight:"100vh", background:isPC?"#E4F0E8":T.bg,
@@ -973,56 +935,21 @@ function App() {
               <span style={{ fontSize:16 }}>🔍</span> 검색
             </button>
           </div>
-          {/* 동기화 */}
+          {/* 계정/매장 정보 */}
           <div style={{ padding:"8px 18px", borderTop:"1px solid rgba(0,112,74,0.07)" }}>
-
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <span style={{ fontSize:12, fontWeight:700, color:T.l1, fontFamily:F }}>
-                {gistToken && gistId ? "🔄 자동 동기화" : "💾 데이터 동기화"}
-              </span>
-              {gistToken && gistId && (
-                <span style={{ fontSize:10, color:syncStatus==="ok"?T.green:syncStatus==="error"?T.red:T.l3,
-                  fontFamily:F, fontWeight:600 }}>
-                  {syncStatus==="syncing"?"동기화중...":syncStatus==="ok"?"✓ "+lastSync:syncStatus==="error"?"⚠ 실패":""}
-                </span>
-              )}
+            <div style={{ fontSize:11, color:T.l3, fontFamily:F, marginBottom:6 }}>
+              🔥 Firebase 실시간 동기화 중
             </div>
-            {gistToken && gistId ? (
-              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-                <button onClick={()=>doPull(false)}
-                  style={{ width:"100%", padding:"7px 0", borderRadius:8, border:"none",
-                    background:"linear-gradient(135deg,"+T.green+",#1E3932)", color:"#fff",
-                    fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                  ⬇ 지금 가져오기
-                </button>
-                <button onClick={async()=>{ setSyncStatus("syncing"); try{ await GistSync.push(); setSyncStatus("ok");
-                      const t=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
-                      localStorage.setItem("sbx_last_sync",t); setLastSync(t);
-                    } catch(e){ setSyncStatus("error"); } }}
-                  style={{ width:"100%", padding:"7px 0", borderRadius:8, border:"1px solid "+T.border1,
-                    background:T.card, color:T.green, fontSize:12, cursor:"pointer",
-                    fontFamily:F, fontWeight:700 }}>
-                  ⬆ 지금 업로드
-                </button>
-                <button onClick={()=>setShowGistSetup(true)}
-                  style={{ width:"100%", padding:"5px 0", borderRadius:8, border:"none",
-                    background:"none", color:T.l3, fontSize:11, cursor:"pointer", fontFamily:F }}>
-                  ⚙ Gist 설정 변경
-                </button>
-              </div>
-            ) : (
-              <div>
-                <div style={{ fontSize:11, color:T.l3, fontFamily:F, lineHeight:1.7, marginBottom:8 }}>
-                  GitHub Gist로 PC↔모바일 자동 동기화
-                </div>
-                <button onClick={()=>setShowGistSetup(true)}
-                  style={{ width:"100%", padding:"9px 0", borderRadius:9, border:"none",
-                    background:"linear-gradient(135deg,"+T.green+",#1E3932)", color:"#fff",
-                    fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                  🔗 동기화 설정하기
-                </button>
-              </div>
-            )}
+            <div style={{ background:T.card2, borderRadius:10, padding:"10px 12px",
+              border:"1px solid "+T.b0, marginBottom:8 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:T.t1, fontFamily:F }}>{currentUser?.name}</div>
+              <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>사번 {currentUser?.empId} · 매장 {currentUser?.storeId}</div>
+            </div>
+            <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }}
+              style={{ width:"100%", padding:"7px 0", borderRadius:8, border:"1px solid "+T.b1,
+                background:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:F }}>
+              로그아웃
+            </button>
           </div>
         
           </aside>
@@ -1088,10 +1015,10 @@ function App() {
                     display:"flex", alignItems:"center", gap:10, cursor:"pointer",
                     fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
                     <span style={{ fontSize:15 }}>
-                      {syncStatus==="syncing"?"⏳":syncStatus==="error"?"⚠️":syncStatus==="ok"?"✅":"🔄"}
+                      "🔥"
                     </span>
                     <span>동기화
-                      {syncStatus==="ok"&&lastSync&&<span style={{ fontSize:11, color:T.t3, marginLeft:4 }}>{lastSync}</span>}
+                      
                     </span>
                   </button>
                 </div>
@@ -1669,94 +1596,38 @@ function App() {
         tasks={tasks||[]} roleTasks={roleTasks||[]}
         onViewNotice={n=>{readNotice(n.id);setViewNotice(n);setShowSearch(false);}}
         setTab={t=>{setTab(t);setViewNotice(null);}}/>}
-      {/* 모바일 동기화 Sheet */}
+      {/* 계정 정보 Sheet (모바일 ⋯ 메뉴 → 동기화) */
       {showSyncSheet&&(
-        <Sheet title="🔄 동기화" onClose={()=>setShowSyncSheet(false)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-              padding:"12px 16px", background:T.card2, borderRadius:12,
-              border:"1px solid "+T.border0 }}>
-              <span style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F }}>
-                {gistToken&&gistId?"🔄 자동 동기화 설정됨":"💾 동기화 미설정"}
-              </span>
-              {gistToken&&gistId&&(
-                <span style={{ fontSize:11, color:syncStatus==="ok"?T.brand:syncStatus==="error"?T.red:T.t3,
-                  fontFamily:F, fontWeight:600 }}>
-                  {syncStatus==="syncing"?"동기화중...":syncStatus==="ok"?"✓ "+lastSync:syncStatus==="error"?"⚠ 실패":""}
-                </span>
-              )}
+        <Sheet title="👤 계정 정보" onClose={()=>setShowSyncSheet(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ background:T.brandDim, borderRadius:14, padding:"16px",
+              border:"1px solid "+T.brandBorder }}>
+              <div style={{ fontSize:16, fontWeight:800, color:T.t1, fontFamily:F, marginBottom:4 }}>
+                {currentUser?.name}
+              </div>
+              <div style={{ fontSize:13, color:T.t2, fontFamily:F }}>{currentUser?.role}</div>
+              <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:6 }}>
+                사번 {currentUser?.empId} · 매장코드 {currentUser?.storeId}
+              </div>
             </div>
-            {gistToken&&gistId ? (
-              <>
-                <button onClick={()=>doPull(false)} style={{
-                  width:"100%", padding:"14px", borderRadius:12, border:"none",
-                  background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")", color:"#fff",
-                  fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                  ⬇ 지금 가져오기
-                </button>
-                <button onClick={async()=>{ setSyncStatus("syncing"); try{ await GistSync.push(); setSyncStatus("ok");
-                  const t=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
-                  localStorage.setItem("sbx_last_sync",t); setLastSync(t);
-                  } catch(e){ setSyncStatus("error"); } }}
-                  style={{ width:"100%", padding:"14px", borderRadius:12,
-                    border:"1px solid "+T.border1, background:T.card, color:T.brand,
-                    fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                  ⬆ 지금 업로드
-                </button>
-                <button onClick={()=>{setShowSyncSheet(false);setShowGistSetup(true);}} style={{
-                  width:"100%", padding:"10px", borderRadius:10, border:"none",
-                  background:"none", color:T.t3, fontSize:13, cursor:"pointer", fontFamily:F }}>
-                  ⚙ Gist 설정 변경
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize:13, color:T.t3, fontFamily:F, lineHeight:1.7, padding:"0 4px" }}>
-                  GitHub Gist 연동으로 PC↔모바일 간 공지, 일정, 할일을 자동 동기화할 수 있어요.
-                </div>
-                <button onClick={()=>{setShowSyncSheet(false);setShowGistSetup(true);}} style={{
-                  width:"100%", padding:"14px", borderRadius:12, border:"none",
-                  background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")", color:"#fff",
-                  fontSize:15, cursor:"pointer", fontFamily:F, fontWeight:700 }}>
-                  🔗 동기화 설정하기
-                </button>
-              </>
-            )}
+            <div style={{ background:T.card2, borderRadius:12, padding:"12px 14px",
+              border:"1px solid "+T.b0, fontSize:13, color:T.t2, fontFamily:F, lineHeight:1.7 }}>
+              🔥 Firebase 실시간 동기화 중<br/>같은 매장코드로 로그인한 모든 기기에서 데이터가 자동으로 동기화돼요.
+            </div>
+            <button onClick={()=>setShowProfileSetup(true)} style={{
+              width:"100%", padding:"14px", borderRadius:12, border:"1px solid "+T.brandBorder,
+              background:T.brandDim, color:T.brand, fontSize:14, cursor:"pointer",
+              fontFamily:F, fontWeight:700 }}>
+              ✏️ 프로필 수정
+            </button>
+            <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }} style={{
+              width:"100%", padding:"12px", borderRadius:12, border:"1px solid "+T.rBdr,
+              background:"none", color:T.red, fontSize:14, cursor:"pointer",
+              fontFamily:F, fontWeight:600 }}>
+              로그아웃
+            </button>
           </div>
         </Sheet>
-      )}
-      {showGistSetup&&(
-        <GistSetupModal
-          onClose={()=>setShowGistSetup(false)}
-          currentToken={gistToken}
-          currentGistId={gistId}
-          onSave={(tok, gid)=>{
-            setGistToken(tok);
-            setGistId(gid);
-            setShowGistSetup(false);
-            if(tok && gid) { setSyncStatus("ok"); }
-          }}
-        />
-      )}
-      {/* 동기화 상태 토스트 */}
-      {syncStatus==="syncing" && (
-        <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)",
-          background:"rgba(30,57,50,0.92)", color:"#fff", borderRadius:20, padding:"8px 18px",
-          fontSize:13, fontFamily:F, zIndex:999, pointerEvents:"none",
-          display:"flex", alignItems:"center", gap:8,
-          animation:"toastIn .3s ease" }}>
-          <span style={{ animation:"spin 1s linear infinite", display:"inline-block" }}>⚙</span>
-          동기화 중...
-        </div>
-      )}
-      {toastVisible && (
-        <div style={{ position:"fixed", bottom:80, left:"50%",
-          background:syncStatus==="error"?"#e53e3e":T.green, color:"#fff",
-          borderRadius:20, padding:"8px 18px",
-          fontSize:13, fontFamily:F, zIndex:999, pointerEvents:"none",
-          animation:toastAnim==="in"?"toastIn .35s ease forwards":"toastOut .5s ease forwards" }}>
-          {syncStatus==="error"?"⚠ 동기화 실패":"✓ 동기화 완료"}
-        </div>
       )}
       {/* showQuiz - already closed above */}
       {false}
@@ -2763,116 +2634,6 @@ function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors 
 }
 
 
-function GistSetupModal({ onClose, currentToken, currentGistId, onSave }) {
-  const [token, setToken] = useState(currentToken||"");
-  const [gistId, setGistId] = useState(currentGistId||"");
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  const handleSave = async () => {
-    if (!token.trim()) { setMsg("GitHub 토큰을 입력해주세요."); return; }
-    setSaving(true);
-    setMsg("");
-    try {
-      localStorage.setItem("sbx_gist_token", token.trim());
-      let gid = gistId.trim();
-      if (!gid) {
-        // 기존 Gist 탐색
-        const found = await GistSync.findExisting().catch(()=>null);
-        gid = found || "";
-      }
-      if (gid) {
-        localStorage.setItem("sbx_gist_id", gid);
-        setGistId(gid);
-        setMsg("✓ 저장됐어요! Gist ID: "+gid.slice(0,8)+"...");
-      } else {
-        // 없으면 새로 생성
-        await GistSync.push();
-        gid = GistSync.getGistId();
-        setGistId(gid);
-        setMsg("✓ 새 Gist 생성됨! ID: "+(gid||"").slice(0,8)+"...");
-      }
-      setTimeout(()=>onSave(token.trim(), gid), 800);
-    } catch(e) {
-      setMsg("❌ 오류: 토큰을 확인해주세요.");
-    }
-    setSaving(false);
-  };
-
-  const handleDisconnect = () => {
-    localStorage.removeItem("sbx_gist_token");
-    localStorage.removeItem("sbx_gist_id");
-    onSave("", "");
-  };
-
-  return (
-    <Sheet title="🔗 Gist 동기화 설정" onClose={onClose}>
-      <p style={{ fontSize:13, color:T.l3, fontFamily:F, marginBottom:16, lineHeight:1.6 }}>
-        GitHub Gist를 통해 팀원들과 공지·캘린더를 공유해요. 각자 본인의 GitHub 토큰을 입력하고, 같은 Gist ID를 사용하면 돼요.
-      </p>
-
-      <Field label="GitHub Personal Access Token"
-        value={token} onChange={setToken}
-        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"/>
-
-      <div style={{ marginBottom:12 }}>
-        <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>
-          Gist ID <span style={{color:T.l4}}>(팀장이 공유한 ID — 없으면 자동 생성)</span>
-        </div>
-        <input value={gistId} onChange={e=>setGistId(e.target.value)}
-          placeholder="비워두면 새로 생성됩니다"
-          style={{ width:"100%", padding:"13px 15px", borderRadius:12,
-            border:"1px solid "+T.border1, background:"#F7FAF8",
-            fontSize:15, fontFamily:F, color:T.l1, outline:"none" }}/>
-      </div>
-
-      {gistId && (
-        <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
-          background:"rgba(0,112,74,0.06)", border:"1px solid rgba(0,112,74,0.15)" }}>
-          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:4 }}>팀원에게 공유할 Gist ID</div>
-          <div style={{ fontSize:14, fontWeight:700, color:T.green, fontFamily:F,
-            wordBreak:"break-all" }}>{gistId}</div>
-        </div>
-      )}
-
-      {msg && (
-        <div style={{ padding:"10px 14px", borderRadius:10, marginBottom:12,
-          background: msg.startsWith("❌")?"rgba(220,38,38,0.06)":"rgba(0,112,74,0.06)",
-          border:"1px solid "+(msg.startsWith("❌")?"rgba(220,38,38,0.2)":"rgba(0,112,74,0.2)") }}>
-          <div style={{ fontSize:13, color: msg.startsWith("❌")?T.red:T.green, fontFamily:F }}>
-            {msg}
-          </div>
-        </div>
-      )}
-
-      <GreenBtn full onClick={handleSave} disabled={saving}>
-        {saving ? "⏳ 저장 중..." : "저장하기"}
-      </GreenBtn>
-
-      {(currentToken||token) && (
-        <button onClick={handleDisconnect} style={{
-          width:"100%", marginTop:10, padding:"11px", borderRadius:12,
-          border:"1px solid rgba(220,38,38,0.2)", background:"rgba(220,38,38,0.05)",
-          color:"#DC2626", fontSize:14, fontFamily:F, cursor:"pointer" }}>
-          연결 해제
-        </button>
-      )}
-
-      <div style={{ marginTop:16, padding:"12px 14px", borderRadius:12,
-        background:T.glass1, border:"1px solid "+T.border0 }}>
-        <div style={{ fontSize:12, color:T.l3, fontFamily:F, lineHeight:1.8 }}>
-          📌 <b>토큰 발급 방법</b><br/>
-          github.com → Settings → Developer settings<br/>
-          → Personal access tokens → Tokens (classic)<br/>
-          → Generate new token → <b>gist</b> 권한만 체크
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
-
-/* ─── Rich Notice Editor ──────────────────────── */
 function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const cats = categories && categories.length ? categories : DEFAULT_CATS;
   const [aiDrafting, setAiDrafting] = useState(false);
@@ -3863,6 +3624,8 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
     </Sheet>
   );
 }
+}
+
 
     const root=ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(App));
