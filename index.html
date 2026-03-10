@@ -247,22 +247,24 @@ function Sheet({ onClose, title, children, noOutsideClose, noPadding }) {
   return (
     <div ref={overlayRef}
       style={{ position:"fixed", inset:0, zIndex:700,
-        background:"rgba(0,0,0,0.55)",
-        backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-        display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+        background:"rgba(0,0,0,0.45)",
+        backdropFilter:"blur(12px)", WebkitBackdropFilter:"blur(12px)",
+        display:"flex",
+        alignItems: isPC ? "center" : "flex-end",
+        justifyContent:"center" }}
       onClick={e=>e.target===e.currentTarget&&!noOutsideClose&&onClose()}>
       <div style={{
         background:"rgba(255,255,255,0.98)",
         backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
-        borderRadius:"20px 20px 0 0",
-        width:"100%", maxWidth: isPC ? 800 : 430,
-        maxHeight:"92vh",
+        borderRadius: isPC ? 20 : "20px 20px 0 0",
+        width:"100%", maxWidth: isPC ? 640 : 430,
+        maxHeight: isPC ? "88vh" : "92vh",
         display:"flex", flexDirection:"column",
-        boxShadow:"0 -4px 30px rgba(0,0,0,0.12)" }}>
-        {/* 드래그 핸들 */}
-        <div style={{ display:"flex", justifyContent:"center", paddingTop:10, paddingBottom:2, flexShrink:0 }}>
+        boxShadow: isPC ? "0 8px 40px rgba(0,0,0,0.18)" : "0 -4px 30px rgba(0,0,0,0.12)" }}>
+        {/* 드래그 핸들 — 모바일만 */}
+        {!isPC && <div style={{ display:"flex", justifyContent:"center", paddingTop:10, paddingBottom:2, flexShrink:0 }}>
           <div style={{ width:36, height:4, borderRadius:2, background:T.b1 }}/>
-        </div>
+        </div>}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
           padding:"8px 20px 14px", flexShrink:0,
           borderBottom:"1px solid "+T.b0 }}>
@@ -787,7 +789,7 @@ function App() {
         endDate:data.noticeEndDate||data.noticeDate, category:data.category, memo:"공지 연동",
         noticeId:"n"+now_id
       };
-      saveEvents(prev => [...(prev||events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
+      saveEvents(prev => [...(prev||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date)));
     }
   };
   const submitEvent = () => {
@@ -873,7 +875,7 @@ function App() {
             <div style={{ width:38, height:38, borderRadius:11, background:rc.bg,
               border:"1.5px solid "+rc.color+"44", flexShrink:0,
               display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ fontSize:15, fontWeight:800, color:rc.color, lineHeight:1 }}>{profile.name[0]}</div>
+              <div style={{ fontSize:profile.avatar?22:15, fontWeight:800, color:rc.color, lineHeight:1 }}>{profile.avatar||profile.name?.[0]}</div>
               <div style={{ fontSize:7, color:rc.color, opacity:0.75, fontWeight:600 }}>{profile.role.slice(0,2)}</div>
             </div>
             <div style={{ flex:1, minWidth:0 }}>
@@ -1630,6 +1632,8 @@ function App() {
               border:"1px solid "+T.b0, fontSize:13, color:T.t2, fontFamily:F, lineHeight:1.7 }}>
               🔥 Firebase 실시간 동기화 중<br/>같은 매장코드로 로그인한 모든 기기에서 데이터가 자동으로 동기화돼요.
             </div>
+            {/* API Key 설정 */}
+            <ApiKeyField/>
             <button onClick={()=>setShowProfileSetup(true)} style={{
               width:"100%", padding:"14px", borderRadius:12, border:"1px solid "+T.brandBorder,
               background:T.brandDim, color:T.brand, fontSize:14, cursor:"pointer",
@@ -3159,6 +3163,41 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
 /* ===================== ORDER TAB ===================== */
 /* ════════════════ AI ASSISTANT (통합) ════════════════ */
+
+/* ── ApiKeyField: AI API 키 입력 ── */
+function ApiKeyField() {
+  const [key, setKey] = React.useState(()=>{ try{return localStorage.getItem("sbx_apikey")||"";}catch(e){return "";} });
+  const [saved, setSaved] = React.useState(false);
+  const save = () => {
+    localStorage.setItem("sbx_apikey", key.trim());
+    window.ANTHROPIC_API_KEY = key.trim();
+    setSaved(true);
+    setTimeout(()=>setSaved(false), 2000);
+  };
+  return (
+    <div style={{ background:T.card2, borderRadius:12, padding:"14px", border:"1px solid "+T.b0 }}>
+      <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8, fontWeight:600 }}>✨ AI API 키 (Anthropic)</div>
+      <div style={{ display:"flex", gap:8 }}>
+        <input
+          type="password"
+          value={key}
+          onChange={e=>setKey(e.target.value)}
+          placeholder="sk-ant-..."
+          style={{ flex:1, padding:"10px 12px", borderRadius:10, border:"1px solid "+T.b1,
+            background:"#fff", fontSize:13, fontFamily:F, outline:"none", color:T.t1 }}
+        />
+        <button onClick={save} style={{
+          padding:"10px 16px", borderRadius:10, border:"none",
+          background:saved?T.brandDim:T.brand, color:saved?T.brand:"#fff",
+          fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:F, flexShrink:0 }}>
+          {saved?"저장됨":"저장"}
+        </button>
+      </div>
+      {key && <div style={{ fontSize:11, color:T.brand, fontFamily:F, marginTop:6 }}>✓ API 키 등록됨</div>}
+    </div>
+  );
+}
+
 function AIAssistantSheet({ onClose, notices, events, tasks, roleTasks, profile, initTab="chat" }) {
   const [tab, setTab] = useState(initTab); // "chat"|"briefing"|"quiz"
   const [messages, setMessages] = useState([]); // { role:"user"|"assistant", text:string }
@@ -3297,6 +3336,9 @@ ${roleTk||"(없음)"}
     if (tab==="quiz" && !quiz) generateQuiz();
   }, [tab]);
 
+  // localStorage에서 API key 로딩
+  const storedKey = (() => { try { return localStorage.getItem("sbx_apikey")||""; } catch(e) { return ""; } })();
+  if (storedKey && !window.ANTHROPIC_API_KEY) window.ANTHROPIC_API_KEY = storedKey;
   const apiKey = window.ANTHROPIC_API_KEY;
 
   return (
