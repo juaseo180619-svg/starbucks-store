@@ -2048,17 +2048,38 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
 
   const DOW_KR = ["일","월","화","수","목","금","토"];
 
-  // 날짜 바뀌면 form 초기화: 전일 마감재고 자동 로드
+  // 날짜 바뀌면 form 초기화: 저장된 데이터 우선 로드, 없으면 전날 마감재고로 초기화
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
   useEffect(() => {
-    const prevDate = getPrevDate(inputDate);
-    const prevRec = records.find(r => r.date === prevDate);
+    const recs = recordsRef.current;
+    const itms = itemsRef.current;
+    const existRec = recs.find(r => r.date === inputDate);
     const init = {};
-    items.forEach(item => {
-      const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
-      init[item] = { prev: String(prevClosing), received: "", closing: "" };
-    });
+    if (existRec) {
+      // 저장된 기록 있으면 그 값으로 채우기
+      itms.forEach(item => {
+        const d = existRec.items[item] || {};
+        init[item] = {
+          prev:     String(d.prev     ?? ""),
+          received: String(d.received ?? ""),
+          closing:  String(d.closing  ?? ""),
+        };
+      });
+    } else {
+      // 없으면 전날 마감재고 → prev에 자동 입력
+      const prevDate = getPrevDate(inputDate);
+      const prevRec = recs.find(r => r.date === prevDate);
+      itms.forEach(item => {
+        const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
+        init[item] = { prev: String(prevClosing), received: "", closing: "" };
+      });
+    }
     setForm(init);
-  }, [inputDate, records.length, items.join(",")]);
+  }, [inputDate]);
 
   function getPrevDate(dateStr) {
     const d = new Date(dateStr + "T00:00:00");
@@ -2386,13 +2407,27 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
                   setDragIdx(null); setDragOverIdx(null);
                 }}
                 onDragEnd={()=>{setDragIdx(null);setDragOverIdx(null);}}
-                onTouchStart={e=>{setDragIdx(idx);}}
                 style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8,
                   opacity: dragIdx===idx ? 0.4 : 1,
                   border: dragOverIdx===idx&&dragIdx!==idx ? "2px solid "+T.green : "2px solid transparent",
                   borderRadius:12, transition:"border .1s" }}>
-                <div style={{ padding:"10px 8px", color:T.l3, cursor:"grab", fontSize:18, userSelect:"none",
-                  flexShrink:0 }}>⠿</div>
+                {/* 순서 이동 버튼 (모바일/PC 모두 작동) */}
+                <div style={{ display:"flex", flexDirection:"column", gap:1, flexShrink:0 }}>
+                  <button onClick={()=>{
+                    if(idx===0) return;
+                    const arr=[...items]; [arr[idx-1],arr[idx]]=[arr[idx],arr[idx-1]]; onSaveItems(arr);
+                  }} disabled={idx===0} style={{ width:24, height:22, border:"none", borderRadius:"4px 4px 0 0",
+                    background:idx===0?"transparent":T.glass2, color:idx===0?T.l4:T.l2,
+                    cursor:idx===0?"default":"pointer", fontSize:12, display:"flex",
+                    alignItems:"center", justifyContent:"center" }}>▲</button>
+                  <button onClick={()=>{
+                    if(idx===items.length-1) return;
+                    const arr=[...items]; [arr[idx],arr[idx+1]]=[arr[idx+1],arr[idx]]; onSaveItems(arr);
+                  }} disabled={idx===items.length-1} style={{ width:24, height:22, border:"none", borderRadius:"0 0 4px 4px",
+                    background:idx===items.length-1?"transparent":T.glass2, color:idx===items.length-1?T.l4:T.l2,
+                    cursor:idx===items.length-1?"default":"pointer", fontSize:12, display:"flex",
+                    alignItems:"center", justifyContent:"center" }}>▼</button>
+                </div>
                 <div style={{ flex:1, padding:"10px 14px", borderRadius:10, background:T.glass2,
                   border:"1px solid "+T.border0, fontSize:14, color:T.l1, fontFamily:F }}>
                   {item}
