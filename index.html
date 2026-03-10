@@ -2037,7 +2037,7 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
   const [dragIdx, setDragIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const [statsItem, setStatsItem] = useState(() => items && items[0] ? items[0] : "우유");
-  const [isSkipped, setIsSkipped] = useState(false); // 현재 날짜가 누락 처리된 상태
+  const [skippedItems, setSkippedItems] = useState({}); // { [item]: true } 항목별 누락 처리
 
   const DOW_KR = ["일","월","화","수","목","금","토"];
 
@@ -2052,36 +2052,35 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
     const itms = itemsRef.current;
     const existRec = recs.find(r => r.date === inputDate);
     const init = {};
+    const initSkipped = {};
 
-    if (existRec && existRec.skipped) {
-      // 누락 처리된 날 — 입력 폼은 비우고, isSkipped 표시
-      setIsSkipped(true);
-      itms.forEach(item => {
-        init[item] = { prev: "", received: "", closing: "" };
-      });
-    } else if (existRec) {
-      // 저장된 기록 있으면 그 값으로 채우기
-      setIsSkipped(false);
+    if (existRec) {
+      // 저장된 기록 — 항목별로 skipped 여부 + 값 복원
       itms.forEach(item => {
         const d = existRec.items[item] || {};
-        init[item] = {
-          prev:     String(d.prev     ?? ""),
-          received: String(d.received ?? ""),
-          closing:  String(d.closing  ?? ""),
-        };
+        if (d.skipped) {
+          initSkipped[item] = true;
+          init[item] = { prev: "", received: "", closing: "" };
+        } else {
+          init[item] = {
+            prev:     String(d.prev     ?? ""),
+            received: String(d.received ?? ""),
+            closing:  String(d.closing  ?? ""),
+          };
+        }
       });
     } else {
-      // 기록 없음 — skipped 건너뛰고 마지막 정상 기록의 마감재고를 prev에
-      setIsSkipped(false);
-      const prevRec = recs
-        .filter(r => r.date < inputDate && !r.skipped)
-        .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
+      // 기록 없음 — 항목별로 마지막 정상(non-skipped) 마감재고를 prev에
       itms.forEach(item => {
+        const prevRec = recs
+          .filter(r => r.date < inputDate && !r.items?.[item]?.skipped && r.items?.[item]?.closing != null)
+          .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
         const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
         init[item] = { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" };
       });
     }
     setForm(init);
+    setSkippedItems(initSkipped);
   }, [inputDate]);
 
   function getPrevDate(dateStr) {
@@ -2104,14 +2103,19 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
     const dow = new Date(inputDate + "T00:00:00").getDay();
     const itemData = {};
     items.forEach(item => {
-      const f = form[item] || {};
-      const used = calcUsed(f.prev, f.received, f.closing);
-      itemData[item] = {
-        prev:     parseFloat(f.prev)    || 0,
-        received: parseFloat(f.received)|| 0,
-        closing:  parseFloat(f.closing) || 0,
-        used:     used !== null ? used : 0,
-      };
+      if (skippedItems[item]) {
+        // 누락 항목: skipped 마킹, 나머지 값은 0
+        itemData[item] = { skipped: true, prev: 0, received: 0, closing: 0, used: 0 };
+      } else {
+        const f = form[item] || {};
+        const used = calcUsed(f.prev, f.received, f.closing);
+        itemData[item] = {
+          prev:     parseFloat(f.prev)    || 0,
+          received: parseFloat(f.received)|| 0,
+          closing:  parseFloat(f.closing) || 0,
+          used:     used !== null ? used : 0,
+        };
+      }
     });
     const newRec = { date: inputDate, dow, items: itemData };
     const exists = records.findIndex(r => r.date === inputDate);
@@ -2122,49 +2126,34 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
       updated = [...records, newRec].sort((a,b) => a.date.localeCompare(b.date));
     }
     onSaveRecords(updated);
-    setIsSkipped(false);
     alert("저장되었습니다 ✓");
   }
 
-  // 누락 처리 — 해당 날짜를 skipped:true 로 마킹
-  function handleSaveSkipped() {
-    const dow = new Date(inputDate + "T00:00:00").getDay();
-    const skippedRec = { date: inputDate, dow, skipped: true, items: {} };
-    const exists = records.findIndex(r => r.date === inputDate);
-    let updated;
-    if (exists >= 0) {
-      updated = records.map((r,i) => i===exists ? skippedRec : r);
-    } else {
-      updated = [...records, skippedRec].sort((a,b) => a.date.localeCompare(b.date));
-    }
-    onSaveRecords(updated);
-    setIsSkipped(true);
-    // form도 비우기
-    const blank = {};
-    items.forEach(item => { blank[item] = { prev:"", received:"", closing:"" }; });
-    setForm(blank);
-  }
-
-  // 누락 처리 취소 — 해당 날짜 기록 삭제
-  function handleCancelSkipped() {
-    const updated = records.filter(r => r.date !== inputDate);
-    onSaveRecords(updated);
-    setIsSkipped(false);
-    // 전일재고 다시 채우기
-    const prevRec = records
-      .filter(r => r.date < inputDate && !r.skipped)
-      .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
-    const blank = {};
-    items.forEach(item => {
-      const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
-      blank[item] = { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" };
+  // 항목별 누락 토글
+  function toggleItemSkip(item) {
+    setSkippedItems(prev => {
+      const next = { ...prev };
+      if (next[item]) {
+        delete next[item];
+        // 누락 해제 시 전일재고 다시 채우기
+        const prevRec = records
+          .filter(r => r.date < inputDate && !r.items?.[item]?.skipped && r.items?.[item]?.closing != null)
+          .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
+        const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
+        setForm(f => ({ ...f, [item]: { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" } }));
+      } else {
+        next[item] = true;
+        // 누락 처리 시 해당 항목 폼 비우기
+        setForm(f => ({ ...f, [item]: { prev: "", received: "", closing: "" } }));
+      }
+      return next;
     });
-    setForm(blank);
   }
 
-  // 요일별 평균 사용량 계산 (누락 처리된 날 제외)
+  // 요일별 평균 사용량 계산 (항목별 누락 제외)
   function getAvgByDow(item, dow) {
-    const vals = records.filter(r => !r.skipped && r.dow === dow && r.items[item]?.used > 0)
+    const vals = records
+      .filter(r => r.dow === dow && !r.items?.[item]?.skipped && r.items?.[item]?.used > 0)
       .map(r => r.items[item].used);
     if (!vals.length) return null;
     return (vals.reduce((a,b)=>a+b,0) / vals.length).toFixed(1);
@@ -2211,7 +2200,7 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
       const wk = mon.toISOString().slice(0,10);
       let w = weeks.find(x=>x.week===wk);
       if (!w) { w = { week:wk, days:{} }; weeks.push(w); }
-      w.days[r.dow] = r.skipped ? "누락" : (r.items[item]?.used ?? null);
+      w.days[r.dow] = r.items?.[item]?.skipped ? "누락" : (r.items?.[item]?.used ?? null);
     });
     return weeks.slice(0,8).reverse();
   }
@@ -2250,104 +2239,87 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
               ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일)
             </span>
             {/* 저장 상태 뱃지 */}
-            {(()=>{
-              const rec = records.find(r=>r.date===inputDate);
-              if (!rec) return null;
-              if (rec.skipped) return (
-                <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
-                  background:"rgba(255,149,0,0.12)", color:T.amber, border:"1px solid rgba(255,149,0,0.25)" }}>
-                  ⚠ 누락 처리됨
-                </span>
-              );
-              return (
-                <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
-                  background:"rgba(0,112,74,0.09)", color:T.green, border:"1px solid rgba(0,112,74,0.2)" }}>
-                  ✓ 저장됨
-                </span>
-              );
-            })()}
+            {records.find(r=>r.date===inputDate) && (
+              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
+                background:"rgba(0,112,74,0.09)", color:T.green, border:"1px solid rgba(0,112,74,0.2)" }}>
+                ✓ 저장됨
+              </span>
+            )}
+            {Object.keys(skippedItems).length > 0 && (
+              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
+                background:"rgba(255,149,0,0.12)", color:T.amber, border:"1px solid rgba(255,149,0,0.25)" }}>
+                ⚠ 누락 {Object.keys(skippedItems).length}개
+              </span>
+            )}
           </div>
 
-          {/* 누락 처리 배너 */}
-          {isSkipped && (
-            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 16px",
-              background:"rgba(255,149,0,0.09)", border:"1px solid rgba(255,149,0,0.25)",
-              borderRadius:12, marginBottom:14 }}>
-              <span style={{ fontSize:22 }}>⚠️</span>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:T.amber, fontFamily:F }}>누락 처리된 날짜예요</div>
-                <div style={{ fontSize:11, color:T.l3, fontFamily:F, marginTop:2 }}>
-                  통계 계산에서 제외되며, 다음 날 전일재고는 이 날을 건너뛰고 자동 입력돼요
-                </div>
-              </div>
-              <button onClick={handleCancelSkipped}
-                style={{ padding:"6px 12px", borderRadius:8, border:"1px solid rgba(255,149,0,0.35)",
-                  background:"none", color:T.amber, fontSize:12, cursor:"pointer", fontFamily:F, fontWeight:600,
-                  flexShrink:0 }}>
-                취소
-              </button>
-            </div>
-          )}
-
           <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16,
-            opacity: isSkipped ? 0.45 : 1, pointerEvents: isSkipped ? "none" : "auto",
-            transition:"opacity .2s" }}>
+            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
             {/* 헤더 */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 0.8fr",
+            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
               padding:"10px 14px", background:T.greenDim, gap:6 }}>
-              {["품목","전일재고","당일입고","마감재고","사용량"].map(h=>(
+              {["품목","전일재고","당일입고","마감재고","사용량","누락"].map(h=>(
                 <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
               ))}
             </div>
             {/* 행 */}
             {items.map((item, idx) => {
+              const skipped = !!skippedItems[item];
               const f = form[item] || { prev:"", received:"", closing:"" };
-              const used = calcUsed(f.prev, f.received, f.closing);
+              const used = skipped ? null : calcUsed(f.prev, f.received, f.closing);
               return (
-                <div key={item} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 0.8fr",
+                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
                   padding:"10px 14px", gap:6, alignItems:"center",
-                  background: idx%2===0 ? T.glass2 : T.card,
-                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none" }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:T.l1, fontFamily:F }}>{item}</div>
+                  background: skipped ? "rgba(255,149,0,0.06)" : idx%2===0 ? T.glass2 : T.card,
+                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none",
+                  transition:"background .15s" }}>
+                  <div style={{ fontSize:13, fontWeight:600,
+                    color: skipped ? T.amber : T.l1, fontFamily:F }}>
+                    {item}
+                    {skipped && <div style={{ fontSize:10, color:T.amber, fontWeight:500, marginTop:1 }}>누락</div>}
+                  </div>
                   {["prev","received","closing"].map(field=>(
                     <input key={field} type="number" min="0" step="0.5"
-                      value={f[field]||""}
+                      value={skipped ? "" : (f[field]||"")}
+                      disabled={skipped}
                       onChange={e=>handleFieldChange(item, field, e.target.value)}
-                      placeholder="0"
+                      placeholder={skipped ? "-" : "0"}
                       style={{ ...inputStyle, fontSize:14,
-                        background: field==="prev" ? T.glass3 : T.card }}/>
+                        background: skipped ? "rgba(255,149,0,0.06)" : field==="prev" ? T.glass3 : T.card,
+                        color: skipped ? T.l4 : T.l1,
+                        borderColor: skipped ? "rgba(255,149,0,0.2)" : T.border1,
+                        cursor: skipped ? "not-allowed" : "auto" }}/>
                   ))}
                   <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
-                    color: used!==null ? T.green : T.l4, fontFamily:F }}>
-                    {used!==null ? used : "-"}
+                    color: skipped ? T.amber : used!==null ? T.green : T.l4, fontFamily:F }}>
+                    {skipped ? "누락" : used!==null ? used : "-"}
                   </div>
+                  {/* 누락 토글 버튼 */}
+                  <button
+                    onClick={()=>toggleItemSkip(item)}
+                    title={skipped ? "누락 해제" : "누락 처리"}
+                    style={{ width:"100%", height:32, borderRadius:8, border:"none",
+                      background: skipped ? "rgba(255,149,0,0.18)" : T.glass3,
+                      color: skipped ? T.amber : T.l3,
+                      fontSize:14, cursor:"pointer", fontWeight:skipped?700:400,
+                      transition:"all .15s" }}>
+                    {skipped ? "✕" : "⚠"}
+                  </button>
                 </div>
               );
             })}
           </div>
 
           <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:12 }}>
-            💡 전일재고는 어제 저장된 마감재고가 자동으로 입력돼요 &nbsp;·&nbsp; 재고를 셀 수 없는 경우 누락 처리하세요
+            💡 전일재고는 자동 입력돼요 &nbsp;·&nbsp; ⚠ 버튼으로 항목별 누락 처리 가능
           </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <button onMouseDown={e=>{e.preventDefault();handleSaveRecord();}}
-              disabled={isSkipped}
-              style={{ flex:1, padding:"14px", borderRadius:14, border:"none",
-                background: isSkipped ? T.glass3 : "linear-gradient(135deg,#00704A,#1E3932)",
-                color: isSkipped ? T.l3 : "#fff", fontSize:15, fontWeight:700, fontFamily:F,
-                cursor: isSkipped ? "not-allowed" : "pointer",
-                boxShadow: isSkipped ? "none" : "0 4px 20px rgba(0,112,74,0.30)" }}>
-              저장하기
-            </button>
-            <button onMouseDown={e=>{e.preventDefault(); isSkipped ? handleCancelSkipped() : handleSaveSkipped();}}
-              style={{ padding:"14px 18px", borderRadius:14, border:"1px solid rgba(255,149,0,0.35)",
-                background: isSkipped ? "rgba(255,149,0,0.12)" : "none",
-                color:T.amber, fontSize:13, fontWeight:700, fontFamily:F,
-                cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>
-              {isSkipped ? "누락 취소" : "⚠ 누락 처리"}
-            </button>
-          </div>
+          <button onMouseDown={e=>{e.preventDefault();handleSaveRecord();}}
+            style={{ width:"100%", padding:"14px", borderRadius:14, border:"none",
+              background:"linear-gradient(135deg,#00704A,#1E3932)",
+              color:"#fff", fontSize:15, fontWeight:700, fontFamily:F,
+              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,112,74,0.30)" }}>
+            저장하기
+          </button>
         </div>
       )}
 
