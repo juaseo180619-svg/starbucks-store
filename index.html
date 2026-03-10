@@ -41,6 +41,9 @@
     .rich-editor br,.notice-body br{line-height:1.8}
     .notice-body{word-break:break-word}
   </style>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -146,17 +149,8 @@ const SEED_EVENTS = [
 ];
 const todayStr = () => new Date().toISOString().slice(0,10);
 
-/* ─── Firebase ──────────────────────────────────── */
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBAOiMIsiF0Y2AFK0L1lddlMKvnvAjBbV8",
-  authDomain: "starbucks-store-479ce.firebaseapp.com",
-  projectId: "starbucks-store-479ce",
-  storageBucket: "starbucks-store-479ce.firebasestorage.app",
-  messagingSenderId: "927355746594",
-  appId: "1:927355746594:web:3a6279d4aff6b6cb4b0d7b"
-};
-if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-const db = firebase.firestore();
+/* ─── Firebase (window.db로 접근) ──────────────── */
+const db = window.db;
 
 
 /* ─── Hooks ─────────────────────────────────────── */
