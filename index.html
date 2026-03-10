@@ -2070,12 +2070,13 @@ function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveB
         };
       });
     } else {
-      // 없으면 전날 마감재고 → prev에 자동 입력
-      const prevDate = getPrevDate(inputDate);
-      const prevRec = recs.find(r => r.date === prevDate);
+      // 없으면 가장 최근 마감재고 → prev에 자동 입력 (날짜 건너뛰어도 OK)
+      const prevRec = recs
+        .filter(r => r.date < inputDate)
+        .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
       itms.forEach(item => {
         const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
-        init[item] = { prev: String(prevClosing), received: "", closing: "" };
+        init[item] = { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" };
       });
     }
     setForm(init);
