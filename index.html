@@ -1596,7 +1596,7 @@ function App() {
         tasks={tasks||[]} roleTasks={roleTasks||[]}
         onViewNotice={n=>{readNotice(n.id);setViewNotice(n);setShowSearch(false);}}
         setTab={t=>{setTab(t);setViewNotice(null);}}/>}
-      {/* 계정 정보 Sheet (모바일 ⋯ 메뉴 → 동기화) */
+      {/* 계정 정보 Sheet (모바일 ⋯ 메뉴 → 동기화) */}
       {showSyncSheet&&(
         <Sheet title="👤 계정 정보" onClose={()=>setShowSyncSheet(false)}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
