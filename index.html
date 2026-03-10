@@ -330,106 +330,97 @@ function ActionBtn({ onClick, children }) {
 
 /* ================== 프로필 설정 화면 ================== */
 /* ─── Profile Setup ─────────────────────────────── */
-function ProfileSetup({ onComplete, existing }) {
-  const [name, setName] = useState(existing?.name || "");
+function ProfileSetup({ onComplete, existing, onClose }) {
+  const [nickname, setNickname] = useState(existing?.name || "");
   const [role, setRole] = useState(existing?.role || "바리스타");
+  const [avatar, setAvatar] = useState(existing?.avatar || "☕");
   const isEdit = !!existing;
 
-  const submit = () => {
-    if (!name.trim()) return;
-    onComplete({ name: name.trim(), role });
-  };
-
+  const ROLES = ["점장","부점장","SSV","바리스타"];
+  const ROLE_C = { "점장":T.violet,"부점장":T.blue,"SSV":T.brand,"바리스타":T.amber };
+  const ROLE_BG = { "점장":T.vDim,"부점장":T.bDim,"SSV":T.brandDim,"바리스타":T.aDim };
+  const AVATARS = ["☕","🌿","⭐","🍵","🌸","🔥","🎯","💚","🍃","✨","🦋","🌙","🎪","🧊","🌺","🍀"];
   const rc = ROLE_COLOR[role] || ROLE_COLOR["바리스타"];
 
-  return (
-    <div style={{ minHeight:"100vh", background:T.bg, maxWidth:430, margin:"0 auto",
-      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-      padding:"40px 24px", fontFamily:F, position:"relative", overflow:"hidden" }}>
+  const submit = () => {
+    if (!nickname.trim()) return;
+    onComplete({ name: nickname.trim(), role, avatar,
+      color: ROLE_C[role]||T.brand, colorBg: ROLE_BG[role]||T.brandDim });
+  };
 
-      {/* 배경 orbs */}
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:"-20%", left:"-20%", width:500, height:500, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,90,50,0.45) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-        <div style={{ position:"absolute", bottom:"10%", right:"-15%", width:380, height:380, borderRadius:"50%",
-          background:"radial-gradient(circle,rgba(0,70,100,0.30) 0%,transparent 65%)", filter:"blur(50px)" }}/>
-      </div>
+  if (isEdit) {
+    // 수정 모드: Sheet 형태
+    return (
+      <Sheet title="프로필 수정" onClose={onClose}>
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
-      <div style={{ position:"relative", zIndex:1, width:"100%" }}>
-        {/* 로고 */}
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:40 }}>
-          <div style={{ width:64, height:64, borderRadius:20,
-            background:"linear-gradient(145deg,#1a5c38,#00704A)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow:"0 8px 32px rgba(0,112,74,0.5),inset 0 1px 0 rgba(255,255,255,0.2)",
-            marginBottom:14 }}>
-            <svg width="36" height="36" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="44" stroke="white" strokeWidth="5"/>
-              <ellipse cx="50" cy="36" rx="15" ry="18" fill="white"/>
-              <path d="M27 57 Q50 78 73 57 Q70 92 50 96 Q30 92 27 57Z" fill="white"/>
-              <path d="M35 57 Q50 50 65 57" stroke="#1a5c38" strokeWidth="4" fill="none" strokeLinecap="round"/>
-              <rect x="22" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(-18 27 63)"/>
-              <rect x="69" y="53" width="9" height="20" rx="4.5" fill="white" transform="rotate(18 73 63)"/>
-            </svg>
-          </div>
-          <div style={{ fontSize:11, fontWeight:700, color:T.l3, letterSpacing:4, marginBottom:6 }}>STARBUCKS</div>
-          <div style={{ fontSize:24, fontWeight:700, color:T.l1, letterSpacing:-0.5 }}>
-            {isEdit ? "프로필 수정" : "프로필 설정"}
-          </div>
-          {!isEdit && (
-            <div style={{ fontSize:13, color:T.l3, marginTop:8, textAlign:"center", lineHeight:1.6 }}>
-              처음 한 번만 설정하면 돼요
+          {/* 아바타 미리보기 */}
+          <div style={{ display:"flex", justifyContent:"center", marginBottom:4 }}>
+            <div style={{ width:72, height:72, borderRadius:20, background:rc.bg,
+              border:"2px solid "+rc.color+"44", display:"flex", alignItems:"center",
+              justifyContent:"center", fontSize:36, boxShadow:"0 4px 20px "+rc.color+"22" }}>
+              {avatar}
             </div>
-          )}
-        </div>
-
-        {/* 아바타 미리보기 */}
-        <div style={{ display:"flex", justifyContent:"center", marginBottom:28 }}>
-          <div style={{ width:72, height:72, borderRadius:"50%",
-            background:rc.bg, border:`2px solid ${rc.color}44`,
-            display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-            boxShadow:`0 4px 20px ${rc.color}22` }}>
-            <div style={{ fontSize:22, fontWeight:800, color:rc.color, lineHeight:1 }}>
-              {name.trim() ? name.trim()[0] : "?"}
-            </div>
-            <div style={{ fontSize:9, color:rc.color, opacity:0.7, marginTop:2, fontWeight:600 }}>{role}</div>
           </div>
-        </div>
 
-        {/* 폼 */}
-        <div style={{ ...glassBox({ padding:"22px 20px",
-          boxShadow:"0 8px 40px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)" }) }}>
-          <Field label="닉네임" value={name} onChange={setName} placeholder="닉네임을 입력하세요 (예: 주이)"/>
+          {/* 아바타 선택 */}
+          <div>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>아바타 선택</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              {AVATARS.map(a => (
+                <button key={a} onClick={()=>setAvatar(a)} style={{
+                  width:42, height:42, borderRadius:12,
+                  border:"2px solid "+(avatar===a?T.brand:T.b0),
+                  background:avatar===a?T.brandDim:"#fff",
+                  fontSize:22, cursor:"pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  boxShadow:avatar===a?"0 2px 8px "+T.brand+"33":"none" }}>{a}</button>
+              ))}
+            </div>
+          </div>
 
-          <div style={{ marginBottom:8 }}>
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:10, paddingLeft:2 }}>직급</div>
+          {/* 닉네임 */}
+          <div>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>닉네임</div>
+            <input value={nickname} onChange={e=>setNickname(e.target.value)}
+              placeholder="닉네임" style={{ fontFamily:F, fontSize:15, color:T.t1,
+                background:T.card2, border:"1.5px solid "+T.b1, borderRadius:12,
+                padding:"12px 14px", width:"100%", outline:"none", boxSizing:"border-box" }}/>
+          </div>
+
+          {/* 직급 */}
+          <div>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>직급</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {ROLES.map(r => {
-                const rc2 = ROLE_COLOR[r];
-                const sel = role === r;
+                const rc2 = ROLE_COLOR[r]; const sel = role === r;
                 return (
                   <button key={r} onClick={()=>setRole(r)} style={{
-                    padding:"12px 8px", borderRadius:14, border:`1px solid ${sel?rc2.color+"55":T.border0}`,
-                    background:sel?rc2.bg:T.glass0, cursor:"pointer", fontFamily:F,
-                    color:sel?rc2.color:T.l3, fontSize:14, fontWeight:sel?700:400,
-                    transition:"all .15s",
-                    boxShadow:sel?`0 2px 12px ${rc2.color}22`:"none",
-                  }}>{r}</button>
+                    padding:"12px 8px", borderRadius:12,
+                    border:"1.5px solid "+(sel?rc2.color+"66":T.b0),
+                    background:sel?rc2.bg:T.card2, cursor:"pointer", fontFamily:F,
+                    color:sel?rc2.color:T.t3, fontSize:14, fontWeight:sel?700:400 }}>{r}</button>
                 );
               })}
             </div>
           </div>
-        </div>
 
-        <div style={{ marginTop:16 }}>
-          <GreenBtn full onClick={submit} disabled={!name.trim()}>
-            {isEdit ? "저장하기" : "시작하기"}
-          </GreenBtn>
+          <button onClick={submit} disabled={!nickname.trim()} style={{
+            padding:"14px", borderRadius:12, border:"none",
+            background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")",
+            color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F,
+            opacity:nickname.trim()?1:0.5 }}>
+            저장하기
+          </button>
         </div>
-      </div>
-    </div>
-  );
+      </Sheet>
+    );
+  }
+
+  // 최초 설정 모드: 전체화면 (사용 안 함 — 로그인 화면에서 처리)
+  return null;
 }
+
 
 /* ================== AI ANALYZE SHEET ================== */
 
@@ -498,53 +489,50 @@ function Spin({ size=20, color }) {
 
 /* ═══════════════════ LOGIN SCREEN ══════════════════ */
 function LoginScreen({ onLogin }) {
-  const [step, setStep] = useState("id"); // "id" | "register"
+  const [step, setStep] = useState("id");
   const [empId, setEmpId] = useState("");
-  const [name, setName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [role, setRole] = useState("바리스타");
   const [storeId, setStoreId] = useState("");
+  const [avatar, setAvatar] = useState("☕");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const ROLES = ["점장","부점장","SSV","바리스타"];
   const ROLE_C = { "점장":T.violet,"부점장":T.blue,"SSV":T.brand,"바리스타":T.amber };
   const ROLE_BG = { "점장":T.vDim,"부점장":T.bDim,"SSV":T.brandDim,"바리스타":T.aDim };
+  const AVATARS = ["☕","🌿","⭐","🍵","🌸","🔥","🎯","💚","🍃","✨","🦋","🌙"];
 
   const handleCheckId = async () => {
     const id = empId.trim();
     if (!id) return setError("사번을 입력해주세요");
     setLoading(true); setError("");
     try {
+      if (!window.db) throw new Error("Firebase 미연결");
       const snap = await db.collection("users").doc(id).get();
-      if (snap.exists) {
-        const userData = snap.data();
-        onLogin(userData);
-      } else {
-        setStep("register");
-      }
+      if (snap.exists) { onLogin(snap.data()); }
+      else { setStep("register"); }
     } catch(e) {
-      setError("연결 오류. 잠시 후 다시 시도해주세요.");
+      console.error(e);
+      setError("연결 오류: " + e.message);
     }
     setLoading(false);
   };
 
   const handleRegister = async () => {
-    if (!name.trim()) return setError("이름을 입력해주세요");
-    if (!storeId.trim()) return setError("매장 코드를 입력해주세요 (예: 1234)");
+    if (!nickname.trim()) return setError("닉네임을 입력해주세요");
+    if (!storeId.trim()) return setError("매장 코드를 입력해주세요");
     setLoading(true); setError("");
     try {
       const userData = {
-        empId: empId.trim(),
-        name: name.trim(),
-        role,
-        storeId: storeId.trim(),
-        color: ROLE_C[role] || T.brand,
-        colorBg: ROLE_BG[role] || T.brandDim,
+        empId: empId.trim(), name: nickname.trim(), role, storeId: storeId.trim(),
+        avatar, color: ROLE_C[role]||T.brand, colorBg: ROLE_BG[role]||T.brandDim,
       };
       await db.collection("users").doc(empId.trim()).set(userData);
       onLogin(userData);
     } catch(e) {
-      setError("등록 오류. 잠시 후 다시 시도해주세요.");
+      console.error(e);
+      setError("등록 오류: " + e.message);
     }
     setLoading(false);
   };
@@ -554,37 +542,32 @@ function LoginScreen({ onLogin }) {
     width:"100%", outline:"none", boxSizing:"border-box" };
 
   return (
-    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center",
-      justifyContent:"center", padding:"20px" }}>
+    <div style={{ minHeight:"100dvh", background:T.bg, display:"flex", alignItems:"center",
+      justifyContent:"center", padding:"20px", paddingBottom:"env(safe-area-inset-bottom,20px)" }}>
       <div style={{ width:"100%", maxWidth:360, background:T.card, borderRadius:20,
         padding:"32px 28px", boxShadow:T.sh3 }}>
 
-        {/* 로고 */}
         <div style={{ textAlign:"center", marginBottom:28 }}>
-          <div style={{ fontSize:36, marginBottom:6 }}>☕</div>
+          <div style={{ fontSize:36, marginBottom:8 }}>☕</div>
           <div style={{ fontSize:20, fontWeight:900, color:T.brandDark, fontFamily:F, letterSpacing:-0.5 }}>
             매장 관리 앱
           </div>
           <div style={{ fontSize:13, color:T.t3, fontFamily:F, marginTop:4 }}>
-            {step==="id" ? "사번으로 로그인하세요" : "처음 사용하시는군요! 정보를 입력해주세요"}
+            {step==="id" ? "사번으로 로그인하세요" : "처음 오셨군요! 정보를 입력해주세요 👋"}
           </div>
         </div>
 
         {step === "id" ? (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <input
-              value={empId}
-              onChange={e=>setEmpId(e.target.value)}
+            <input value={empId} onChange={e=>setEmpId(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleCheckId()}
-              placeholder="사번 입력"
-              style={fBase}
-              autoFocus
-            />
+              placeholder="사번 입력" style={fBase} autoFocus/>
             {error && <div style={{ fontSize:12, color:T.red, fontFamily:F }}>{error}</div>}
             <button onClick={handleCheckId} disabled={loading} style={{
               padding:"14px", borderRadius:12, border:"none",
               background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")",
-              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F,
+              opacity:loading?0.7:1 }}>
               {loading ? "확인 중..." : "로그인"}
             </button>
           </div>
@@ -594,32 +577,37 @@ function LoginScreen({ onLogin }) {
               background:T.brandDim, borderRadius:10, border:"1px solid "+T.brandBorder }}>
               사번 <b style={{ color:T.brand }}>{empId}</b> — 처음 등록하는 계정이에요
             </div>
-            <input
-              value={name}
-              onChange={e=>setName(e.target.value)}
-              placeholder="이름"
-              style={fBase}
-              autoFocus
-            />
+
+            {/* 아바타 선택 */}
+            <div>
+              <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>아바타 선택</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {AVATARS.map(a => (
+                  <button key={a} onClick={()=>setAvatar(a)} style={{
+                    width:40, height:40, borderRadius:10, border:"2px solid "+(avatar===a?T.brand:T.b0),
+                    background:avatar===a?T.brandDim:"#fff", fontSize:20, cursor:"pointer",
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>{a}</button>
+                ))}
+              </div>
+            </div>
+
+            <input value={nickname} onChange={e=>setNickname(e.target.value)}
+              placeholder="닉네임 (예: 주이, 카페왕)" style={fBase} autoFocus/>
             <select value={role} onChange={e=>setRole(e.target.value)} style={{...fBase}}>
               {ROLES.map(r=><option key={r} value={r}>{r}</option>)}
             </select>
-            <input
-              value={storeId}
-              onChange={e=>setStoreId(e.target.value)}
+            <input value={storeId} onChange={e=>setStoreId(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleRegister()}
-              placeholder="매장 코드 (같은 매장 팀원과 동일하게)"
-              style={fBase}
-            />
+              placeholder="매장 코드 (팀원 모두 동일하게)" style={fBase}/>
             <div style={{ fontSize:11, color:T.t3, fontFamily:F, lineHeight:1.7 }}>
-              💡 매장 코드는 팀원들과 동일하게 입력해야 데이터가 공유돼요.<br/>
-              예: 매장 번호, 지점명 등 팀에서 정한 코드
+              💡 매장 코드는 팀원들과 동일하게 입력해야 공지·일정이 공유돼요
             </div>
             {error && <div style={{ fontSize:12, color:T.red, fontFamily:F }}>{error}</div>}
             <button onClick={handleRegister} disabled={loading} style={{
               padding:"14px", borderRadius:12, border:"none",
               background:"linear-gradient(135deg,"+T.brand+","+T.brandDark+")",
-              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F }}>
+              color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:F,
+              opacity:loading?0.7:1 }}>
               {loading ? "등록 중..." : "등록하고 시작하기"}
             </button>
             <button onClick={()=>{ setStep("id"); setError(""); }} style={{
@@ -633,6 +621,7 @@ function LoginScreen({ onLogin }) {
     </div>
   );
 }
+
 
 /* ═══════════════════ APP ══════════════════════════ */
 function App() {
@@ -821,7 +810,7 @@ function App() {
 
   /* 로그인 안된 경우 - LoginScreen은 showLogin state로 처리 (App 최상단) */
   if (showLogin) return <LoginScreen onLogin={handleLogin}/>;
-  if (showProfileSetup) return <ProfileSetup onComplete={saveProfile} existing={profile}/>;
+  // 프로필 수정은 overlay Sheet로 (early return 제거)
   /* --- 메인 UI --- */
   return (
     <div style={{ minHeight:"100vh", background:isPC?"#E4F0E8":T.bg,
@@ -968,69 +957,77 @@ function App() {
           WebkitBackdropFilter:"blur(20px)",
           borderBottom:"1px solid rgba(0,112,74,0.10)",
           display:"flex", alignItems:"center", justifyContent:"space-between",
-          padding:"0 16px", height:60 }}>
+          padding:"0 14px", height:60 }}>
 
-          {/* 왼쪽: 아바타만 */}
-          <div onClick={()=>setShowProfileSetup(true)} style={{ cursor:"pointer" }}>
-            <div style={{ width:38, height:38, borderRadius:12, background:rc.bg,
+          {/* 왼쪽: 아바타 + 이름 + 직급 */}
+          <div onClick={()=>setShowProfileSetup(true)}
+            style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", flex:1, minWidth:0 }}>
+            <div style={{ width:36, height:36, borderRadius:12, background:rc.bg,
               border:"1.5px solid "+rc.color+"55", flexShrink:0,
-              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-              boxShadow:"0 2px 8px "+rc.color+"22" }}>
-              <div style={{ fontSize:16, fontWeight:800, color:rc.color, lineHeight:1 }}>{profile.name[0]}</div>
-              <div style={{ fontSize:7, color:rc.color, opacity:0.7, fontWeight:600, lineHeight:1.4 }}>{profile.role.slice(0,2)}</div>
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:20, boxShadow:"0 2px 8px "+rc.color+"22" }}>
+              {profile.avatar || profile.name?.[0] || "☕"}
+            </div>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F,
+                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {profile.name}
+              </div>
+              <div style={{ fontSize:11, color:rc.color, fontFamily:F, fontWeight:600 }}>
+                {profile.role}
+              </div>
             </div>
           </div>
 
-          {/* 중앙: 날짜 */}
-          <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
-            <span style={{ fontSize:22, fontWeight:900, color:T.t1, fontFamily:F, letterSpacing:-1 }}>
-              {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
-            </span>
-            <span style={{ fontSize:11, color:T.t3, fontFamily:F }}>
-              {["일","월","화","수","목","금","토"][now.getDay()]}
-            </span>
-          </div>
-
-          {/* 오른쪽: 검색 + 더보기 */}
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button onClick={()=>setShowSearch(true)} style={{
-              width:38, height:38, borderRadius:12, border:"1px solid "+T.b1,
-              background:T.card2, display:"flex", alignItems:"center", justifyContent:"center",
-              cursor:"pointer", fontSize:17 }}>🔍</button>
-            {/* 더보기 버튼 */}
+          {/* 오른쪽: ☰메뉴 + 날짜 */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+            {/* ☰ 메뉴 */}
             <div style={{ position:"relative" }}>
-              <button onClick={()=>setShowMoreMenu(v=>!v)} style={{
-                width:38, height:38, borderRadius:12, border:"1px solid "+T.b1,
-                background:showMoreMenu?T.brandDim:T.card2,
+              <button onClick={e=>{e.stopPropagation();setShowMoreMenu(v=>!v);}} style={{
+                width:36, height:36, borderRadius:10, border:"1px solid "+T.b1,
+                background:showMoreMenu?T.brandDim:T.card2, cursor:"pointer",
                 display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", fontSize:18, color:T.t2, fontWeight:700 }}>⋯</button>
+                fontSize:18, color:T.t2 }}>☰</button>
               {showMoreMenu && (
-                <div style={{ position:"absolute", top:44, right:0, zIndex:300,
+                <div style={{ position:"absolute", top:42, right:0, zIndex:300,
                   background:"#fff", borderRadius:14, boxShadow:"0 8px 32px rgba(0,0,0,0.15)",
-                  border:"1px solid "+T.b1, minWidth:160, overflow:"hidden" }}
-                  onClick={()=>setShowMoreMenu(false)}>
-                  <button onClick={()=>{setAiInitTab("chat");setShowAI(true);}} style={{
+                  border:"1px solid "+T.b1, minWidth:170, overflow:"hidden" }}
+                  onClick={e=>e.stopPropagation()}>
+                  <button onClick={()=>{setShowSearch(true);setShowMoreMenu(false);}} style={{
                     width:"100%", padding:"13px 16px", border:"none", background:"none",
                     display:"flex", alignItems:"center", gap:10, cursor:"pointer",
                     fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
-                    <span>✨</span> AI 어시스턴트
+                    🔍 <span>검색</span>
                   </button>
-                  <div style={{ height:1, background:T.border0, margin:"0 12px" }}/>
-                  <button onClick={()=>setShowSyncSheet(true)} style={{
+                  <div style={{ height:1, background:T.b0, margin:"0 12px" }}/>
+                  <button onClick={()=>{setAiInitTab("chat");setShowAI(true);setShowMoreMenu(false);}} style={{
                     width:"100%", padding:"13px 16px", border:"none", background:"none",
                     display:"flex", alignItems:"center", gap:10, cursor:"pointer",
                     fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
-                    <span style={{ fontSize:15 }}>
-                      "🔥"
-                    </span>
-                    <span>동기화
-                      
-                    </span>
+                    ✨ <span>AI 어시스턴트</span>
+                  </button>
+                  <div style={{ height:1, background:T.b0, margin:"0 12px" }}/>
+                  <button onClick={()=>{setShowSyncSheet(true);setShowMoreMenu(false);}} style={{
+                    width:"100%", padding:"13px 16px", border:"none", background:"none",
+                    display:"flex", alignItems:"center", gap:10, cursor:"pointer",
+                    fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
+                    👤 <span>계정 정보</span>
                   </button>
                 </div>
               )}
             </div>
+
+            {/* 날짜 */}
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
+              <span style={{ fontSize:17, fontWeight:800, color:T.t1, fontFamily:F, lineHeight:1.1 }}>
+                {now.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}
+              </span>
+              <span style={{ fontSize:10, color:T.t3, fontFamily:F, fontWeight:500 }}>
+                {["일","월","화","수","목","금","토"][now.getDay()]}요일
+              </span>
+            </div>
           </div>
+
         </div>
       )}
 
@@ -1602,6 +1599,11 @@ function App() {
         tasks={tasks||[]} roleTasks={roleTasks||[]}
         onViewNotice={n=>{readNotice(n.id);setViewNotice(n);setShowSearch(false);}}
         setTab={t=>{setTab(t);setViewNotice(null);}}/>}
+      {/* 프로필 수정 Sheet */}
+      {showProfileSetup && (
+        <ProfileSetup onComplete={saveProfile} existing={profile}
+          onClose={()=>setShowProfileSetup(false)}/>
+      )}
       {/* 계정 정보 Sheet (모바일 ⋯ 메뉴 → 동기화) */}
       {showSyncSheet&&(
         <Sheet title="👤 계정 정보" onClose={()=>setShowSyncSheet(false)}>
