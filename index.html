@@ -56,6 +56,18 @@
       list:async(p,s)=>{const px=(s?"sh_":"pr_")+(p||"");return{keys:Object.keys(localStorage).filter(k=>k.startsWith(px)),shared:s}}
     };
   </script>
+  <script>
+    var FIREBASE_CONFIG = {
+      apiKey: "AIzaSyBAOiMIsiF0Y2AFK0L1lddlMKvnvAjBbV8",
+      authDomain: "starbucks-store-479ce.firebaseapp.com",
+      projectId: "starbucks-store-479ce",
+      storageBucket: "starbucks-store-479ce.firebasestorage.app",
+      messagingSenderId: "927355746594",
+      appId: "1:927355746594:web:3a6279d4aff6b6cb4b0d7b"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    window.db = firebase.firestore();
+  </script>
   <script type="text/babel" data-presets="react">
     const{useState,useEffect,useCallback,useRef}=React;
 
