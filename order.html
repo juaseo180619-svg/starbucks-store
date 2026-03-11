@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="발주"/>
+  <meta name="theme-color" content="#00704A"/>
+  <title>발주 관리</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    html,body{height:100%;background:#F2F2F7;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,sans-serif;}
+    #root{min-height:100vh;}
+    ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.15);border-radius:4px;}
+    input:focus,textarea:focus{outline:none!important;}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}
+    .fi{animation:fadeUp .25s cubic-bezier(.22,1,.36,1) both}
+    button:active{opacity:0.78;transition:opacity .1s}
+    input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.4);}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ─── Design Tokens ─────────────────────────────── */
+const F = "'Noto Sans KR', -apple-system, sans-serif";
+const T = {
+  bg:"#F2F2F7", card:"#FFFFFF", card2:"#F2F2F7", card3:"#E5E5EA",
+  brand:"#00704A", brandDark:"#1E3932", brandLight:"#D4EDE3",
+  brandDim:"rgba(0,112,74,0.09)", brandBorder:"rgba(0,112,74,0.18)",
+  t1:"#1C1C1E", t2:"#3C3C43", t3:"#8E8E93", t4:"rgba(60,60,67,0.18)",
+  red:"#FF3B30", rDim:"rgba(255,59,48,0.10)", rBdr:"rgba(255,59,48,0.22)",
+  amber:"#FF9500", aDim:"rgba(255,149,0,0.10)", aBdr:"rgba(255,149,0,0.22)",
+  blue:"#007AFF", bDim:"rgba(0,122,255,0.10)",
+  b0:"rgba(60,60,67,0.10)", b1:"rgba(60,60,67,0.16)",
+  sh1:"0 1px 3px rgba(0,0,0,0.06)", sh2:"0 2px 8px rgba(0,0,0,0.08)", sh3:"0 4px 20px rgba(0,0,0,0.10)",
+};
+
+/* ─── Storage ────────────────────────────────────── */
+const LS = {
+  get: (k, def) => { try { const v = localStorage.getItem("sborder_"+k); return v ? JSON.parse(v) : def; } catch { return def; } },
+  set: (k, v) => { try { localStorage.setItem("sborder_"+k, JSON.stringify(v)); } catch {} },
+};
+
+/* ─── Utils ─────────────────────────────────────── */
+const todayStr = () => new Date().toISOString().slice(0,10);
+const DOW_KR = ["일","월","화","수","목","금","토"];
+const fmtDate = (s) => { if (!s) return ""; const d = new Date(s+"T00:00:00"); return d.toLocaleDateString("ko-KR",{month:"short",day:"numeric"}); };
+const getDow = (s) => new Date(s+"T00:00:00").getDay();
+
+/* ─── Excel Parsing ──────────────────────────────── */
+function parseInventoryExcel(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type:"array", cellDates:true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+
+  // 헤더 2행, 데이터 3행부터
+  const items = {};
+  const dateStr = todayStr();
+
+  for (let i = 2; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row[2]) continue; // SKU명 없으면 skip
+    const sku   = String(row[1] || "").trim();
+    const name  = String(row[2] || "").trim();
+    const cat   = String(row[3] || "").trim();
+    const unit  = String(row[4] || "EA").trim();
+    const actual = parseFloat(row[7]) || 0;
+    const actualSum = parseFloat(row[8]) || 0;
+    const sold   = parseFloat(row[20]) || 0;
+    const tmrIn  = parseFloat(row[21]) || 0;
+    const d2In   = parseFloat(row[22]) || 0;
+    const dayIn  = parseFloat(row[14]) || 0;
+
+    // 유통기한
+    let expDate = null;
+    let dday = null;
+    if (row[11] && row[11] instanceof Date) {
+      expDate = row[11].toISOString().slice(0,10);
+    } else if (row[11] && typeof row[11] === "string") {
+      expDate = row[11].slice(0,10);
+    }
+    const ddayRaw = String(row[10] || "").trim();
+    if (ddayRaw) {
+      const m = ddayRaw.match(/-?(\d+)/);
+      dday = m ? parseInt(ddayRaw.replace("D-","").replace("D+","")) : null;
+      if (ddayRaw.startsWith("D-") || ddayRaw === "D-day") {
+        dday = ddayRaw === "D-day" ? 0 : -parseInt(m[1]);
+        // D-3 means expires in 3 days
+        dday = parseInt(m ? m[0] : "0") * -1;
+        const parts = ddayRaw.match(/D-(\d+)/);
+        dday = parts ? parseInt(parts[1]) : (ddayRaw === "D-day" ? 0 : null);
+      }
+    }
+
+    if (!items[sku]) {
+      items[sku] = {
+        sku, name, cat, unit,
+        batches: [],
+        actualSum: 0,
+        sold: 0,
+        tmrIn: 0,
+        d2In: 0,
+        dayIn: 0,
+      };
+    }
+    items[sku].batches.push({ actual, expDate, dday: dday });
+    // actualSum은 마지막 행 기준 (같은 값 반복됨)
+    items[sku].actualSum = actualSum || items[sku].actualSum || actual;
+    items[sku].sold = sold || items[sku].sold;
+    items[sku].tmrIn = tmrIn || items[sku].tmrIn;
+    items[sku].d2In = d2In || items[sku].d2In;
+    items[sku].dayIn = dayIn || items[sku].dayIn;
+  }
+
+  return { date: dateStr, dow: getDow(dateStr), items };
+}
+
+/* ─── App Entry ──────────────────────────────────── */
+function App() {
+  const [tab, setTab] = useState("dashboard");
+  const isPC = window.innerWidth >= 768;
+
+  // 핵심 데이터
+  const [uploadHistory, setUploadHistory] = useState(() => LS.get("history", []));
+  const [manualItems,   setManualItems]   = useState(() => LS.get("manualItems", ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"]));
+  const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
+  const [buffers,       setBuffers]       = useState(() => LS.get("buffers", {}));
+  const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {})); // sku → 표시명
+
+  const saveHistory = (v) => { setUploadHistory(v); LS.set("history", v); };
+  const saveManualItems = (v) => { setManualItems(v); LS.set("manualItems", v); };
+  const saveManualRecords = (v) => { setManualRecords(v); LS.set("manualRecords", v); };
+  const saveBuffers = (v) => { setBuffers(v); LS.set("buffers", v); };
+  const saveSkuAliases = (v) => { setSkuAliases(v); LS.set("skuAliases", v); };
+
+  // 최신 업로드 데이터
+  const latestUpload = uploadHistory.length ? uploadHistory[uploadHistory.length - 1] : null;
+
+  const tabs = [
+    { id:"dashboard", icon:"🏠", label:"홈" },
+    { id:"upload",    icon:"📁", label:"실사" },
+    { id:"recommend", icon:"📦", label:"발주" },
+    { id:"manual",    icon:"📝", label:"수동" },
+    { id:"history",   icon:"📈", label:"통계" },
+  ];
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.bg, fontFamily:F, overflowX:"hidden" }}>
+      <style>{`
+        *{box-sizing:border-box;}
+        ::placeholder{color:${T.t3};font-family:${F};}
+        ::-webkit-scrollbar{display:none;}
+        textarea,input{font-family:${F};}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+        .fi{animation:fadeUp .25s cubic-bezier(.22,1,.36,1) both}
+        button:active{opacity:0.75;transition:opacity .1s}
+      `}</style>
+
+      {/* ── 모바일 상단 헤더 ── */}
+      {!isPC && (
+        <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:200,
+          background:"rgba(242,242,247,0.95)", backdropFilter:"blur(20px)",
+          WebkitBackdropFilter:"blur(20px)",
+          borderBottom:"1px solid "+T.b0,
+          display:"flex", alignItems:"center", padding:"0 16px", height:56 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ width:32, height:32, borderRadius:10,
+              background:"linear-gradient(135deg,#00704A,#1E3932)",
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>☕</div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:T.t3, letterSpacing:1.5 }}>STARBUCKS</div>
+              <div style={{ fontSize:13, fontWeight:800, color:T.brand, lineHeight:1 }}>발주 관리</div>
+            </div>
+          </div>
+          {latestUpload && (
+            <div style={{ marginLeft:"auto", fontSize:11, color:T.t3, fontFamily:F }}>
+              최근: {fmtDate(latestUpload.date)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── PC 사이드바 ── */}
+      {isPC && (
+        <aside style={{ width:220, minHeight:"100vh", background:T.card,
+          borderRight:"1px solid "+T.b0,
+          display:"flex", flexDirection:"column",
+          position:"fixed", top:0, left:0, height:"100vh",
+          overflowY:"auto", zIndex:200 }}>
+          <div style={{ padding:"20px 20px 14px", borderBottom:"1px solid "+T.b0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:10,
+                background:"linear-gradient(135deg,#00704A,#1E3932)",
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>☕</div>
+              <div>
+                <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:2 }}>STARBUCKS</div>
+                <div style={{ fontSize:13, fontWeight:800, color:T.brand }}>발주 관리</div>
+              </div>
+            </div>
+          </div>
+          <nav style={{ padding:"8px 10px", flex:1 }}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                display:"flex", alignItems:"center", gap:10, width:"100%",
+                padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
+                fontFamily:F, fontSize:14, fontWeight:tab===t.id?700:400,
+                background:tab===t.id?T.brandDim:"transparent",
+                color:tab===t.id?T.brand:T.t1, marginBottom:2, textAlign:"left",
+                transition:"background .12s" }}
+              onMouseEnter={e=>{ if(tab!==t.id) e.currentTarget.style.background=T.b0; }}
+              onMouseLeave={e=>{ if(tab!==t.id) e.currentTarget.style.background="transparent"; }}>
+                <span style={{ fontSize:16, width:22, textAlign:"center",
+                  filter:tab===t.id?"none":"grayscale(0.3) opacity(0.7)" }}>{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          {latestUpload && (
+            <div style={{ padding:"10px 14px", borderTop:"1px solid "+T.b0,
+              fontSize:11, color:T.t3, fontFamily:F }}>
+              최근 업로드: {fmtDate(latestUpload.date)}<br/>
+              {Object.keys(latestUpload.items||{}).length}개 SKU
+            </div>
+          )}
+        </aside>
+      )}
+
+      {/* ── 모바일 하단 탭바 ── */}
+      {!isPC && (
+        <nav style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200,
+          background:"rgba(255,255,255,0.96)", backdropFilter:"blur(24px)",
+          WebkitBackdropFilter:"blur(24px)",
+          borderTop:"1px solid "+T.b0,
+          display:"flex", height:"calc(52px + env(safe-area-inset-bottom))",
+          paddingBottom:"env(safe-area-inset-bottom)" }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+              justifyContent:"flex-start", paddingTop:7, gap:2, border:"none",
+              cursor:"pointer", background:"transparent", position:"relative" }}>
+              <div style={{ position:"relative" }}>
+                <span style={{ fontSize:tab===t.id?21:19,
+                  filter:tab===t.id?"none":"grayscale(0.4) opacity(0.6)" }}>{t.icon}</span>
+              </div>
+              <span style={{ fontSize:10, fontWeight:tab===t.id?700:500,
+                color:tab===t.id?T.brand:T.t3, fontFamily:F, lineHeight:1 }}>{t.label}</span>
+              {tab===t.id && (
+                <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)",
+                  width:28, height:2.5, borderRadius:"0 0 3px 3px", background:T.brand }}/>
+              )}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* ── 콘텐츠 영역 ── */}
+      <div style={{
+        marginLeft:isPC?220:0,
+        paddingTop:isPC?0:56,
+        paddingBottom:isPC?0:"calc(62px + env(safe-area-inset-bottom))",
+        minHeight:"100vh"
+      }}>
+        {tab==="dashboard" && (
+          <DashboardTab
+            latestUpload={latestUpload}
+            uploadHistory={uploadHistory}
+            manualRecords={manualRecords}
+            manualItems={manualItems}
+            buffers={buffers}
+            setTab={setTab}
+            skuAliases={skuAliases}
+          />
+        )}
+        {tab==="upload" && (
+          <UploadTab
+            uploadHistory={uploadHistory}
+            onSave={saveHistory}
+            skuAliases={skuAliases}
+            onSaveAliases={saveSkuAliases}
+          />
+        )}
+        {tab==="recommend" && (
+          <RecommendTab
+            latestUpload={latestUpload}
+            uploadHistory={uploadHistory}
+            manualRecords={manualRecords}
+            manualItems={manualItems}
+            buffers={buffers}
+            onSaveBuffers={saveBuffers}
+            skuAliases={skuAliases}
+          />
+        )}
+        {tab==="manual" && (
+          <ManualTab
+            records={manualRecords}
+            items={manualItems}
+            buffers={buffers}
+            onSaveRecords={saveManualRecords}
+            onSaveItems={saveManualItems}
+            onSaveBuffers={saveBuffers}
+          />
+        )}
+        {tab==="history" && (
+          <HistoryTab
+            uploadHistory={uploadHistory}
+            manualRecords={manualRecords}
+            manualItems={manualItems}
+            skuAliases={skuAliases}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Shared UI ──────────────────────────────────── */
+function Card({ children, style={} }) {
+  return (
+    <div style={{ background:T.card, borderRadius:16, boxShadow:T.sh1, overflow:"hidden", ...style }}>
+      {children}
+    </div>
+  );
+}
+function SH({ title, sub, action }) {
+  return (
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+      <div>
+        <span style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F }}>{title}</span>
+        {sub && <span style={{ fontSize:12, color:T.t3, fontFamily:F, marginLeft:6 }}>{sub}</span>}
+      </div>
+      {action}
+    </div>
+  );
+}
+function GreenBtn({ onClick, children, full, disabled, small }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      background:disabled?"#E5E5EA":T.brand, color:disabled?"#AEAEB2":"#fff",
+      border:"none", borderRadius:12, padding:small?"8px 16px":"13px 20px",
+      fontSize:small?13:15, fontWeight:600, fontFamily:F,
+      cursor:disabled?"not-allowed":"pointer", width:full?"100%":"auto",
+      boxShadow:disabled?"none":"0 3px 14px rgba(0,112,74,0.25)", transition:"opacity .15s"
+    }}>{children}</button>
+  );
+}
+function Pill({ label, color, dim }) {
+  return (
+    <span style={{ fontSize:11, fontWeight:700, padding:"2px 9px", borderRadius:20,
+      background:dim||color+"18", color, fontFamily:F, letterSpacing:0.2, whiteSpace:"nowrap" }}>
+      {label}
+    </span>
+  );
+}
+function Spin({ size=20, color }) {
+  return (
+    <div style={{ width:size, height:size, borderRadius:"50%",
+      border:`2.5px solid ${color||T.brandDim}`, borderTopColor:color||T.brand,
+      animation:"spin .7s linear infinite", flexShrink:0 }}/>
+  );
+}
+function EmptyState({ emoji, text, sub }) {
+  return (
+    <div style={{ padding:"40px 20px", textAlign:"center" }}>
+      <div style={{ fontSize:38, marginBottom:10 }}>{emoji||"📭"}</div>
+      <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F }}>{text}</div>
+      {sub && <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>{sub}</div>}
+    </div>
+  );
+}
+
+/* ─── 대시보드 ───────────────────────────────────── */
+function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, setTab, skuAliases }) {
+  const today = todayStr();
+  const dow = getDow(today);
+
+  // 유통기한 임박 항목 (D-3 이하)
+  const expiring = useMemo(() => {
+    if (!latestUpload) return [];
+    return Object.values(latestUpload.items||{})
+      .flatMap(item => item.batches.map(b => ({ ...item, ...b })))
+      .filter(b => b.dday !== null && b.dday !== undefined && b.dday <= 3 && b.actual > 0)
+      .sort((a,b) => (a.dday||99) - (b.dday||99));
+  }, [latestUpload]);
+
+  // 재고 부족 (추천 발주량 > 0인 항목)
+  const needOrder = useMemo(() => {
+    if (!latestUpload) return 0;
+    let cnt = 0;
+    Object.entries(latestUpload.items||{}).forEach(([sku, item]) => {
+      const hist = uploadHistory.filter(h => h.date < latestUpload.date && h.items?.[sku]);
+      if (hist.length < 2) return;
+      const avgSold = hist.reduce((s,h)=>s+(h.items[sku]?.sold||0),0)/hist.length;
+      const buf = parseFloat(buffers[sku]||buffers[item.name]||2);
+      const rec = Math.max(0, Math.ceil(avgSold*2 + buf - item.actualSum - item.tmrIn));
+      if (rec > 0) cnt++;
+    });
+    return cnt;
+  }, [latestUpload, uploadHistory, buffers]);
+
+  // 총 SKU 수
+  const totalSku = latestUpload ? Object.keys(latestUpload.items||{}).length : 0;
+  // 재고 0인 SKU
+  const zeroStock = latestUpload ? Object.values(latestUpload.items||{}).filter(i=>i.actualSum===0).length : 0;
+
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+      {/* 히어로 카드 */}
+      <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+        borderRadius:22, padding:"22px 20px", marginBottom:18, position:"relative", overflow:"hidden" }}>
+        <div style={{ position:"absolute", right:-30, top:-30, width:120, height:120,
+          borderRadius:"50%", background:"rgba(255,255,255,0.05)" }}/>
+        <div style={{ position:"relative", zIndex:1 }}>
+          <div style={{ fontSize:12, color:"rgba(255,255,255,0.6)", fontFamily:F, marginBottom:4 }}>
+            {new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
+          </div>
+          <div style={{ fontSize:18, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:16 }}>
+            발주 관리 대시보드 ☕
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+            {[
+              { v:totalSku, l:"총 SKU", tab:"upload" },
+              { v:expiring.length, l:"유통임박", tab:"recommend" },
+              { v:needOrder, l:"발주필요", tab:"recommend" },
+            ].map(s => (
+              <button key={s.l} onClick={() => setTab(s.tab)} style={{
+                background:"rgba(255,255,255,0.14)", borderRadius:12,
+                padding:"10px 8px", border:"none", cursor:"pointer", textAlign:"center" }}>
+                <div style={{ fontSize:22, fontWeight:900, color:"#fff", fontFamily:F, lineHeight:1 }}>{s.v}</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.70)", fontFamily:F, marginTop:3 }}>{s.l}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 업로드 없음 안내 */}
+      {!latestUpload && (
+        <Card style={{ marginBottom:16 }}>
+          <EmptyState emoji="📁" text="실사 데이터가 없어요"
+            sub="실사 탭에서 엑셀 파일을 업로드해보세요"/>
+          <div style={{ padding:"0 16px 16px" }}>
+            <GreenBtn full onClick={() => setTab("upload")}>📁 실사 업로드하기</GreenBtn>
+          </div>
+        </Card>
+      )}
+
+      {/* 유통기한 임박 */}
+      {expiring.length > 0 && (
+        <div style={{ marginBottom:16 }}>
+          <SH title="⚠ 유통기한 임박" sub={expiring.length+"개"}/>
+          <Card>
+            {expiring.slice(0,6).map((item, i, arr) => {
+              const dday = item.dday;
+              const color = dday === 0 ? T.red : dday <= 1 ? T.red : dday <= 3 ? T.amber : T.t3;
+              const dim   = dday === 0 ? T.rDim : dday <= 1 ? T.rDim : T.aDim;
+              const dispName = skuAliases[item.sku] || item.name;
+              return (
+                <div key={item.sku+"_"+i} style={{
+                  padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
+                  borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
+                  <div style={{ width:40, height:40, borderRadius:10, background:dim,
+                    display:"flex", flexDirection:"column", alignItems:"center",
+                    justifyContent:"center", flexShrink:0 }}>
+                    <div style={{ fontSize:13, fontWeight:900, color, lineHeight:1 }}>
+                      {dday === 0 ? "D-day" : "D-"+dday}
+                    </div>
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {dispName}
+                    </div>
+                    <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+                      재고 {item.actual}개 · {item.expDate ? fmtDate(item.expDate) + " 만료" : ""}
+                    </div>
+                  </div>
+                  <Pill label={dday===0?"오늘마감":dday<=1?"내일마감":"D-"+dday}
+                    color={color} dim={dim}/>
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      )}
+
+      {/* 최근 실사 요약 */}
+      {latestUpload && (
+        <div style={{ marginBottom:16 }}>
+          <SH title="최근 실사 현황" sub={fmtDate(latestUpload.date)+" ("+DOW_KR[latestUpload.dow]+"요일)"}
+            action={
+              <button onClick={() => setTab("upload")} style={{
+                padding:"5px 12px", borderRadius:8, border:"none",
+                background:T.brand, color:"#fff", fontSize:12, fontWeight:600,
+                cursor:"pointer", fontFamily:F }}>+ 업로드</button>
+            }/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            {[
+              { label:"총 품목", value:totalSku+"개", color:T.brand, dim:T.brandDim },
+              { label:"재고 없음", value:zeroStock+"개", color:T.red, dim:T.rDim },
+              { label:"내일 입고", value:Object.values(latestUpload.items||{}).filter(i=>i.tmrIn>0).length+"개", color:T.blue, dim:T.bDim },
+              { label:"당일 판매", value:Object.values(latestUpload.items||{}).reduce((s,i)=>s+i.sold,0)+"개", color:T.amber, dim:T.aDim },
+            ].map(stat => (
+              <div key={stat.label} style={{ background:stat.dim, borderRadius:14,
+                padding:"14px 16px", border:"1px solid "+stat.color+"22" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:stat.color, fontFamily:F, marginBottom:4 }}>
+                  {stat.label}
+                </div>
+                <div style={{ fontSize:24, fontWeight:900, color:stat.color, fontFamily:F, letterSpacing:-1 }}>
+                  {stat.value}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 바로가기 버튼 */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {[
+          { icon:"📁", label:"실사 업로드", tab:"upload", color:T.brand },
+          { icon:"📦", label:"발주 추천",   tab:"recommend", color:T.amber },
+          { icon:"📝", label:"수동 입력",   tab:"manual",  color:T.blue },
+          { icon:"📈", label:"통계 보기",   tab:"history", color:"#7C3AED" },
+        ].map(btn => (
+          <button key={btn.tab} onClick={() => setTab(btn.tab)} style={{
+            background:T.card, borderRadius:14, border:"1px solid "+T.b0,
+            padding:"16px 14px", cursor:"pointer", display:"flex",
+            alignItems:"center", gap:10, boxShadow:T.sh1,
+            transition:"transform .15s" }}
+          onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"}
+          onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+            <div style={{ width:38, height:38, borderRadius:10,
+              background:btn.color+"15", border:"1px solid "+btn.color+"25",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:18, flexShrink:0 }}>{btn.icon}</div>
+            <span style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F }}>{btn.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── 실사 업로드 탭 ─────────────────────────────── */
+function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
+  const [dragging, setDragging] = useState(false);
+  const [parsing,  setParsing]  = useState(false);
+  const [preview,  setPreview]  = useState(null); // 파싱된 데이터 미리보기
+  const [error,    setError]    = useState("");
+  const [catFilter, setCatFilter] = useState("전체");
+  const [editAlias, setEditAlias] = useState(null); // { sku, name }
+  const [aliasInput, setAliasInput] = useState("");
+  const fileRef = useRef();
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["xlsx","xls"].includes(ext)) { setError("xlsx 또는 xls 파일만 지원해요"); return; }
+    setParsing(true); setError("");
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseInventoryExcel(buf);
+      setPreview(parsed);
+    } catch(e) {
+      setError("파일 파싱 오류: "+e.message);
+    }
+    setParsing(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleSaveUpload = () => {
+    if (!preview) return;
+    const exists = uploadHistory.findIndex(h => h.date === preview.date);
+    let updated;
+    if (exists >= 0) {
+      updated = uploadHistory.map((h,i) => i===exists ? preview : h);
+    } else {
+      updated = [...uploadHistory, preview];
+    }
+    onSave(updated);
+    setPreview(null);
+    alert("저장되었습니다 ✓");
+  };
+
+  const deleteHistory = (idx) => {
+    if (!window.confirm("이 기록을 삭제할까요?")) return;
+    onSave(uploadHistory.filter((_,i) => i!==idx));
+  };
+
+  // 미리보기 카테고리 목록
+  const cats = preview ? ["전체", ...new Set(Object.values(preview.items).map(i=>i.cat))] : [];
+  const filteredItems = preview ? Object.values(preview.items).filter(item =>
+    catFilter === "전체" || item.cat === catFilter
+  ) : [];
+
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+      <SH title="📁 실사 데이터 업로드"
+        sub="엑셀 파일 업로드 → 자동 파싱 → 발주 추천에 반영"/>
+
+      {/* 드롭존 */}
+      {!preview && (
+        <div
+          onDragOver={e=>{e.preventDefault();setDragging(true);}}
+          onDragLeave={()=>setDragging(false)}
+          onDrop={handleDrop}
+          onClick={()=>fileRef.current?.click()}
+          style={{ border:"2px dashed "+(dragging?T.brand:T.b1),
+            borderRadius:18, padding:"44px 20px", textAlign:"center",
+            background:dragging?T.brandDim:T.card, cursor:"pointer",
+            transition:"all .2s", marginBottom:16 }}>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }}
+            onChange={e=>{ const f=e.target.files[0]; if(f) handleFile(f); e.target.value=""; }}/>
+          {parsing ? (
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:12 }}>
+              <Spin size={32}/>
+              <div style={{ fontSize:14, color:T.t3, fontFamily:F }}>파일 분석 중...</div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize:42, marginBottom:12 }}>📊</div>
+              <div style={{ fontSize:15, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:4 }}>
+                실사 엑셀 파일을 올려주세요
+              </div>
+              <div style={{ fontSize:13, color:T.t3, fontFamily:F }}>
+                드래그 & 드롭 또는 탭하여 선택<br/>.xlsx / .xls 지원
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div style={{ padding:"12px 16px", borderRadius:12, background:T.rDim,
+          border:"1px solid "+T.rBdr, color:T.red, fontSize:13, fontFamily:F, marginBottom:14 }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {/* 미리보기 */}
+      {preview && (
+        <div>
+          <div style={{ background:T.brandDim, border:"1px solid "+T.brandBorder,
+            borderRadius:12, padding:"12px 16px", marginBottom:14, fontSize:13, color:T.brand, fontFamily:F }}>
+            📅 {preview.date} ({DOW_KR[preview.dow]}요일) · {Object.keys(preview.items).length}개 SKU 파싱됨
+          </div>
+
+          {/* 카테고리 필터 */}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+            {cats.map(c => (
+              <button key={c} onClick={() => setCatFilter(c)} style={{
+                padding:"5px 12px", borderRadius:20, border:"1px solid "+(catFilter===c?T.brand:T.b1),
+                background:catFilter===c?T.brandDim:T.card,
+                color:catFilter===c?T.brand:T.t2,
+                fontSize:12, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>
+                {c}
+              </button>
+            ))}
+          </div>
+
+          <Card style={{ marginBottom:14 }}>
+            {/* 헤더 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+              padding:"9px 14px", background:T.brandDim, gap:4 }}>
+              {["품목명","재고","판매","내일입고","내모레","유통"].map(h => (
+                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {filteredItems.length === 0
+              ? <EmptyState emoji="📋" text="해당 카테고리 항목이 없어요"/>
+              : filteredItems.map((item, idx) => {
+                  const minDday = item.batches.reduce((m,b) => b.dday!==null&&b.dday<m ? b.dday : m, 99);
+                  const expiryColor = minDday<=1?T.red:minDday<=3?T.amber:T.t3;
+                  const dispName = skuAliases[item.sku] || item.name;
+                  return (
+                    <div key={item.sku} style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+                      padding:"10px 14px", gap:4, alignItems:"center",
+                      background:idx%2===0?T.card2:T.card,
+                      borderTop:idx>0?"1px solid "+T.b0:"none" }}>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {dispName}
+                        </div>
+                        <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</div>
+                      </div>
+                      <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
+                        color:item.actualSum===0?T.red:T.t1, fontFamily:F }}>
+                        {item.actualSum}
+                      </div>
+                      <div style={{ textAlign:"center", fontSize:13, color:T.amber, fontFamily:F }}>
+                        {item.sold||"-"}
+                      </div>
+                      <div style={{ textAlign:"center", fontSize:13, color:T.blue, fontFamily:F }}>
+                        {item.tmrIn||"-"}
+                      </div>
+                      <div style={{ textAlign:"center", fontSize:13, color:T.t3, fontFamily:F }}>
+                        {item.d2In||"-"}
+                      </div>
+                      <div style={{ textAlign:"center", fontSize:12, fontWeight:700,
+                        color:expiryColor, fontFamily:F }}>
+                        {minDday<=3 && minDday!==99 ? "D-"+minDday : "-"}
+                      </div>
+                    </div>
+                  );
+                })
+            }
+          </Card>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:8 }}>
+            <button onClick={() => setPreview(null)} style={{
+              padding:"13px", borderRadius:12, border:"1px solid "+T.b1,
+              background:T.card, color:T.t2, cursor:"pointer", fontFamily:F,
+              fontSize:14, fontWeight:600 }}>취소</button>
+            <GreenBtn full onClick={handleSaveUpload}>저장하기</GreenBtn>
+          </div>
+          <div style={{ fontSize:12, color:T.t3, fontFamily:F, textAlign:"center" }}>
+            저장 후 발주 추천 탭에서 추천 발주량을 확인할 수 있어요
+          </div>
+        </div>
+      )}
+
+      {/* 업로드 히스토리 */}
+      {uploadHistory.length > 0 && !preview && (
+        <div style={{ marginTop:20 }}>
+          <SH title="업로드 기록" sub={uploadHistory.length+"건"}/>
+          <Card>
+            {[...uploadHistory].reverse().map((h, i, arr) => (
+              <div key={h.date} style={{ padding:"12px 16px",
+                display:"flex", alignItems:"center", gap:12,
+                borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
+                <div style={{ width:40, height:40, borderRadius:10, background:T.brandDim,
+                  display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1 }}>
+                    {new Date(h.date+"T00:00:00").getDate()}
+                  </div>
+                  <div style={{ fontSize:9, color:T.brand, opacity:0.7 }}>
+                    {new Date(h.date+"T00:00:00").toLocaleDateString("ko-KR",{month:"short"})}
+                  </div>
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F }}>
+                    {fmtDate(h.date)} ({DOW_KR[h.dow]}요일)
+                  </div>
+                  <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+                    {Object.keys(h.items||{}).length}개 SKU · 판매합계 {Object.values(h.items||{}).reduce((s,i)=>s+i.sold,0)}
+                  </div>
+                </div>
+                <button onClick={() => deleteHistory(uploadHistory.length-1-i)} style={{
+                  padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
+                  background:T.rDim, color:T.red, cursor:"pointer",
+                  fontSize:12, fontFamily:F }}>삭제</button>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── 발주 추천 탭 ───────────────────────────────── */
+function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, onSaveBuffers, skuAliases }) {
+  const [catFilter, setCatFilter] = useState("전체");
+  const [showBufEdit, setShowBufEdit] = useState(false);
+  const [bufEdit, setBufEdit] = useState({});
+
+  if (!latestUpload) {
+    return (
+      <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+        <EmptyState emoji="📁" text="실사 데이터가 없어요" sub="실사 탭에서 엑셀을 먼저 업로드해주세요"/>
+      </div>
+    );
+  }
+
+  const today = latestUpload.date;
+  const todayDow = latestUpload.dow;
+
+  // SKU별 과거 평균 판매량 계산
+  function getAvgSold(sku) {
+    const hist = uploadHistory.filter(h => h.date <= today && h.items?.[sku]?.sold > 0);
+    if (!hist.length) return null;
+    const total = hist.reduce((s,h) => s+(h.items[sku]?.sold||0), 0);
+    return (total/hist.length).toFixed(1);
+  }
+  function getAvgSoldByDow(sku, dow) {
+    const hist = uploadHistory.filter(h => h.dow===dow && h.date<=today && h.items?.[sku]?.sold > 0);
+    if (!hist.length) return null;
+    const total = hist.reduce((s,h) => s+(h.items[sku]?.sold||0), 0);
+    return (total/hist.length).toFixed(1);
+  }
+
+  // 발주 추천량 계산
+  // 발주일 기준: 내일(+1) + 모레(+2=입고일) 사용량 커버
+  function calcRecommend(sku, item) {
+    const current = item.actualSum;
+    const tmrIn   = item.tmrIn;
+    const d2In    = item.d2In;
+    const dow1    = (todayDow + 1) % 7;
+    const dow2    = (todayDow + 2) % 7;
+    const avg1    = parseFloat(getAvgSoldByDow(sku, dow1)) || parseFloat(getAvgSold(sku)) || 0;
+    const avg2    = parseFloat(getAvgSoldByDow(sku, dow2)) || parseFloat(getAvgSold(sku)) || 0;
+    const totalUsage = avg1 + avg2;
+    const buf     = parseFloat(buffers[sku] ?? buffers[item.name] ?? 2);
+    const rec     = Math.max(0, Math.ceil(totalUsage + buf - current - tmrIn - d2In));
+    return { rec, avg1, avg2, totalUsage, buf, current, tmrIn, d2In, dow1, dow2 };
+  }
+
+  const cats = ["전체", ...new Set(Object.values(latestUpload.items).map(i=>i.cat))];
+  const items = Object.entries(latestUpload.items).filter(([,item]) =>
+    catFilter === "전체" || item.cat === catFilter
+  );
+
+  // 발주 필요 항목만 상단 정렬
+  const sortedItems = [...items].sort((a,b) => {
+    const ra = calcRecommend(a[0], a[1]);
+    const rb = calcRecommend(b[0], b[1]);
+    return rb.rec - ra.rec;
+  });
+
+  const totalRec = items.reduce((s,[sku,item]) => s+calcRecommend(sku,item).rec, 0);
+  const needOrderItems = items.filter(([sku,item]) => calcRecommend(sku,item).rec > 0);
+
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+      <SH title="📦 발주 추천"
+        sub={fmtDate(today)+" 기준"}
+        action={
+          <button onClick={() => setShowBufEdit(!showBufEdit)} style={{
+            padding:"5px 12px", borderRadius:8, border:"1px solid "+T.b1,
+            background:showBufEdit?T.brandDim:T.card,
+            color:showBufEdit?T.brand:T.t2,
+            fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
+            🛡 버퍼 설정
+          </button>
+        }/>
+
+      {/* 요약 배너 */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:14 }}>
+        {[
+          { label:"발주 필요", value:needOrderItems.length+"개 품목", color:T.brand, dim:T.brandDim },
+          { label:"총 발주량", value:totalRec+"개", color:T.amber, dim:T.aDim },
+          { label:"충분한 품목", value:(items.length-needOrderItems.length)+"개", color:T.blue, dim:T.bDim },
+        ].map(s => (
+          <div key={s.label} style={{ background:s.dim, borderRadius:12, padding:"12px 12px",
+            border:"1px solid "+s.color+"22", textAlign:"center" }}>
+            <div style={{ fontSize:10, fontWeight:700, color:s.color, fontFamily:F }}>{s.label}</div>
+            <div style={{ fontSize:16, fontWeight:900, color:s.color, fontFamily:F, marginTop:2 }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 발주 기준 설명 */}
+      <div style={{ background:T.brandDim, border:"1px solid "+T.brandBorder,
+        borderRadius:12, padding:"10px 14px", marginBottom:14, fontSize:12, color:T.brand, fontFamily:F }}>
+        📅 발주일 {DOW_KR[todayDow]}요일 → 입고 예정 {DOW_KR[(todayDow+2)%7]}요일<br/>
+        <span style={{ color:T.t2 }}>내일({DOW_KR[(todayDow+1)%7]}) + 입고일({DOW_KR[(todayDow+2)%7]}) 평균판매량 합산 → 현재고/예정입고 차감</span>
+      </div>
+
+      {/* 버퍼 설정 패널 */}
+      {showBufEdit && (
+        <Card style={{ marginBottom:14, padding:"14px" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
+            🛡 품목별 버퍼 재고 설정
+          </div>
+          {items.slice(0,10).map(([sku, item]) => {
+            const key = sku;
+            const cur = bufEdit[key]!==undefined ? bufEdit[key] : (buffers[key]??2);
+            return (
+              <div key={key} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                <div style={{ flex:1, fontSize:13, color:T.t1, fontFamily:F,
+                  overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {skuAliases[sku]||item.name}
+                </div>
+                <input type="number" min="0" step="1" value={cur}
+                  onChange={e => setBufEdit(b=>({...b,[key]:e.target.value}))}
+                  onBlur={() => {
+                    if (bufEdit[key]!==undefined) {
+                      onSaveBuffers({...buffers,[key]:parseFloat(bufEdit[key])||0});
+                    }
+                  }}
+                  style={{ width:64, padding:"7px 10px", borderRadius:8, border:"1px solid "+T.b1,
+                    background:T.card2, fontSize:13, fontFamily:F, textAlign:"center", outline:"none" }}/>
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      {/* 카테고리 필터 */}
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+        {cats.map(c => (
+          <button key={c} onClick={() => setCatFilter(c)} style={{
+            padding:"5px 12px", borderRadius:20, border:"1px solid "+(catFilter===c?T.brand:T.b1),
+            background:catFilter===c?T.brandDim:T.card,
+            color:catFilter===c?T.brand:T.t2,
+            fontSize:12, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* 추천 테이블 */}
+      <Card>
+        <div style={{ display:"grid", gridTemplateColumns:"1.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.9fr",
+          padding:"9px 14px", background:T.brandDim, gap:4 }}>
+          {["품목","현재고","내일avg","입고avg","합계","버퍼","권장"].map(h => (
+            <div key={h} style={{ fontSize:11, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
+          ))}
+        </div>
+        {sortedItems.map(([sku, item], idx) => {
+          const { rec, avg1, avg2, totalUsage, buf, current, tmrIn, d2In, dow1, dow2 } = calcRecommend(sku, item);
+          const dispName = skuAliases[sku] || item.name;
+          const isNeed = rec > 0;
+          return (
+            <div key={sku} style={{ display:"grid", gridTemplateColumns:"1.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.9fr",
+              padding:"10px 14px", gap:4, alignItems:"center",
+              background: isNeed ? (idx%2===0?"rgba(255,149,0,0.04)":"rgba(255,149,0,0.02)") : (idx%2===0?T.card2:T.card),
+              borderTop:idx>0?"1px solid "+T.b0:"none" }}>
+              <div>
+                <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
+                  overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {dispName}
+                </div>
+                <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</div>
+              </div>
+              <div style={{ textAlign:"center", fontSize:13, fontWeight:current===0?700:400,
+                color:current===0?T.red:T.t1, fontFamily:F }}>{current}</div>
+              <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}
+                title={DOW_KR[dow1]+"요일 평균"}>{avg1||"-"}</div>
+              <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}
+                title={DOW_KR[dow2]+"요일 평균"}>{avg2||"-"}</div>
+              <div style={{ textAlign:"center", fontSize:13, fontWeight:600, color:T.amber, fontFamily:F }}>
+                {totalUsage>0?totalUsage.toFixed(1):"-"}
+              </div>
+              <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}>{buf}</div>
+              <div style={{ textAlign:"center", fontSize:15, fontWeight:800,
+                color:isNeed?T.brand:T.t4, fontFamily:F }}>
+                {isNeed ? "▶ "+rec : "✓"}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+      <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:8 }}>
+        * 버퍼 기본값 2 · 예정입고(내일/모레) 차감 반영됨 · 과거 데이터 부족 시 "-" 표시
+      </div>
+    </div>
+  );
+}
+
+/* ─── 수동 입력 탭 (기존 OrderTab 개선) ─────────── */
+function ManualTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveBuffers }) {
+  const [mode, setMode] = useState("input");
+  const [inputDate, setInputDate] = useState(todayStr);
+  const [form, setForm] = useState({});
+  const [skippedItems, setSkippedItems] = useState({});
+  const [newItem, setNewItem] = useState("");
+  const [bufEdit, setBufEdit] = useState({});
+  const [statsItem, setStatsItem] = useState(() => items && items[0] ? items[0] : "");
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const DOW_KR_LOCAL = ["일","월","화","수","목","금","토"];
+
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  useEffect(() => {
+    const recs = recordsRef.current;
+    const itms = itemsRef.current;
+    const existRec = recs.find(r => r.date === inputDate);
+    const init = {};
+    const initSkipped = {};
+    if (existRec) {
+      itms.forEach(item => {
+        const d = existRec.items[item] || {};
+        if (d.skipped) { initSkipped[item] = true; init[item] = { prev:"", received:"", closing:"" }; }
+        else { init[item] = { prev:String(d.prev??""), received:String(d.received??""), closing:String(d.closing??"") }; }
+      });
+    } else {
+      itms.forEach(item => {
+        const prevRec = recs.filter(r=>r.date<inputDate&&!r.items?.[item]?.skipped&&r.items?.[item]?.closing!=null)
+          .sort((a,b)=>b.date.localeCompare(a.date))[0]||null;
+        const prevClosing = prevRec?(prevRec.items[item]?.closing??""):"";
+        init[item] = { prev:String(prevClosing!==""?prevClosing:""), received:"", closing:"" };
+      });
+    }
+    setForm(init);
+    setSkippedItems(initSkipped);
+  }, [inputDate]);
+
+  function calcUsed(prev, received, closing) {
+    const p=parseFloat(prev)||0, r=parseFloat(received)||0, c=parseFloat(closing)||0;
+    if (prev===""&&received===""&&closing==="") return null;
+    return Math.max(0,p+r-c);
+  }
+
+  function getAvgByDow(item, dow) {
+    const vals = records.filter(r=>r.dow===dow&&!r.items?.[item]?.skipped&&r.items?.[item]?.used>0)
+      .map(r=>r.items[item].used);
+    if (!vals.length) return null;
+    return (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1);
+  }
+
+  function getRecommend(item) {
+    const baseDow = new Date(inputDate+"T00:00:00").getDay();
+    const todayRec = records.find(r=>r.date===inputDate);
+    const currentStock = todayRec?(todayRec.items[item]?.closing??0):0;
+    const dow1=(baseDow+1)%7, dow2=(baseDow+2)%7;
+    const avg1=parseFloat(getAvgByDow(item,dow1))||0;
+    const avg2=parseFloat(getAvgByDow(item,dow2))||0;
+    const totalAvgUsage=avg1+avg2;
+    const buf=parseFloat(buffers[item])||2;
+    const rec=Math.max(0,Math.ceil(totalAvgUsage+buf-currentStock));
+    return {rec,avg1,avg2,totalAvgUsage,buf,currentStock,dow1,dow2};
+  }
+
+  function getWeeklyStats(item) {
+    const sorted=[...records].sort((a,b)=>b.date.localeCompare(a.date));
+    const weeks=[];
+    sorted.forEach(r=>{
+      const d=new Date(r.date+"T00:00:00");
+      const mon=new Date(d); mon.setDate(d.getDate()-((d.getDay()+6)%7));
+      const wk=mon.toISOString().slice(0,10);
+      let w=weeks.find(x=>x.week===wk);
+      if(!w){w={week:wk,days:{}}; weeks.push(w);}
+      w.days[r.dow]=r.items?.[item]?.skipped?"누락":(r.items?.[item]?.used??null);
+    });
+    return weeks.slice(0,8).reverse();
+  }
+
+  function handleSaveRecord() {
+    const dow=new Date(inputDate+"T00:00:00").getDay();
+    const itemData={};
+    items.forEach(item=>{
+      if(skippedItems[item]){
+        itemData[item]={skipped:true,prev:0,received:0,closing:0,used:0};
+      } else {
+        const f=form[item]||{};
+        const used=calcUsed(f.prev,f.received,f.closing);
+        itemData[item]={prev:parseFloat(f.prev)||0,received:parseFloat(f.received)||0,closing:parseFloat(f.closing)||0,used:used!==null?used:0};
+      }
+    });
+    const newRec={date:inputDate,dow,items:itemData};
+    const exists=records.findIndex(r=>r.date===inputDate);
+    let updated;
+    if(exists>=0){updated=records.map((r,i)=>i===exists?newRec:r);}
+    else{updated=[...records,newRec].sort((a,b)=>a.date.localeCompare(b.date));}
+    onSaveRecords(updated);
+    alert("저장되었습니다 ✓");
+  }
+
+  function toggleItemSkip(item) {
+    setSkippedItems(prev=>{
+      const next={...prev};
+      if(next[item]){
+        delete next[item];
+        const prevRec=records.filter(r=>r.date<inputDate&&!r.items?.[item]?.skipped&&r.items?.[item]?.closing!=null)
+          .sort((a,b)=>b.date.localeCompare(a.date))[0]||null;
+        const prevClosing=prevRec?(prevRec.items[item]?.closing??""):"";
+        setForm(f=>({...f,[item]:{prev:String(prevClosing!==""?prevClosing:""),received:"",closing:""}}));
+      } else {
+        next[item]=true;
+        setForm(f=>({...f,[item]:{prev:"",received:"",closing:""}}));
+      }
+      return next;
+    });
+  }
+
+  const btnStyle = (active) => ({
+    padding:"8px 14px", borderRadius:10, border:"none", cursor:"pointer",
+    fontFamily:F, fontSize:13, fontWeight:active?700:500,
+    background:active?T.brand:T.card2, color:active?"#fff":T.t2, transition:"all .15s"
+  });
+
+  const inputSt = {
+    width:"100%", padding:"8px 8px", borderRadius:8,
+    border:"1px solid "+T.b1, background:T.card,
+    fontSize:14, fontFamily:F, color:T.t1,
+    textAlign:"center", outline:"none"
+  };
+
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+      <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+        {[["input","📝 재고 입력"],["recommend","📦 발주 추천"],["stats","📊 통계"],["settings","⚙️ 설정"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setMode(id)} style={btnStyle(mode===id)}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── 재고 입력 ── */}
+      {mode==="input" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, flexWrap:"wrap" }}>
+            <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)}
+              style={{ ...inputSt, width:"auto", textAlign:"left", padding:"8px 12px" }}/>
+            <span style={{ fontSize:13, color:T.t3, fontFamily:F }}>
+              ({DOW_KR_LOCAL[new Date(inputDate+"T00:00:00").getDay()]}요일)
+            </span>
+            {records.find(r=>r.date===inputDate) && (
+              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
+                background:T.brandDim, color:T.brand, border:"1px solid "+T.brandBorder }}>✓ 저장됨</span>
+            )}
+          </div>
+          <Card style={{ marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
+              padding:"9px 14px", background:T.brandDim, gap:6 }}>
+              {["품목","전일재고","당일입고","마감재고","사용량","누락"].map(h=>(
+                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {items.map((item, idx) => {
+              const skipped=!!skippedItems[item];
+              const f=form[item]||{prev:"",received:"",closing:""};
+              const used=skipped?null:calcUsed(f.prev,f.received,f.closing);
+              return (
+                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
+                  padding:"10px 14px", gap:6, alignItems:"center",
+                  background:skipped?"rgba(255,149,0,0.05)":idx%2===0?T.card2:T.card,
+                  borderTop:idx>0?"1px solid "+T.b0:"none" }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:skipped?T.amber:T.t1, fontFamily:F }}>
+                    {item}
+                    {skipped&&<div style={{ fontSize:10, color:T.amber, fontWeight:500 }}>누락</div>}
+                  </div>
+                  {["prev","received","closing"].map(field=>(
+                    <input key={field} type="number" min="0" step="0.5"
+                      value={skipped?"":(f[field]||"")}
+                      disabled={skipped}
+                      onChange={e=>setForm(fm=>({...fm,[item]:{...(fm[item]||{}),[field]:e.target.value}}))}
+                      placeholder={skipped?"-":"0"}
+                      style={{ ...inputSt, fontSize:14,
+                        background:skipped?"rgba(255,149,0,0.05)":field==="prev"?T.card3:T.card,
+                        color:skipped?T.t4:T.t1,
+                        borderColor:skipped?"rgba(255,149,0,0.2)":T.b1,
+                        cursor:skipped?"not-allowed":"auto" }}/>
+                  ))}
+                  <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
+                    color:skipped?T.amber:used!==null?T.brand:T.t4, fontFamily:F }}>
+                    {skipped?"누락":used!==null?used:"-"}
+                  </div>
+                  <button onClick={()=>toggleItemSkip(item)} style={{
+                    width:"100%", height:32, borderRadius:8, border:"none",
+                    background:skipped?"rgba(255,149,0,0.18)":T.card3,
+                    color:skipped?T.amber:T.t3,
+                    fontSize:14, cursor:"pointer", fontWeight:skipped?700:400 }}>
+                    {skipped?"✕":"⚠"}
+                  </button>
+                </div>
+              );
+            })}
+          </Card>
+          <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:12 }}>
+            💡 전일재고는 자동 입력 · ⚠ 버튼으로 항목별 누락 처리
+          </div>
+          <button onMouseDown={e=>{e.preventDefault();handleSaveRecord();}}
+            style={{ width:"100%", padding:"14px", borderRadius:14, border:"none",
+              background:"linear-gradient(135deg,#00704A,#1E3932)",
+              color:"#fff", fontSize:15, fontWeight:700, fontFamily:F,
+              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,112,74,0.28)" }}>
+            저장하기
+          </button>
+        </div>
+      )}
+
+      {/* ── 발주 추천 (수동 데이터 기반) ── */}
+      {mode==="recommend" && (
+        <div>
+          <div style={{ background:T.brandDim, border:"1px solid "+T.brandBorder,
+            borderRadius:12, padding:"10px 14px", marginBottom:14, fontSize:13, color:T.brand, fontFamily:F }}>
+            📅 기준일: {inputDate} ({DOW_KR_LOCAL[new Date(inputDate+"T00:00:00").getDay()]}요일)<br/>
+            <span style={{ fontSize:11, color:T.t2 }}>내일+입고일 평균사용량 합산 → 현재고 차감</span>
+          </div>
+          <Card>
+            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr 0.7fr 0.7fr 0.8fr 0.6fr 1fr",
+              padding:"9px 14px", background:T.brandDim, gap:4 }}>
+              {["품목","현재고","내일","입고일","합계","버퍼","권장"].map(h=>(
+                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {items.map((item, idx) => {
+              const {rec,avg1,avg2,totalAvgUsage,buf,currentStock,dow1,dow2}=getRecommend(item);
+              return (
+                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr 0.7fr 0.7fr 0.8fr 0.6fr 1fr",
+                  padding:"10px 14px", gap:4, alignItems:"center",
+                  background:idx%2===0?T.card2:T.card,
+                  borderTop:idx>0?"1px solid "+T.b0:"none" }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F }}>{item}</div>
+                  <div style={{ textAlign:"center", fontSize:13, color:T.t2, fontFamily:F }}>{currentStock}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}>{avg1||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}>{avg2||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:13, fontWeight:600, color:T.amber, fontFamily:F }}>
+                    {totalAvgUsage>0?totalAvgUsage.toFixed(1):"-"}
+                  </div>
+                  <div style={{ textAlign:"center", fontSize:13, color:T.t3, fontFamily:F }}>{buf}</div>
+                  <div style={{ textAlign:"center", fontSize:15, fontWeight:800,
+                    color:rec>0?T.brand:T.t4, fontFamily:F }}>
+                    {rec>0?"▶ "+rec:"✓"}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      )}
+
+      {/* ── 통계 ── */}
+      {mode==="stats" && (
+        <div>
+          <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+            {items.map(item=>(
+              <button key={item} onClick={()=>setStatsItem(item)}
+                style={{ padding:"6px 12px", borderRadius:20,
+                  border:"1px solid "+(statsItem===item?T.brand:T.b1),
+                  background:statsItem===item?T.brandDim:T.card,
+                  color:statsItem===item?T.brand:T.t2,
+                  fontSize:12, fontWeight:statsItem===item?700:400, cursor:"pointer", fontFamily:F }}>
+                {item}
+              </button>
+            ))}
+          </div>
+          {/* 요일별 평균 */}
+          <Card style={{ padding:"14px", marginBottom:14 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:12 }}>
+              📊 요일별 평균 사용량 — {statsItem}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6 }}>
+              {[0,1,2,3,4,5,6].map(dow=>{
+                const avg=getAvgByDow(statsItem,dow);
+                const maxAvg=Math.max(...[0,1,2,3,4,5,6].map(d=>parseFloat(getAvgByDow(statsItem,d))||0));
+                const ratio=maxAvg>0?(parseFloat(avg)||0)/maxAvg:0;
+                const isWe=dow===0||dow===6;
+                const col=dow===0?T.red:dow===6?T.blue:T.brand;
+                return (
+                  <div key={dow} style={{ textAlign:"center" }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F, marginBottom:4 }}>
+                      {DOW_KR_LOCAL[dow]}
+                    </div>
+                    <div style={{ height:60, background:T.card3, borderRadius:6,
+                      position:"relative", overflow:"hidden", marginBottom:4 }}>
+                      <div style={{ position:"absolute", bottom:0, left:0, right:0,
+                        height:(ratio*100)+"%", background:col,
+                        borderRadius:6, opacity:0.8, transition:"height .3s" }}/>
+                    </div>
+                    <div style={{ fontSize:12, fontWeight:700, color:col, fontFamily:F }}>
+                      {avg||"-"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+          {/* 주차별 테이블 */}
+          <Card>
+            <div style={{ padding:"12px 14px 8px", fontSize:13, fontWeight:700, color:T.t1, fontFamily:F }}>
+              주차별 기록 — {statsItem}
+            </div>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
+                <thead>
+                  <tr style={{ background:T.brandDim }}>
+                    <th style={{ padding:"8px 10px", textAlign:"left", color:T.brand, fontWeight:700 }}>주차</th>
+                    {[0,1,2,3,4,5,6].map(d=>(
+                      <th key={d} style={{ padding:"8px 6px", textAlign:"center",
+                        color:d===0?T.red:d===6?T.blue:T.brand, fontWeight:700 }}>
+                        {DOW_KR_LOCAL[d]}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {getWeeklyStats(statsItem).map((wk,wi)=>(
+                    <tr key={wk.week} style={{ background:wi%2===0?T.card2:T.card }}>
+                      <td style={{ padding:"8px 10px", color:T.t2, fontWeight:500 }}>
+                        {wk.week.slice(5)}
+                      </td>
+                      {[0,1,2,3,4,5,6].map(d=>{
+                        const val=wk.days[d];
+                        const isSkip=val==="누락";
+                        return (
+                          <td key={d} style={{ padding:"8px 6px", textAlign:"center",
+                            color:isSkip?T.amber:val!=null?(d===0?T.red:d===6?T.blue:T.t1):T.t4,
+                            fontWeight:val!=null?600:400, fontSize:isSkip?10:12 }}>
+                            {isSkip?"누락":val!=null?val:"·"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  {getWeeklyStats(statsItem).length===0&&(
+                    <tr><td colSpan={8} style={{ padding:"20px", textAlign:"center", color:T.t3 }}>
+                      아직 기록이 없어요
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── 설정 ── */}
+      {mode==="settings" && (
+        <div>
+          <Card style={{ padding:"16px", marginBottom:14 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:12 }}>📋 품목 관리</div>
+            {items.map((item,idx)=>(
+              <div key={item}
+                draggable
+                onDragStart={()=>setDragIdx(idx)}
+                onDragOver={e=>{e.preventDefault();setDragOverIdx(idx);}}
+                onDrop={()=>{
+                  if(dragIdx===null||dragIdx===idx)return;
+                  const arr=[...items];const[moved]=arr.splice(dragIdx,1);arr.splice(idx,0,moved);
+                  onSaveItems(arr);setDragIdx(null);setDragOverIdx(null);
+                }}
+                onDragEnd={()=>{setDragIdx(null);setDragOverIdx(null);}}
+                style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8,
+                  opacity:dragIdx===idx?0.4:1,
+                  border:dragOverIdx===idx&&dragIdx!==idx?"2px solid "+T.brand:"2px solid transparent",
+                  borderRadius:12, transition:"border .1s" }}>
+                <div style={{ display:"flex", flexDirection:"column", gap:1, flexShrink:0 }}>
+                  <button onClick={()=>{ if(idx===0)return; const arr=[...items];[arr[idx-1],arr[idx]]=[arr[idx],arr[idx-1]];onSaveItems(arr); }}
+                    disabled={idx===0} style={{ width:24,height:22,border:"none",borderRadius:"4px 4px 0 0",
+                      background:idx===0?"transparent":T.card2,color:idx===0?T.t4:T.t2,
+                      cursor:idx===0?"default":"pointer",fontSize:12 }}>▲</button>
+                  <button onClick={()=>{ if(idx===items.length-1)return; const arr=[...items];[arr[idx],arr[idx+1]]=[arr[idx+1],arr[idx]];onSaveItems(arr); }}
+                    disabled={idx===items.length-1} style={{ width:24,height:22,border:"none",borderRadius:"0 0 4px 4px",
+                      background:idx===items.length-1?"transparent":T.card2,color:idx===items.length-1?T.t4:T.t2,
+                      cursor:idx===items.length-1?"default":"pointer",fontSize:12 }}>▼</button>
+                </div>
+                <div style={{ flex:1,padding:"10px 14px",borderRadius:10,background:T.card2,
+                  border:"1px solid "+T.b0,fontSize:14,color:T.t1,fontFamily:F }}>{item}</div>
+                <button onClick={()=>{if(!window.confirm(`"${item}" 삭제?`))return;onSaveItems(items.filter((_,i)=>i!==idx));}}
+                  style={{ padding:"8px 10px",borderRadius:8,border:"1px solid "+T.rBdr,
+                    background:T.rDim,color:T.red,cursor:"pointer",fontFamily:F,fontSize:12,flexShrink:0 }}>삭제</button>
+              </div>
+            ))}
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <input value={newItem} onChange={e=>setNewItem(e.target.value)}
+                placeholder="새 품목명"
+                onKeyDown={e=>{ if(e.key==="Enter"&&newItem.trim()){onSaveItems([...items,newItem.trim()]);setNewItem("");}}}
+                style={{ flex:1,padding:"10px 14px",borderRadius:10,border:"1px solid "+T.b1,
+                  background:T.card,fontSize:14,fontFamily:F,color:T.t1,outline:"none",height:44 }}/>
+              <button onClick={()=>{if(newItem.trim()){onSaveItems([...items,newItem.trim()]);setNewItem("");}}}
+                style={{ padding:"0 18px",borderRadius:10,border:"none",height:44,flexShrink:0,
+                  background:T.brand,color:"#fff",cursor:"pointer",fontFamily:F,fontSize:14,fontWeight:600 }}>추가</button>
+            </div>
+          </Card>
+          <Card style={{ padding:"16px" }}>
+            <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:6 }}>🛡 품목별 버퍼 재고</div>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:12 }}>발주 추천 시 추가하는 안전 재고량</div>
+            {items.map(item=>(
+              <div key={item} style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
+                <div style={{ flex:1,fontSize:14,color:T.t1,fontFamily:F }}>{item}</div>
+                <input type="number" min="0" step="0.5"
+                  value={bufEdit[item]!==undefined?bufEdit[item]:(buffers[item]??2)}
+                  onChange={e=>setBufEdit(b=>({...b,[item]:e.target.value}))}
+                  onBlur={()=>{if(bufEdit[item]!==undefined)onSaveBuffers({...buffers,[item]:parseFloat(bufEdit[item])||0});}}
+                  style={{ width:70,padding:"8px 10px",borderRadius:8,border:"1px solid "+T.b1,
+                    background:T.card2,fontSize:14,fontFamily:F,textAlign:"center",outline:"none" }}/>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── 통계/히스토리 탭 ───────────────────────────── */
+function HistoryTab({ uploadHistory, manualRecords, manualItems, skuAliases }) {
+  const [viewMode, setViewMode] = useState("excel"); // "excel" | "manual"
+  const [selSku, setSelSku] = useState(null);
+
+  // 엑셀 업로드 기반 SKU 목록
+  const allSkus = useMemo(() => {
+    const skus = {};
+    uploadHistory.forEach(h => {
+      Object.entries(h.items||{}).forEach(([sku, item]) => {
+        if (!skus[sku]) skus[sku] = item.name;
+      });
+    });
+    return skus;
+  }, [uploadHistory]);
+
+  // 선택된 SKU의 판매 트렌드
+  const skuTrend = useMemo(() => {
+    if (!selSku) return [];
+    return uploadHistory
+      .filter(h => h.items?.[selSku])
+      .map(h => ({ date:h.date, dow:h.dow, sold:h.items[selSku].sold||0, stock:h.items[selSku].actualSum||0 }))
+      .sort((a,b) => a.date.localeCompare(b.date));
+  }, [selSku, uploadHistory]);
+
+  // 요일별 평균 판매 (선택 SKU)
+  const dowAvgs = useMemo(() => {
+    if (!selSku) return {};
+    const byDow = {};
+    uploadHistory.forEach(h => {
+      if (!h.items?.[selSku]) return;
+      const d = h.dow;
+      if (!byDow[d]) byDow[d] = [];
+      if (h.items[selSku].sold > 0) byDow[d].push(h.items[selSku].sold);
+    });
+    const avgs = {};
+    Object.entries(byDow).forEach(([d, vals]) => {
+      avgs[d] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null;
+    });
+    return avgs;
+  }, [selSku, uploadHistory]);
+
+  const DOW_KR_LOCAL = ["일","월","화","수","목","금","토"];
+
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+      <SH title="📈 통계 & 히스토리"/>
+
+      {/* 모드 탭 */}
+      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+        {[["excel","📊 실사 데이터"],["manual","📝 수동 입력"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setViewMode(id)} style={{
+            padding:"8px 16px", borderRadius:10, border:"none", cursor:"pointer",
+            fontFamily:F, fontSize:13, fontWeight:viewMode===id?700:500,
+            background:viewMode===id?T.brand:T.card2, color:viewMode===id?"#fff":T.t2 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* 엑셀 실사 통계 */}
+      {viewMode==="excel" && (
+        <div>
+          {uploadHistory.length === 0 ? (
+            <EmptyState emoji="📁" text="업로드된 실사 데이터가 없어요" sub="실사 탭에서 엑셀을 업로드해주세요"/>
+          ) : (
+            <div>
+              {/* SKU 선택 */}
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginBottom:8 }}>SKU 선택 (판매 추이 분석)</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {Object.entries(allSkus).slice(0,20).map(([sku, name]) => {
+                    const disp = skuAliases[sku] || name;
+                    return (
+                      <button key={sku} onClick={() => setSelSku(selSku===sku?null:sku)} style={{
+                        padding:"5px 11px", borderRadius:20,
+                        border:"1px solid "+(selSku===sku?T.brand:T.b1),
+                        background:selSku===sku?T.brandDim:T.card,
+                        color:selSku===sku?T.brand:T.t2,
+                        fontSize:12, fontWeight:selSku===sku?700:400,
+                        cursor:"pointer", fontFamily:F,
+                        maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {disp.length > 10 ? disp.slice(0,10)+"..." : disp}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 선택된 SKU 분석 */}
+              {selSku && (
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
+                    {skuAliases[selSku]||allSkus[selSku]} — 판매 추이
+                  </div>
+                  {/* 요일별 평균 막대 */}
+                  <Card style={{ padding:"14px", marginBottom:12 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:T.t3, fontFamily:F, marginBottom:10 }}>요일별 평균 판매량</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6 }}>
+                      {[0,1,2,3,4,5,6].map(dow=>{
+                        const avg=dowAvgs[dow];
+                        const maxAvg=Math.max(...Object.values(dowAvgs).map(v=>parseFloat(v)||0));
+                        const ratio=maxAvg>0?(parseFloat(avg)||0)/maxAvg:0;
+                        const col=dow===0?T.red:dow===6?T.blue:T.brand;
+                        return (
+                          <div key={dow} style={{ textAlign:"center" }}>
+                            <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F, marginBottom:4 }}>
+                              {DOW_KR_LOCAL[dow]}
+                            </div>
+                            <div style={{ height:56, background:T.card3, borderRadius:6,
+                              position:"relative", overflow:"hidden", marginBottom:4 }}>
+                              <div style={{ position:"absolute", bottom:0, left:0, right:0,
+                                height:(ratio*100)+"%", background:col, opacity:0.8, borderRadius:6 }}/>
+                            </div>
+                            <div style={{ fontSize:12, fontWeight:700, color:col, fontFamily:F }}>
+                              {avg||"-"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                  {/* 날짜별 기록 */}
+                  <Card>
+                    <div style={{ padding:"10px 14px 6px", fontSize:12, fontWeight:700, color:T.t1, fontFamily:F }}>
+                      날짜별 기록
+                    </div>
+                    <div style={{ overflowX:"auto" }}>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
+                        <thead>
+                          <tr style={{ background:T.brandDim }}>
+                            {["날짜","요일","재고","판매"].map(h=>(
+                              <th key={h} style={{ padding:"8px 10px", textAlign:"center",
+                                color:T.brand, fontWeight:700 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...skuTrend].reverse().map((row,i)=>(
+                            <tr key={row.date} style={{ background:i%2===0?T.card2:T.card }}>
+                              <td style={{ padding:"8px 10px", color:T.t2, textAlign:"center" }}>{fmtDate(row.date)}</td>
+                              <td style={{ padding:"8px 6px", textAlign:"center",
+                                color:row.dow===0?T.red:row.dow===6?T.blue:T.t2,
+                                fontWeight:600 }}>{DOW_KR_LOCAL[row.dow]}</td>
+                              <td style={{ padding:"8px 6px", textAlign:"center",
+                                color:row.stock===0?T.red:T.t1, fontWeight:row.stock===0?700:400 }}>{row.stock}</td>
+                              <td style={{ padding:"8px 6px", textAlign:"center",
+                                color:T.amber, fontWeight:600 }}>{row.sold||"-"}</td>
+                            </tr>
+                          ))}
+                          {skuTrend.length===0&&(
+                            <tr><td colSpan={4} style={{ padding:"20px", textAlign:"center", color:T.t3 }}>
+                              기록이 없어요
+                            </td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              {/* 전체 업로드 기록 요약 */}
+              <div style={{ marginTop:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
+                  업로드 히스토리 ({uploadHistory.length}건)
+                </div>
+                <Card>
+                  {[...uploadHistory].reverse().map((h,i,arr)=>(
+                    <div key={h.date} style={{ padding:"12px 16px",
+                      display:"flex", alignItems:"center", gap:12,
+                      borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
+                      <div style={{ width:42, height:42, borderRadius:11, background:T.brandDim,
+                        display:"flex", flexDirection:"column", alignItems:"center",
+                        justifyContent:"center", flexShrink:0 }}>
+                        <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1 }}>
+                          {new Date(h.date+"T00:00:00").getDate()}
+                        </div>
+                        <div style={{ fontSize:9, color:T.brand, opacity:0.7 }}>
+                          {new Date(h.date+"T00:00:00").toLocaleDateString("ko-KR",{month:"short"})}
+                        </div>
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F }}>
+                          {fmtDate(h.date)} ({DOW_KR_LOCAL[h.dow]}요일)
+                        </div>
+                        <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+                          {Object.keys(h.items||{}).length}개 SKU ·
+                          총 판매 {Object.values(h.items||{}).reduce((s,i)=>s+i.sold,0)}개 ·
+                          재고없음 {Object.values(h.items||{}).filter(i=>i.actualSum===0).length}개
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </Card>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 수동 입력 통계 (기존 기능) */}
+      {viewMode==="manual" && (
+        <div>
+          {manualRecords.length === 0 ? (
+            <EmptyState emoji="📝" text="수동 입력 기록이 없어요" sub="수동 입력 탭에서 재고를 입력해주세요"/>
+          ) : (
+            <div>
+              <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
+                수동 입력 요일별 평균
+              </div>
+              {manualItems.slice(0,5).map(item => {
+                const avgs = [0,1,2,3,4,5,6].map(dow => {
+                  const vals = manualRecords.filter(r=>r.dow===dow&&!r.items?.[item]?.skipped&&r.items?.[item]?.used>0)
+                    .map(r=>r.items[item].used);
+                  return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null;
+                });
+                const maxAvg = Math.max(...avgs.map(v=>parseFloat(v)||0));
+                return (
+                  <Card key={item} style={{ padding:"12px 14px", marginBottom:10 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>{item}</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+                      {avgs.map((avg,dow) => {
+                        const ratio=maxAvg>0?(parseFloat(avg)||0)/maxAvg:0;
+                        const col=dow===0?T.red:dow===6?T.blue:T.brand;
+                        return (
+                          <div key={dow} style={{ textAlign:"center" }}>
+                            <div style={{ fontSize:10, color:col, fontWeight:700, fontFamily:F, marginBottom:2 }}>
+                              {DOW_KR_LOCAL[dow]}
+                            </div>
+                            <div style={{ height:36, background:T.card3, borderRadius:4,
+                              position:"relative", overflow:"hidden", marginBottom:2 }}>
+                              <div style={{ position:"absolute", bottom:0, left:0, right:0,
+                                height:(ratio*100)+"%", background:col, opacity:0.8 }}/>
+                            </div>
+                            <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F }}>{avg||"-"}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Render ─────────────────────────────────────── */
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>
