@@ -62,15 +62,39 @@ const DOW_KR = ["일","월","화","수","목","금","토"];
 const fmtDate = (s) => { if (!s) return ""; const d = new Date(s+"T00:00:00"); return d.toLocaleDateString("ko-KR",{month:"short",day:"numeric"}); };
 const getDow = (s) => new Date(s+"T00:00:00").getDay();
 
+/* ─── Filename Date Extraction ───────────────────── */
+function isValidDateStr(s) {
+  const d = new Date(s+"T00:00:00");
+  return !isNaN(d.getTime()) && s.length === 10;
+}
+function extractDateFromFilename(filename) {
+  const name = filename.replace(/\.[^.]+$/, "");
+  // YYYYMMDD (8자리)
+  const m2 = name.match(/(\d{4})(\d{2})(\d{2})/);
+  if (m2) { const d = m2[1]+"-"+m2[2]+"-"+m2[3]; if (isValidDateStr(d)) return d; }
+  // YYMMDD (6자리)
+  const m1 = name.match(/(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (m1) {
+    const yy = parseInt(m1[1]);
+    const year = (yy >= 50 ? 1900+yy : 2000+yy);
+    const d = year+"-"+m1[2]+"-"+m1[3];
+    if (isValidDateStr(d)) return d;
+  }
+  // YYYY-MM-DD
+  const m3 = name.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m3) { const d = m3[1]+"-"+m3[2]+"-"+m3[3]; if (isValidDateStr(d)) return d; }
+  return todayStr();
+}
+
 /* ─── Excel Parsing ──────────────────────────────── */
-function parseInventoryExcel(arrayBuffer) {
+function parseInventoryExcel(arrayBuffer, dateOverride) {
   const wb = XLSX.read(arrayBuffer, { type:"array", cellDates:true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
 
   // 헤더 2행, 데이터 3행부터
   const items = {};
-  const dateStr = todayStr();
+  const dateStr = dateOverride || todayStr();
 
   for (let i = 2; i < raw.length; i++) {
     const row = raw[i];
@@ -560,47 +584,62 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 /* ─── 실사 업로드 탭 ─────────────────────────────── */
 function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
   const [dragging, setDragging] = useState(false);
-  const [parsing,  setParsing]  = useState(false);
-  const [preview,  setPreview]  = useState(null); // 파싱된 데이터 미리보기
+  const [pending,  setPending]  = useState([]); // [{id,filename,data,customDate,expanded}]
   const [error,    setError]    = useState("");
-  const [catFilter, setCatFilter] = useState("전체");
-  const [editAlias, setEditAlias] = useState(null); // { sku, name }
-  const [aliasInput, setAliasInput] = useState("");
   const fileRef = useRef();
 
-  const handleFile = async (file) => {
-    if (!file) return;
-    const ext = file.name.split(".").pop().toLowerCase();
-    if (!["xlsx","xls"].includes(ext)) { setError("xlsx 또는 xls 파일만 지원해요"); return; }
-    setParsing(true); setError("");
-    try {
-      const buf = await file.arrayBuffer();
-      const parsed = parseInventoryExcel(buf);
-      setPreview(parsed);
-    } catch(e) {
-      setError("파일 파싱 오류: "+e.message);
+  const parseFiles = async (files) => {
+    setError("");
+    const newItems = [];
+    for (const file of files) {
+      const ext = file.name.split(".").pop().toLowerCase();
+      if (!["xlsx","xls"].includes(ext)) { setError('"'+file.name+'" — xlsx 또는 xls 파일만 지원해요'); continue; }
+      try {
+        const buf = await file.arrayBuffer();
+        const guessDate = extractDateFromFilename(file.name);
+        const data = parseInventoryExcel(buf, guessDate);
+        newItems.push({ id:Date.now()+Math.random(), filename:file.name, data, customDate:guessDate, expanded:false });
+      } catch(e) {
+        setError('"'+file.name+'" 파싱 오류: '+e.message);
+      }
     }
-    setParsing(false);
+    if (newItems.length) setPending(prev => [...prev, ...newItems]);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault(); setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+  const handleDrop = (e) => { e.preventDefault(); setDragging(false); parseFiles(Array.from(e.dataTransfer.files)); };
+
+  const updateDate = (id, newDate) => {
+    setPending(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      return { ...p, customDate:newDate, data:{ ...p.data, date:newDate, dow:getDow(newDate) } };
+    }));
   };
 
-  const handleSaveUpload = () => {
-    if (!preview) return;
-    const exists = uploadHistory.findIndex(h => h.date === preview.date);
+  const removePending = (id) => setPending(prev => prev.filter(p => p.id !== id));
+
+  const saveOne = (item) => {
+    const exists = uploadHistory.findIndex(h => h.date === item.data.date);
     let updated;
     if (exists >= 0) {
-      updated = uploadHistory.map((h,i) => i===exists ? preview : h);
+      if (!window.confirm(item.data.date+" 날짜의 기존 데이터가 있어요. 덮어쓸까요?")) return;
+      updated = uploadHistory.map((h,i) => i===exists ? item.data : h);
     } else {
-      updated = [...uploadHistory, preview];
+      updated = [...uploadHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
     }
     onSave(updated);
-    setPreview(null);
-    alert("저장되었습니다 ✓");
+    removePending(item.id);
+  };
+
+  const saveAll = () => {
+    let updated = [...uploadHistory];
+    for (const item of pending) {
+      const exists = updated.findIndex(h => h.date === item.data.date);
+      if (exists >= 0) updated = updated.map((h,i) => i===exists ? item.data : h);
+      else updated = [...updated, item.data];
+    }
+    onSave(updated.sort((a,b) => a.date.localeCompare(b.date)));
+    setPending([]);
+    alert(pending.length+"개 파일이 저장되었습니다 ✓");
   };
 
   const deleteHistory = (idx) => {
@@ -608,142 +647,69 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
     onSave(uploadHistory.filter((_,i) => i!==idx));
   };
 
-  // 미리보기 카테고리 목록
-  const cats = preview ? ["전체", ...new Set(Object.values(preview.items).map(i=>i.cat))] : [];
-  const filteredItems = preview ? Object.values(preview.items).filter(item =>
-    catFilter === "전체" || item.cat === catFilter
-  ) : [];
+  const toggleExpand = (id) => setPending(prev => prev.map(p => p.id===id ? {...p,expanded:!p.expanded} : p));
 
   return (
     <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
       <SH title="📁 실사 데이터 업로드"
-        sub="엑셀 파일 업로드 → 자동 파싱 → 발주 추천에 반영"/>
+        sub="엑셀 파일 업로드 → 날짜 설정 → 발주 추천에 반영"/>
 
-      {/* 드롭존 */}
-      {!preview && (
-        <div
-          onDragOver={e=>{e.preventDefault();setDragging(true);}}
-          onDragLeave={()=>setDragging(false)}
-          onDrop={handleDrop}
-          onClick={()=>fileRef.current?.click()}
-          style={{ border:"2px dashed "+(dragging?T.brand:T.b1),
-            borderRadius:18, padding:"44px 20px", textAlign:"center",
-            background:dragging?T.brandDim:T.card, cursor:"pointer",
-            transition:"all .2s", marginBottom:16 }}>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }}
-            onChange={e=>{ const f=e.target.files[0]; if(f) handleFile(f); e.target.value=""; }}/>
-          {parsing ? (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:12 }}>
-              <Spin size={32}/>
-              <div style={{ fontSize:14, color:T.t3, fontFamily:F }}>파일 분석 중...</div>
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontSize:42, marginBottom:12 }}>📊</div>
-              <div style={{ fontSize:15, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:4 }}>
-                실사 엑셀 파일을 올려주세요
-              </div>
-              <div style={{ fontSize:13, color:T.t3, fontFamily:F }}>
-                드래그 & 드롭 또는 탭하여 선택<br/>.xlsx / .xls 지원
-              </div>
-            </div>
-          )}
+      {/* 드롭존 — 항상 표시, multiple 지원 */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragging(true);}}
+        onDragLeave={()=>setDragging(false)}
+        onDrop={handleDrop}
+        onClick={()=>fileRef.current?.click()}
+        style={{ border:"2px dashed "+(dragging?T.brand:T.b1),
+          borderRadius:18, padding:"28px 20px", textAlign:"center",
+          background:dragging?T.brandDim:T.card, cursor:"pointer",
+          transition:"all .2s", marginBottom:14 }}>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display:"none" }}
+          onChange={e=>{ parseFiles(Array.from(e.target.files)); e.target.value=""; }}/>
+        <div style={{ fontSize:34, marginBottom:8 }}>📊</div>
+        <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:2 }}>
+          실사 엑셀 파일을 올려주세요
         </div>
-      )}
+        <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+          여러 파일 동시 업로드 가능 · .xlsx / .xls
+        </div>
+      </div>
 
       {error && (
-        <div style={{ padding:"12px 16px", borderRadius:12, background:T.rDim,
-          border:"1px solid "+T.rBdr, color:T.red, fontSize:13, fontFamily:F, marginBottom:14 }}>
+        <div style={{ padding:"10px 14px", borderRadius:12, background:T.rDim,
+          border:"1px solid "+T.rBdr, color:T.red, fontSize:13, fontFamily:F, marginBottom:12 }}>
           ⚠ {error}
         </div>
       )}
 
-      {/* 미리보기 */}
-      {preview && (
-        <div>
-          <div style={{ background:T.brandDim, border:"1px solid "+T.brandBorder,
-            borderRadius:12, padding:"12px 16px", marginBottom:14, fontSize:13, color:T.brand, fontFamily:F }}>
-            📅 {preview.date} ({DOW_KR[preview.dow]}요일) · {Object.keys(preview.items).length}개 SKU 파싱됨
-          </div>
-
-          {/* 카테고리 필터 */}
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
-            {cats.map(c => (
-              <button key={c} onClick={() => setCatFilter(c)} style={{
-                padding:"5px 12px", borderRadius:20, border:"1px solid "+(catFilter===c?T.brand:T.b1),
-                background:catFilter===c?T.brandDim:T.card,
-                color:catFilter===c?T.brand:T.t2,
-                fontSize:12, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>
-                {c}
-              </button>
-            ))}
-          </div>
-
-          <Card style={{ marginBottom:14 }}>
-            {/* 헤더 */}
-            <div style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
-              padding:"9px 14px", background:T.brandDim, gap:4 }}>
-              {["품목명","재고","판매","내일입고","내모레","유통"].map(h => (
-                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
-              ))}
+      {/* 대기 중인 파일들 */}
+      {pending.length > 0 && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F }}>
+              파싱 완료 — {pending.length}개 파일
             </div>
-            {filteredItems.length === 0
-              ? <EmptyState emoji="📋" text="해당 카테고리 항목이 없어요"/>
-              : filteredItems.map((item, idx) => {
-                  const minDday = item.batches.reduce((m,b) => b.dday!==null&&b.dday<m ? b.dday : m, 99);
-                  const expiryColor = minDday<=1?T.red:minDday<=3?T.amber:T.t3;
-                  const dispName = skuAliases[item.sku] || item.name;
-                  return (
-                    <div key={item.sku} style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
-                      padding:"10px 14px", gap:4, alignItems:"center",
-                      background:idx%2===0?T.card2:T.card,
-                      borderTop:idx>0?"1px solid "+T.b0:"none" }}>
-                      <div>
-                        <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                          {dispName}
-                        </div>
-                        <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</div>
-                      </div>
-                      <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
-                        color:item.actualSum===0?T.red:T.t1, fontFamily:F }}>
-                        {item.actualSum}
-                      </div>
-                      <div style={{ textAlign:"center", fontSize:13, color:T.amber, fontFamily:F }}>
-                        {item.sold||"-"}
-                      </div>
-                      <div style={{ textAlign:"center", fontSize:13, color:T.blue, fontFamily:F }}>
-                        {item.tmrIn||"-"}
-                      </div>
-                      <div style={{ textAlign:"center", fontSize:13, color:T.t3, fontFamily:F }}>
-                        {item.d2In||"-"}
-                      </div>
-                      <div style={{ textAlign:"center", fontSize:12, fontWeight:700,
-                        color:expiryColor, fontFamily:F }}>
-                        {minDday<=3 && minDday!==99 ? "D-"+minDday : "-"}
-                      </div>
-                    </div>
-                  );
-                })
-            }
-          </Card>
-
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:8 }}>
-            <button onClick={() => setPreview(null)} style={{
-              padding:"13px", borderRadius:12, border:"1px solid "+T.b1,
-              background:T.card, color:T.t2, cursor:"pointer", fontFamily:F,
-              fontSize:14, fontWeight:600 }}>취소</button>
-            <GreenBtn full onClick={handleSaveUpload}>저장하기</GreenBtn>
+            {pending.length > 1 && (
+              <GreenBtn small onClick={saveAll}>전체 저장</GreenBtn>
+            )}
           </div>
-          <div style={{ fontSize:12, color:T.t3, fontFamily:F, textAlign:"center" }}>
-            저장 후 발주 추천 탭에서 추천 발주량을 확인할 수 있어요
-          </div>
+          {pending.map(item => (
+            <PendingFileCard
+              key={item.id}
+              item={item}
+              skuAliases={skuAliases}
+              onUpdateDate={updateDate}
+              onSave={saveOne}
+              onRemove={removePending}
+              onToggle={toggleExpand}
+            />
+          ))}
         </div>
       )}
 
       {/* 업로드 히스토리 */}
-      {uploadHistory.length > 0 && !preview && (
-        <div style={{ marginTop:20 }}>
+      {uploadHistory.length > 0 && (
+        <div style={{ marginTop:pending.length>0?4:0 }}>
           <SH title="업로드 기록" sub={uploadHistory.length+"건"}/>
           <Card>
             {[...uploadHistory].reverse().map((h, i, arr) => (
@@ -777,6 +743,107 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
           </Card>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── 파일 카드 (업로드 대기) ─────────────────────── */
+function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle }) {
+  const [catFilter, setCatFilter] = useState("전체");
+  const cats = ["전체", ...new Set(Object.values(item.data.items).map(i=>i.cat))];
+  const filteredItems = Object.values(item.data.items).filter(i =>
+    catFilter === "전체" || i.cat === catFilter
+  );
+  const skuCount = Object.keys(item.data.items).length;
+  return (
+    <div style={{ background:T.card, borderRadius:16, boxShadow:T.sh1,
+      overflow:"hidden", marginBottom:10, border:"1px solid "+T.brandBorder }}>
+      <div style={{ padding:"12px 14px", display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ width:36, height:36, borderRadius:10, background:T.brandDim,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>📊</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F,
+            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.filename}</div>
+          <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>{skuCount}개 SKU · {DOW_KR[item.data.dow]}요일</div>
+        </div>
+        <button onClick={()=>onRemove(item.id)} style={{
+          padding:"4px 8px", borderRadius:6, border:"1px solid "+T.b1,
+          background:T.card2, color:T.t3, cursor:"pointer", fontSize:12 }}>✕</button>
+      </div>
+
+      {/* 날짜 설정 */}
+      <div style={{ padding:"0 14px 12px", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <div style={{ fontSize:12, fontWeight:600, color:T.t2, fontFamily:F, flexShrink:0 }}>📅 날짜</div>
+        <input type="date" value={item.customDate}
+          onChange={e => onUpdateDate(item.id, e.target.value)}
+          style={{ flex:1, minWidth:120, padding:"7px 10px", borderRadius:8,
+            border:"1px solid "+T.brand, background:T.brandDim,
+            fontSize:13, fontFamily:F, color:T.brand, fontWeight:700, outline:"none" }}/>
+        <div style={{ fontSize:12, color:T.brand, fontFamily:F, fontWeight:700 }}>
+          ({DOW_KR[getDow(item.customDate)]}요일)
+        </div>
+      </div>
+
+      {/* 미리보기 토글 */}
+      <div style={{ padding:"0 14px 10px" }}>
+        <button onClick={()=>onToggle(item.id)} style={{
+          width:"100%", padding:"7px", borderRadius:8, border:"1px solid "+T.b1,
+          background:item.expanded?T.brandDim:T.card2,
+          color:item.expanded?T.brand:T.t3,
+          fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
+          {item.expanded ? "▲ 미리보기 접기" : "▼ 미리보기 펼치기"}
+        </button>
+      </div>
+
+      {/* 미리보기 */}
+      {item.expanded && (
+        <div>
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap", padding:"0 14px 8px" }}>
+            {cats.map(c => (
+              <button key={c} onClick={()=>setCatFilter(c)} style={{
+                padding:"4px 10px", borderRadius:14, border:"1px solid "+(catFilter===c?T.brand:T.b1),
+                background:catFilter===c?T.brandDim:T.card2,
+                color:catFilter===c?T.brand:T.t2,
+                fontSize:11, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>{c}</button>
+            ))}
+          </div>
+          <div style={{ maxHeight:220, overflowY:"auto" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+              padding:"7px 14px", background:T.brandDim, gap:4 }}>
+              {["품목명","재고","판매","내일","모레","유통"].map(h => (
+                <div key={h} style={{ fontSize:10, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
+              ))}
+            </div>
+            {filteredItems.map((it, idx) => {
+              const minDday = it.batches.reduce((m,b) => b.dday!==null&&b.dday<m ? b.dday : m, 99);
+              const expiryColor = minDday<=1?T.red:minDday<=3?T.amber:T.t3;
+              const dispName = skuAliases[it.sku] || it.name;
+              return (
+                <div key={it.sku} style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+                  padding:"8px 14px", gap:4, alignItems:"center",
+                  background:idx%2===0?T.card2:T.card, borderTop:"1px solid "+T.b0 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:T.t1, fontFamily:F,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{dispName}</div>
+                  <div style={{ textAlign:"center", fontSize:13, fontWeight:700,
+                    color:it.actualSum===0?T.red:T.t1, fontFamily:F }}>{it.actualSum}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.amber, fontFamily:F }}>{it.sold||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.blue, fontFamily:F }}>{it.tmrIn||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}>{it.d2In||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:11, fontWeight:700,
+                    color:expiryColor, fontFamily:F }}>{minDday<=3&&minDday!==99?"D-"+minDday:"-"}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 저장 버튼 */}
+      <div style={{ padding:"10px 14px" }}>
+        <GreenBtn full onClick={()=>onSave(item)}>
+          📅 {item.customDate} ({DOW_KR[item.data.dow]}요일) 로 저장
+        </GreenBtn>
+      </div>
     </div>
   );
 }
