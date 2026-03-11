@@ -904,7 +904,6 @@ function App() {
               { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
               { id:"calendar", icon:"📅", label:"캘린더", badge:0 },
               { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
-              { id:"order",    icon:"📦", label:"발주",   badge:0 },
               { id:"memo",     icon:"📝", label:"메모",   badge:0 },
             ].map(t=>(
               <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1059,7 +1058,6 @@ function App() {
             { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
             { id:"calendar", icon:"📅", label:"캘린더" },
             { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
-            { id:"order",    icon:"📦", label:"발주" },
             { id:"memo",     icon:"📝", label:"메모" },
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1144,6 +1142,24 @@ function App() {
                     fontWeight:700, cursor:"pointer", fontFamily:F }}>✨ AI 채팅</button>
                 </div>
               </div>
+            </div>
+
+            {/* 발주관리 앱 바로가기 */}
+            <div onClick={()=>window.open("./order.html","_self")} style={{
+              background:"linear-gradient(135deg,rgba(0,112,74,0.10),rgba(30,57,50,0.08))",
+              border:"1.5px solid rgba(0,112,74,0.22)",
+              borderRadius:18, padding:"15px 18px", marginBottom:18,
+              cursor:"pointer", display:"flex", alignItems:"center", gap:14,
+              boxShadow:"0 2px 12px rgba(0,112,74,0.08)" }}>
+              <div style={{ width:46, height:46, borderRadius:13,
+                background:"linear-gradient(135deg,#00704A,#1E3932)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:22, flexShrink:0, boxShadow:"0 3px 12px rgba(0,112,74,0.30)" }}>📦</div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:15, fontWeight:700, color:T.t1, fontFamily:F }}>발주·재고 관리</div>
+                <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:2 }}>재고입력 · 발주추천 · 통계 분석</div>
+              </div>
+              <span style={{ color:T.brand, fontSize:20, fontWeight:300 }}>›</span>
             </div>
 
             {/* 오늘 할 일 */}
@@ -1479,19 +1495,7 @@ function App() {
           </div>
         )}
 
-        {/* -- ORDER CALCULATOR -- */}
-        {tab==="order"&&(
-          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
-            <OrderTab
-              records={orderRecords||[]}
-              items={orderItems||DEFAULT_ORDER_ITEMS}
-              buffers={orderBuffers||{}}
-              onSaveRecords={saveOrderRecords}
-              onSaveItems={saveOrderItems}
-              onSaveBuffers={saveOrderBuffers}
-            />
-          </div>
-        )}
+
       </div>
 
       {/* == MODALS == */}
