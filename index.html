@@ -35,11 +35,11 @@
     ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.15);border-radius:4px}
     input:focus,textarea:focus,[contenteditable]:focus{border-color:rgba(0,112,74,0.45)!important;box-shadow:0 0 0 3px rgba(0,112,74,0.08)!important;outline:none!important}
     @media(min-width:768px){html,body{background:#E4F0E8}}
-    /* 공지 에디터 ↔ 뷰어 줄간격 통일 */
-    .rich-editor div,.notice-body div{margin:0;padding:0;min-height:1em}
+    /* 공지 에디터 ↔ 뷰어 렌더링 완전 통일 */
+    .rich-editor div,.notice-body div{margin:0;padding:0;min-height:1.8em}
     .rich-editor p,.notice-body p{margin:0}
     .rich-editor br,.notice-body br{line-height:1.8}
-    .notice-body{word-break:break-word}
+    .rich-editor,.notice-body{word-break:break-word;overflow-wrap:break-word}
   </style>
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
@@ -2819,6 +2819,8 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const imgRef = useRef();
 
   useEffect(() => {
+    // 줄바꿈 방식 div로 통일 (에디터↔뷰어 일관성)
+    document.execCommand("defaultParagraphSeparator", false, "div");
     if (initial && editorRef.current) {
       editorRef.current.innerHTML = initial.content || "";
     }
@@ -2829,30 +2831,24 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     editorRef.current.focus();
   };
 
-  /* ── 블록 내 텍스트만 정확히 선택 (후행 BR 제외) ── */
+  /* -- 블록 내 텍스트만 정확히 선택 (후행 BR 제외) -- */
   const selectBlock = (ed, block) => {
     const sel = window.getSelection();
     const r = document.createRange();
-    // 후행 BR 노드들 제외한 마지막 유효 노드 찾기
-    const children = Array.from(block.childNodes);
-    let lastValid = children.length - 1;
-    while (lastValid >= 0 && block.childNodes[lastValid].nodeName === 'BR') lastValid--;
+    let lastValid = block.childNodes.length - 1;
+    while (lastValid >= 0 && block.childNodes[lastValid].nodeName === "BR") lastValid--;
     if (lastValid < 0) {
-      // 내용이 BR뿐이거나 비어있음 → 블록 시작에 커서만
-      r.setStart(block, 0);
-      r.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(r);
-      return null; // 선택 불가
+      r.setStart(block, 0); r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+      return null;
     }
     r.setStart(block, 0);
     r.setEndAfter(block.childNodes[lastValid]);
-    sel.removeAllRanges();
-    sel.addRange(r);
+    sel.removeAllRanges(); sel.addRange(r);
     return r;
   };
 
-  /* ── execCommand 래퍼: 선택 없으면 현재 줄만 선택 후 적용 ── */
+  /* -- execCommand 래퍼: 선택 없으면 현재 줄만 선택 후 적용 -- */
   const execFmt = (cmd, val) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -2861,24 +2857,19 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     if (!sel || !sel.rangeCount) return;
     const range = sel.getRangeAt(0);
     if (range.collapsed) {
-      // 커서만 있을 때 → 현재 블록 전체 선택 후 적용
       const block = getEdBlock(range.startContainer, ed);
       if (block) {
         const r = selectBlock(ed, block);
         if (r) {
           document.execCommand(cmd, false, val || null);
-          // 커서를 블록 끝으로 복원
           const newR = document.createRange();
           newR.setStart(block, block.childNodes.length);
           newR.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(newR);
+          sel.removeAllRanges(); sel.addRange(newR);
         } else {
-          // 빈 줄이면 pending format만 적용
           document.execCommand(cmd, false, val || null);
         }
-        ed.focus();
-        return;
+        ed.focus(); return;
       }
     }
     document.execCommand(cmd, false, val || null);
@@ -2990,7 +2981,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     });
   };
 
-  /* ── 폰트 크기 적용 — 현재 줄 또는 선택 범위에만 span 래핑 ── */
+  /* ── 폰트 크기 적용 — 선택 범위에만 span 래핑 ── */
   const applyFontSize = (size, weight) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -2999,20 +2990,19 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     if (!sel || !sel.rangeCount) return;
     let range = sel.getRangeAt(0);
 
-    // 선택 없을 때(커서만) → 현재 블록만 정확히 선택 (후행 BR 제외)
+    // 커서만 있을 때 → 현재 블록만 정확히 선택 (후행 BR 제외)
     if (range.collapsed) {
       const block = getEdBlock(range.startContainer, ed);
       if (!block) return;
       const r = selectBlock(ed, block);
-      if (!r) return; // 빈 줄
+      if (!r) return;
       range = sel.getRangeAt(0);
       if (range.collapsed) return;
     } else {
-      // 선택이 여러 블록에 걸칠 경우 → startBlock만으로 범위 좁히기
+      // 다중 블록 선택 시 → 시작 블록만으로 제한 (다음 줄 번짐 방지)
       const startBlock = getEdBlock(range.startContainer, ed);
       const endBlock   = getEdBlock(range.endContainer,   ed);
       if (startBlock && endBlock && startBlock !== endBlock) {
-        // 시작 블록만 선택으로 제한
         const r = selectBlock(ed, startBlock);
         if (!r) return;
         range = sel.getRangeAt(0);
@@ -3267,9 +3257,9 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                     const kl = k.toLowerCase();
                     if (kl === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); return; }
                     if ((kl === "z" && e.shiftKey) || kl === "y") { e.preventDefault(); document.execCommand("redo"); return; }
-                    if (kl === "b") { e.preventDefault(); document.execCommand("bold"); return; }
-                    if (kl === "i") { e.preventDefault(); document.execCommand("italic"); return; }
-                    if (kl === "u") { e.preventDefault(); document.execCommand("underline"); return; }
+                    if (kl === "b") { e.preventDefault(); execFmt("bold"); return; }
+                    if (kl === "i") { e.preventDefault(); execFmt("italic"); return; }
+                    if (kl === "u") { e.preventDefault(); execFmt("underline"); return; }
                   }
 
                   // ── Tab: 들여쓰기 / Shift+Tab: 내어쓰기 ──
@@ -3306,8 +3296,8 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
                   lastEnterRef.current = null;
                 }}
-                style={{ ...fBase, flex:1, minHeight:200, fontSize:15, lineHeight:1.9, padding:"14px 16px",
-                  whiteSpace:"pre-wrap", overflowY:"auto" }}/>
+                style={{ ...fBase, flex:1, minHeight:200, fontSize:15, lineHeight:1.8, padding:"14px 16px",
+                  overflowY:"auto" }}/>
             </div>
           </div>
         ) : (
@@ -3412,9 +3402,9 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                     const kl = k.toLowerCase();
                     if (kl === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); return; }
                     if ((kl === "z" && e.shiftKey) || kl === "y") { e.preventDefault(); document.execCommand("redo"); return; }
-                    if (kl === "b") { e.preventDefault(); document.execCommand("bold"); return; }
-                    if (kl === "i") { e.preventDefault(); document.execCommand("italic"); return; }
-                    if (kl === "u") { e.preventDefault(); document.execCommand("underline"); return; }
+                    if (kl === "b") { e.preventDefault(); execFmt("bold"); return; }
+                    if (kl === "i") { e.preventDefault(); execFmt("italic"); return; }
+                    if (kl === "u") { e.preventDefault(); execFmt("underline"); return; }
                   }
 
                   // ── Tab: 들여쓰기 / Shift+Tab: 내어쓰기 ──
