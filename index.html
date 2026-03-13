@@ -904,6 +904,7 @@ function App() {
               { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
               { id:"calendar", icon:"📅", label:"캘린더", badge:0 },
               { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
+              { id:"order",    icon:"📦", label:"발주",   badge:0 },
               { id:"memo",     icon:"📝", label:"메모",   badge:0 },
             ].map(t=>(
               <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1058,6 +1059,7 @@ function App() {
             { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
             { id:"calendar", icon:"📅", label:"캘린더" },
             { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
+            { id:"order",    icon:"📦", label:"발주" },
             { id:"memo",     icon:"📝", label:"메모" },
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1142,24 +1144,6 @@ function App() {
                     fontWeight:700, cursor:"pointer", fontFamily:F }}>✨ AI 채팅</button>
                 </div>
               </div>
-            </div>
-
-            {/* 발주관리 앱 바로가기 */}
-            <div onClick={()=>window.open("./order.html","_self")} style={{
-              background:"linear-gradient(135deg,rgba(0,112,74,0.10),rgba(30,57,50,0.08))",
-              border:"1.5px solid rgba(0,112,74,0.22)",
-              borderRadius:18, padding:"15px 18px", marginBottom:18,
-              cursor:"pointer", display:"flex", alignItems:"center", gap:14,
-              boxShadow:"0 2px 12px rgba(0,112,74,0.08)" }}>
-              <div style={{ width:46, height:46, borderRadius:13,
-                background:"linear-gradient(135deg,#00704A,#1E3932)",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:22, flexShrink:0, boxShadow:"0 3px 12px rgba(0,112,74,0.30)" }}>📦</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:15, fontWeight:700, color:T.t1, fontFamily:F }}>발주·재고 관리</div>
-                <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:2 }}>재고입력 · 발주추천 · 통계 분석</div>
-              </div>
-              <span style={{ color:T.brand, fontSize:20, fontWeight:300 }}>›</span>
             </div>
 
             {/* 오늘 할 일 */}
@@ -1495,7 +1479,19 @@ function App() {
           </div>
         )}
 
-
+        {/* -- ORDER CALCULATOR -- */}
+        {tab==="order"&&(
+          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
+            <OrderTab
+              records={orderRecords||[]}
+              items={orderItems||DEFAULT_ORDER_ITEMS}
+              buffers={orderBuffers||{}}
+              onSaveRecords={saveOrderRecords}
+              onSaveItems={saveOrderItems}
+              onSaveBuffers={saveOrderBuffers}
+            />
+          </div>
+        )}
       </div>
 
       {/* == MODALS == */}
@@ -2833,6 +2829,62 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     editorRef.current.focus();
   };
 
+  /* ── 블록 내 텍스트만 정확히 선택 (후행 BR 제외) ── */
+  const selectBlock = (ed, block) => {
+    const sel = window.getSelection();
+    const r = document.createRange();
+    // 후행 BR 노드들 제외한 마지막 유효 노드 찾기
+    const children = Array.from(block.childNodes);
+    let lastValid = children.length - 1;
+    while (lastValid >= 0 && block.childNodes[lastValid].nodeName === 'BR') lastValid--;
+    if (lastValid < 0) {
+      // 내용이 BR뿐이거나 비어있음 → 블록 시작에 커서만
+      r.setStart(block, 0);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return null; // 선택 불가
+    }
+    r.setStart(block, 0);
+    r.setEndAfter(block.childNodes[lastValid]);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return r;
+  };
+
+  /* ── execCommand 래퍼: 선택 없으면 현재 줄만 선택 후 적용 ── */
+  const execFmt = (cmd, val) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (range.collapsed) {
+      // 커서만 있을 때 → 현재 블록 전체 선택 후 적용
+      const block = getEdBlock(range.startContainer, ed);
+      if (block) {
+        const r = selectBlock(ed, block);
+        if (r) {
+          document.execCommand(cmd, false, val || null);
+          // 커서를 블록 끝으로 복원
+          const newR = document.createRange();
+          newR.setStart(block, block.childNodes.length);
+          newR.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(newR);
+        } else {
+          // 빈 줄이면 pending format만 적용
+          document.execCommand(cmd, false, val || null);
+        }
+        ed.focus();
+        return;
+      }
+    }
+    document.execCommand(cmd, false, val || null);
+    ed.focus();
+  };
+
   const insertImage = async (file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -2938,7 +2990,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     });
   };
 
-  /* ── 폰트 크기 적용 — 선택 범위에만 span 래핑 ── */
+  /* ── 폰트 크기 적용 — 현재 줄 또는 선택 범위에만 span 래핑 ── */
   const applyFontSize = (size, weight) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -2947,22 +2999,31 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     if (!sel || !sel.rangeCount) return;
     let range = sel.getRangeAt(0);
 
-    // 선택 없을 때(커서만) → 현재 블록 전체 선택
+    // 선택 없을 때(커서만) → 현재 블록만 정확히 선택 (후행 BR 제외)
     if (range.collapsed) {
       const block = getEdBlock(range.startContainer, ed);
       if (!block) return;
-      const newR = document.createRange();
-      newR.selectNodeContents(block);
-      sel.removeAllRanges();
-      sel.addRange(newR);
+      const r = selectBlock(ed, block);
+      if (!r) return; // 빈 줄
       range = sel.getRangeAt(0);
+      if (range.collapsed) return;
+    } else {
+      // 선택이 여러 블록에 걸칠 경우 → startBlock만으로 범위 좁히기
+      const startBlock = getEdBlock(range.startContainer, ed);
+      const endBlock   = getEdBlock(range.endContainer,   ed);
+      if (startBlock && endBlock && startBlock !== endBlock) {
+        // 시작 블록만 선택으로 제한
+        const r = selectBlock(ed, startBlock);
+        if (!r) return;
+        range = sel.getRangeAt(0);
+      }
     }
 
-    // 선택 범위에서 기존 fontSize/fontWeight 제거 후 span 래핑
+    // 기존 fontSize/fontWeight 제거 후 span 래핑
     const frag = range.extractContents();
     const strip = (n) => {
       if (n.style) { n.style.fontSize = ""; n.style.fontWeight = ""; }
-      n.childNodes && n.childNodes.forEach(strip);
+      n.childNodes && Array.from(n.childNodes).forEach(strip);
     };
     strip(frag);
     const sp = document.createElement("span");
@@ -2970,7 +3031,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     sp.style.fontWeight = weight;
     sp.appendChild(frag);
     range.insertNode(sp);
-    // 커서를 span 뒤로 이동
+    // 커서를 span 바로 뒤로 이동
     const newR = document.createRange();
     newR.setStartAfter(sp);
     newR.collapse(true);
@@ -2982,14 +3043,14 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const ToolbarContent = () => (
     <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
       {/* 서식: 굵게/기울임/밑줄 */}
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("bold");}}
+      <button onMouseDown={e=>{e.preventDefault();execFmt("bold");}}
         style={{ ...btnS, fontWeight:800 }}>B</button>
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("italic");}}
+      <button onMouseDown={e=>{e.preventDefault();execFmt("italic");}}
         style={{ ...btnS, fontStyle:"italic" }}>I</button>
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("underline");}}
+      <button onMouseDown={e=>{e.preventDefault();execFmt("underline");}}
         style={{ ...btnS, textDecoration:"underline" }}>U</button>
       {/* 취소선 */}
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("strikeThrough");}}
+      <button onMouseDown={e=>{e.preventDefault();execFmt("strikeThrough");}}
         style={{ ...btnS, textDecoration:"line-through" }}>S</button>
 
       {/* 구분선 */}
@@ -3019,11 +3080,11 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
       {/* 형광펜 */}
       {["#FFEB3B","#A5D6A7","#EF9A9A","#90CAF9"].map(bg=>(
-        <button key={bg} onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,bg);}}
+        <button key={bg} onMouseDown={e=>{e.preventDefault();execFmt("hiliteColor",bg);}}
           style={{ width:24, height:24, borderRadius:5, background:bg,
             border:"1px solid rgba(0,0,0,0.12)", cursor:"pointer", flexShrink:0 }}/>
       ))}
-      <button onMouseDown={e=>{e.preventDefault();document.execCommand("hiliteColor",false,"transparent");}}
+      <button onMouseDown={e=>{e.preventDefault();execFmt("hiliteColor","transparent");}}
         style={{ ...btnS, color:T.l3, fontSize:11 }}>지우기</button>
 
       {/* 구분선 */}
