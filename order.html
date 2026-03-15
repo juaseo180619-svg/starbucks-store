@@ -16,6 +16,21 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
+  <script>
+    var FIREBASE_CONFIG = {
+      apiKey: "AIzaSyBAOiMIsiF0Y2AFK0L1lddlMKvnvAjBbV8",
+      authDomain: "starbucks-store-479ce.firebaseapp.com",
+      projectId: "starbucks-store-479ce",
+      storageBucket: "starbucks-store-479ce.firebasestorage.app",
+      messagingSenderId: "927355746594",
+      appId: "1:927355746594:web:3a6279d4aff6b6cb4b0d7b"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    window.db = firebase.firestore();
+  </script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
     html,body{height:100%;background:#F2F2F7;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,sans-serif;}
@@ -50,10 +65,67 @@ const T = {
   sh1:"0 1px 3px rgba(0,0,0,0.06)", sh2:"0 2px 8px rgba(0,0,0,0.08)", sh3:"0 4px 20px rgba(0,0,0,0.10)",
 };
 
-/* ─── Storage ────────────────────────────────────── */
+/* ─── Storage (로컬 캐시) ───────────────────────── */
 const LS = {
   get: (k, def) => { try { const v = localStorage.getItem("sborder_"+k); return v ? JSON.parse(v) : def; } catch { return def; } },
   set: (k, v) => { try { localStorage.setItem("sborder_"+k, JSON.stringify(v)); } catch {} },
+};
+
+/* ─── Firestore 동기화 헬퍼 ─────────────────────── */
+const DB = {
+  // 매장별 경로
+  path: (storeId) => window.db.collection("orderStores").doc(storeId),
+
+  // 설정 문서 (manualItems, buffers, skuAliases)
+  saveConfig: async (storeId, data) => {
+    try {
+      await DB.path(storeId).collection("data").doc("config").set(data, { merge: true });
+      return true;
+    } catch(e) { console.warn("Firestore saveConfig error:", e); return false; }
+  },
+  loadConfig: async (storeId) => {
+    try {
+      const snap = await DB.path(storeId).collection("data").doc("config").get();
+      return snap.exists ? snap.data() : null;
+    } catch(e) { console.warn("Firestore loadConfig error:", e); return null; }
+  },
+
+  // 수동 기록 (manualRecords)
+  saveManualRecords: async (storeId, records) => {
+    try {
+      await DB.path(storeId).collection("data").doc("manualRecords").set({ records }, { merge: false });
+      return true;
+    } catch(e) { console.warn("Firestore saveManualRecords error:", e); return false; }
+  },
+  loadManualRecords: async (storeId) => {
+    try {
+      const snap = await DB.path(storeId).collection("data").doc("manualRecords").get();
+      return snap.exists ? (snap.data().records || []) : null;
+    } catch(e) { console.warn("Firestore loadManualRecords error:", e); return null; }
+  },
+
+  // 업로드 이력 (history) - 각 엔트리를 별도 문서로 저장
+  saveHistoryEntry: async (storeId, entry) => {
+    try {
+      const { id, filename, date, rows, uploadedAt } = entry;
+      await DB.path(storeId).collection("history").doc(String(id)).set(
+        { id, filename, date, rows, uploadedAt: uploadedAt || Date.now() }
+      );
+      return true;
+    } catch(e) { console.warn("Firestore saveHistoryEntry error:", e); return false; }
+  },
+  deleteHistoryEntry: async (storeId, id) => {
+    try {
+      await DB.path(storeId).collection("history").doc(String(id)).delete();
+      return true;
+    } catch(e) { console.warn("Firestore deleteHistoryEntry error:", e); return false; }
+  },
+  loadHistory: async (storeId) => {
+    try {
+      const snap = await DB.path(storeId).collection("history").orderBy("date", "asc").get();
+      return snap.docs.map(d => d.data());
+    } catch(e) { console.warn("Firestore loadHistory error:", e); return null; }
+  },
 };
 
 /* ─── Utils ─────────────────────────────────────── */
@@ -159,18 +231,104 @@ function App() {
   const [tab, setTab] = useState("dashboard");
   const isPC = window.innerWidth >= 768;
 
+  // ── Firebase 동기화 상태 ──
+  const [storeId, setStoreId] = useState(() => LS.get("storeId", ""));
+  const [storeInput, setStoreInput] = useState("");
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle|loading|ok|error
+  const [dataLoaded, setDataLoaded] = useState(false);
+
   // 핵심 데이터
   const [uploadHistory, setUploadHistory] = useState(() => LS.get("history", []));
   const [manualItems,   setManualItems]   = useState(() => LS.get("manualItems", ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"]));
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
   const [buffers,       setBuffers]       = useState(() => LS.get("buffers", {}));
-  const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {})); // sku → 표시명
+  const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {}));
 
-  const saveHistory = (v) => { setUploadHistory(v); LS.set("history", v); };
-  const saveManualItems = (v) => { setManualItems(v); LS.set("manualItems", v); };
-  const saveManualRecords = (v) => { setManualRecords(v); LS.set("manualRecords", v); };
-  const saveBuffers = (v) => { setBuffers(v); LS.set("buffers", v); };
-  const saveSkuAliases = (v) => { setSkuAliases(v); LS.set("skuAliases", v); };
+  // ── 초기 Firebase 데이터 로드 ──
+  useEffect(() => {
+    if (!storeId || !window.db) { setDataLoaded(true); return; }
+    setSyncStatus("loading");
+    (async () => {
+      try {
+        const [cfg, recs, hist] = await Promise.all([
+          DB.loadConfig(storeId),
+          DB.loadManualRecords(storeId),
+          DB.loadHistory(storeId),
+        ]);
+        if (cfg) {
+          if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
+          if (cfg.buffers)      { setBuffers(cfg.buffers);          LS.set("buffers", cfg.buffers); }
+          if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
+        }
+        if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
+        if (hist !== null && hist.length > 0) { setUploadHistory(hist); LS.set("history", hist); }
+        setSyncStatus("ok");
+      } catch(e) {
+        console.warn("Firebase 로드 실패, 로컬 캐시 사용:", e);
+        setSyncStatus("error");
+      } finally {
+        setDataLoaded(true);
+      }
+    })();
+  }, [storeId]);
+
+  // ── Firebase + LS 통합 저장 함수 ──
+  const syncConfig = async (items, bufs, aliases) => {
+    if (!storeId || !window.db) return;
+    setSyncStatus("loading");
+    const ok = await DB.saveConfig(storeId, { manualItems: items, buffers: bufs, skuAliases: aliases });
+    setSyncStatus(ok ? "ok" : "error");
+  };
+
+  const saveHistory = async (v, newEntry) => {
+    setUploadHistory(v); LS.set("history", v);
+    if (storeId && window.db && newEntry) {
+      setSyncStatus("loading");
+      const ok = await DB.saveHistoryEntry(storeId, newEntry);
+      setSyncStatus(ok ? "ok" : "error");
+    }
+  };
+  const deleteHistoryEntry = async (id) => {
+    if (storeId && window.db) {
+      setSyncStatus("loading");
+      await DB.deleteHistoryEntry(storeId, id);
+      setSyncStatus("ok");
+    }
+  };
+  const saveManualItems = async (v) => {
+    setManualItems(v); LS.set("manualItems", v);
+    await syncConfig(v, buffers, skuAliases);
+  };
+  const saveManualRecords = async (v) => {
+    setManualRecords(v); LS.set("manualRecords", v);
+    if (!storeId || !window.db) return;
+    setSyncStatus("loading");
+    const ok = await DB.saveManualRecords(storeId, v);
+    setSyncStatus(ok ? "ok" : "error");
+  };
+  const saveBuffers = async (v) => {
+    setBuffers(v); LS.set("buffers", v);
+    await syncConfig(manualItems, v, skuAliases);
+  };
+  const saveSkuAliases = async (v) => {
+    setSkuAliases(v); LS.set("skuAliases", v);
+    await syncConfig(manualItems, buffers, v);
+  };
+
+  // 매장번호 등록
+  const handleSetStore = () => {
+    const sid = storeInput.trim();
+    if (!sid) return;
+    LS.set("storeId", sid);
+    setStoreId(sid);
+    setDataLoaded(false);
+  };
+
+  // UploadTab에서 삭제 접근 가능하게 window에 노출
+  useEffect(() => {
+    window._deleteHistoryEntry = (id) => deleteHistoryEntry(id);
+    return () => { delete window._deleteHistoryEntry; };
+  }, [storeId]);
 
   // 최신 업로드 데이터
   const latestUpload = uploadHistory.length ? uploadHistory[uploadHistory.length - 1] : null;
@@ -212,11 +370,25 @@ function App() {
               <div style={{ fontSize:13, fontWeight:800, color:T.brand, lineHeight:1 }}>발주 관리</div>
             </div>
           </div>
-          {latestUpload && (
-            <div style={{ marginLeft:"auto", fontSize:11, color:T.t3, fontFamily:F }}>
-              최근: {fmtDate(latestUpload.date)}
-            </div>
-          )}
+          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
+            {storeId && (
+              <div style={{
+                fontSize:10, fontWeight:700, letterSpacing:0.5,
+                color: syncStatus==="ok"?T.brand : syncStatus==="error"?T.red : T.t3,
+                display:"flex", alignItems:"center", gap:4
+              }}>
+                {syncStatus==="loading" && <span style={{ display:"inline-block", width:10, height:10, border:"1.5px solid currentColor", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>}
+                {syncStatus==="ok" && "🔗"}
+                {syncStatus==="error" && "⚠️"}
+                {storeId !== "local" && (syncStatus==="loading" ? "동기화 중" : syncStatus==="ok" ? storeId+"점" : syncStatus==="error" ? "오프라인" : "")}
+              </div>
+            )}
+            <button onClick={()=>{
+              const sid = prompt("매장번호를 입력하세요 (예: 3867)\n\n동기화 없이 사용하려면 'local' 입력");
+              if(sid !== null && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
+            }} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", padding:"4px 2px" }}
+              title="매장 설정">⚙️</button>
+          </div>
         </div>
       )}
 
@@ -262,6 +434,34 @@ function App() {
               {Object.keys(latestUpload.items||{}).length}개 SKU
             </div>
           )}
+          {/* 동기화 상태 */}
+          <div style={{ padding:"10px 14px", borderTop:"1px solid "+T.b0 }}>
+            <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:4 }}>
+              {storeId
+                ? <>🏪 매장 <b style={{color:T.brand}}>{storeId}</b></>
+                : <span style={{color:T.amber}}>매장번호 미설정</span>}
+            </div>
+            {storeId && (
+              <div style={{
+                fontSize:11, fontWeight:700,
+                color: syncStatus==="ok"?T.brand : syncStatus==="error"?T.red : T.t3,
+                display:"flex", alignItems:"center", gap:5
+              }}>
+                {syncStatus==="loading" && <span style={{ display:"inline-block", width:10, height:10, border:"1.5px solid currentColor", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>}
+                {syncStatus==="ok" ? "🔗 Firebase 동기화 중" : syncStatus==="error" ? "⚠️ 오프라인 (로컬 저장)" : ""}
+              </div>
+            )}
+            <button onClick={()=>{
+              const sid = prompt("매장번호를 입력하세요 (예: 3867)");
+              if(sid && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
+            }} style={{
+              marginTop:6, width:"100%", padding:"5px 0", borderRadius:6,
+              border:"1px solid "+T.b1, background:"transparent",
+              fontSize:11, color:T.t2, fontFamily:F, cursor:"pointer"
+            }}>
+              {storeId ? "매장번호 변경" : "매장번호 설정"}
+            </button>
+          </div>
         </aside>
       )}
 
@@ -300,7 +500,52 @@ function App() {
         paddingBottom:isPC?0:"calc(62px + env(safe-area-inset-bottom))",
         minHeight:"100vh"
       }}>
-        {tab==="dashboard" && (
+
+        {/* 매장번호 미설정 온보딩 */}
+        {!storeId && (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
+            justifyContent:"center", minHeight:"70vh", padding:32 }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>🏪</div>
+            <div style={{ fontSize:20, fontWeight:800, color:T.t1, fontFamily:F, marginBottom:8 }}>매장번호 설정</div>
+            <div style={{ fontSize:14, color:T.t3, fontFamily:F, textAlign:"center", marginBottom:28, lineHeight:1.7 }}>
+              폰과 PC가 같은 데이터를 공유하려면<br/>매장번호를 입력하세요.<br/>
+              <span style={{color:T.t4, fontSize:12}}>기존에 입력한 로컬 데이터는 유지됩니다.</span>
+            </div>
+            <div style={{ display:"flex", gap:8, width:"100%", maxWidth:300 }}>
+              <input
+                value={storeInput}
+                onChange={e=>setStoreInput(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handleSetStore()}
+                placeholder="매장번호 입력 (예: 3867)"
+                style={{ flex:1, padding:"12px 14px", borderRadius:12,
+                  border:"1.5px solid "+T.b1, fontFamily:F, fontSize:15,
+                  background:T.card, color:T.t1 }}
+              />
+              <button onClick={handleSetStore} style={{
+                padding:"12px 18px", borderRadius:12, border:"none",
+                background:T.brand, color:"#fff", fontFamily:F,
+                fontSize:15, fontWeight:700, cursor:"pointer"
+              }}>확인</button>
+            </div>
+            <button onClick={()=>{ LS.set("storeId","local"); setStoreId("local"); }}
+              style={{ marginTop:16, background:"none", border:"none",
+                fontSize:13, color:T.t3, fontFamily:F, cursor:"pointer", textDecoration:"underline" }}>
+              동기화 없이 로컬만 사용
+            </button>
+          </div>
+        )}
+
+        {/* 데이터 로딩 중 */}
+        {storeId && !dataLoaded && (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
+            justifyContent:"center", minHeight:"60vh", gap:16 }}>
+            <div style={{ width:32, height:32, border:"3px solid "+T.brandLight,
+              borderTopColor:T.brand, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+            <div style={{ fontSize:14, color:T.t3, fontFamily:F }}>데이터 불러오는 중...</div>
+          </div>
+        )}
+
+        {storeId && dataLoaded && tab==="dashboard" && (
           <DashboardTab
             latestUpload={latestUpload}
             uploadHistory={uploadHistory}
@@ -311,7 +556,7 @@ function App() {
             skuAliases={skuAliases}
           />
         )}
-        {tab==="upload" && (
+        {storeId && dataLoaded && tab==="upload" && (
           <UploadTab
             uploadHistory={uploadHistory}
             onSave={saveHistory}
@@ -319,7 +564,7 @@ function App() {
             onSaveAliases={saveSkuAliases}
           />
         )}
-        {tab==="recommend" && (
+        {storeId && dataLoaded && tab==="recommend" && (
           <RecommendTab
             latestUpload={latestUpload}
             uploadHistory={uploadHistory}
@@ -330,7 +575,7 @@ function App() {
             skuAliases={skuAliases}
           />
         )}
-        {tab==="manual" && (
+        {storeId && dataLoaded && tab==="manual" && (
           <ManualTab
             records={manualRecords}
             items={manualItems}
@@ -340,7 +585,7 @@ function App() {
             onSaveBuffers={saveBuffers}
           />
         )}
-        {tab==="history" && (
+        {storeId && dataLoaded && tab==="history" && (
           <HistoryTab
             uploadHistory={uploadHistory}
             manualRecords={manualRecords}
@@ -626,25 +871,34 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
     } else {
       updated = [...uploadHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
     }
-    onSave(updated);
+    // 새 항목이면 newEntry로 Firebase 개별 저장, 덮어쓰기면 배열 전체 저장
+    const isNew = exists < 0;
+    onSave(updated, isNew ? item.data : null);
     removePending(item.id);
   };
 
   const saveAll = () => {
     let updated = [...uploadHistory];
+    const newEntries = [];
     for (const item of pending) {
       const exists = updated.findIndex(h => h.date === item.data.date);
       if (exists >= 0) updated = updated.map((h,i) => i===exists ? item.data : h);
-      else updated = [...updated, item.data];
+      else { updated = [...updated, item.data]; newEntries.push(item.data); }
     }
-    onSave(updated.sort((a,b) => a.date.localeCompare(b.date)));
+    const sorted = updated.sort((a,b) => a.date.localeCompare(b.date));
+    // 새 항목들 개별 Firebase 저장
+    newEntries.forEach(entry => onSave(sorted, entry));
+    if (newEntries.length === 0) onSave(sorted, null);
     setPending([]);
     alert(pending.length+"개 파일이 저장되었습니다 ✓");
   };
 
   const deleteHistory = (idx) => {
     if (!window.confirm("이 기록을 삭제할까요?")) return;
-    onSave(uploadHistory.filter((_,i) => i!==idx));
+    const toDelete = uploadHistory[idx];
+    onSave(uploadHistory.filter((_,i) => i!==idx), null);
+    // Firebase에서도 삭제 (App의 deleteHistoryEntry 직접 호출 불가 → onSave 시그니처 활용)
+    if (toDelete && toDelete.id) window._deleteHistoryEntry && window._deleteHistoryEntry(toDelete.id);
   };
 
   const toggleExpand = (id) => setPending(prev => prev.map(p => p.id===id ? {...p,expanded:!p.expanded} : p));
