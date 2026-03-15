@@ -107,24 +107,40 @@ const DB = {
   // 업로드 이력 (history) - 각 엔트리를 별도 문서로 저장
   saveHistoryEntry: async (storeId, entry) => {
     try {
-      const { id, filename, date, rows, uploadedAt } = entry;
-      await DB.path(storeId).collection("history").doc(String(id)).set(
-        { id, filename, date, rows, uploadedAt: uploadedAt || Date.now() }
-      );
+      const docId = entry._id || entry.date; // date를 문서 ID로 사용 (유일성 보장)
+      await DB.path(storeId).collection("history").doc(docId).set({
+        ...entry,
+        _id: docId,
+        _savedAt: Date.now()
+      });
       return true;
     } catch(e) { console.warn("Firestore saveHistoryEntry error:", e); return false; }
   },
-  deleteHistoryEntry: async (storeId, id) => {
+  deleteHistoryEntry: async (storeId, key) => {
     try {
-      await DB.path(storeId).collection("history").doc(String(id)).delete();
+      await DB.path(storeId).collection("history").doc(String(key)).delete();
       return true;
     } catch(e) { console.warn("Firestore deleteHistoryEntry error:", e); return false; }
   },
   loadHistory: async (storeId) => {
     try {
       const snap = await DB.path(storeId).collection("history").orderBy("date", "asc").get();
+      if (snap.empty) return null;
       return snap.docs.map(d => d.data());
     } catch(e) { console.warn("Firestore loadHistory error:", e); return null; }
+  },
+  // 전체 히스토리를 한번에 업로드 (기존 로컬 데이터 마이그레이션용)
+  uploadAllHistory: async (storeId, histArray) => {
+    try {
+      const batch = window.db.batch();
+      histArray.forEach(entry => {
+        const docId = entry.date;
+        const ref = window.db.collection("orderStores").doc(storeId).collection("history").doc(docId);
+        batch.set(ref, { ...entry, _id: docId, _savedAt: Date.now() });
+      });
+      await batch.commit();
+      return true;
+    } catch(e) { console.warn("Firestore uploadAllHistory error:", e); return false; }
   },
 };
 
@@ -300,7 +316,16 @@ function App() {
           if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
         }
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
-        if (hist !== null && hist.length > 0) { setUploadHistory(hist); LS.set("history", hist); }
+        if (hist !== null && hist.length > 0) {
+          setUploadHistory(hist); LS.set("history", hist);
+        } else {
+          // Firebase에 히스토리 없음 → 로컬 데이터를 Firebase에 업로드 (최초 동기화)
+          const localHist = LS.get("history", []);
+          if (localHist.length > 0) {
+            console.log("[sync] Firebase history empty, migrating", localHist.length, "entries from localStorage");
+            await DB.uploadAllHistory(storeId, localHist);
+          }
+        }
         setSyncStatus("ok");
       } catch(e) {
         console.warn("Firebase 로드 실패, 로컬 캐시 사용:", e);
@@ -540,37 +565,60 @@ function App() {
         minHeight:"100vh"
       }}>
 
-        {/* 매장번호 미설정 온보딩 */}
+        {/* 매장번호 미설정 온보딩 - 전용 풀스크린 */}
         {!storeId && (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
-            justifyContent:"center", minHeight:"70vh", padding:32 }}>
-            <div style={{ fontSize:48, marginBottom:16 }}>🏪</div>
-            <div style={{ fontSize:20, fontWeight:800, color:T.t1, fontFamily:F, marginBottom:8 }}>매장번호 설정</div>
-            <div style={{ fontSize:14, color:T.t3, fontFamily:F, textAlign:"center", marginBottom:28, lineHeight:1.7 }}>
-              폰과 PC가 같은 데이터를 공유하려면<br/>매장번호를 입력하세요.<br/>
-              <span style={{color:T.t4, fontSize:12}}>기존에 입력한 로컬 데이터는 유지됩니다.</span>
+          <div style={{
+            position:"fixed", inset:0, zIndex:999,
+            background:"linear-gradient(160deg,#EEF7F1 0%,#D4EDE3 100%)",
+            display:"flex", flexDirection:"column",
+            alignItems:"center", justifyContent:"center", padding:32
+          }}>
+            {/* 로고 */}
+            <div style={{ width:72, height:72, borderRadius:20,
+              background:"linear-gradient(135deg,#00704A,#1E3932)",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:36, marginBottom:20, boxShadow:"0 8px 24px rgba(0,112,74,0.25)" }}>
+              ☕
             </div>
-            <div style={{ display:"flex", gap:8, width:"100%", maxWidth:300 }}>
-              <input
-                value={storeInput}
-                onChange={e=>setStoreInput(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&handleSetStore()}
-                placeholder="매장번호 입력 (예: 3867)"
-                style={{ flex:1, padding:"12px 14px", borderRadius:12,
-                  border:"1.5px solid "+T.b1, fontFamily:F, fontSize:15,
-                  background:T.card, color:T.t1 }}
-              />
-              <button onClick={handleSetStore} style={{
-                padding:"12px 18px", borderRadius:12, border:"none",
-                background:T.brand, color:"#fff", fontFamily:F,
-                fontSize:15, fontWeight:700, cursor:"pointer"
-              }}>확인</button>
+            <div style={{ fontSize:11, fontWeight:700, letterSpacing:2.5,
+              color:T.brand, fontFamily:F, marginBottom:6 }}>STARBUCKS</div>
+            <div style={{ fontSize:22, fontWeight:900, color:T.t1, fontFamily:F, marginBottom:6 }}>
+              발주 관리
             </div>
-            <button onClick={()=>{ LS.set("storeId","local"); setStoreId("local"); }}
-              style={{ marginTop:16, background:"none", border:"none",
-                fontSize:13, color:T.t3, fontFamily:F, cursor:"pointer", textDecoration:"underline" }}>
-              동기화 없이 로컬만 사용
-            </button>
+            <div style={{ fontSize:14, color:T.t3, fontFamily:F,
+              textAlign:"center", marginBottom:36, lineHeight:1.8 }}>
+              폰과 PC에서 같은 데이터를 공유하려면<br/>매장번호를 입력해주세요.
+            </div>
+            <div style={{ width:"100%", maxWidth:320 }}>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                <input
+                  value={storeInput}
+                  onChange={e=>setStoreInput(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&handleSetStore()}
+                  placeholder="매장번호 입력 (예: 3867)"
+                  style={{ flex:1, padding:"14px 16px", borderRadius:14,
+                    border:"1.5px solid rgba(0,112,74,0.25)", fontFamily:F, fontSize:15,
+                    background:"rgba(255,255,255,0.9)", color:T.t1,
+                    outline:"none", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}
+                />
+                <button onClick={handleSetStore} style={{
+                  padding:"14px 20px", borderRadius:14, border:"none",
+                  background:T.brand, color:"#fff", fontFamily:F,
+                  fontSize:15, fontWeight:700, cursor:"pointer",
+                  boxShadow:"0 4px 12px rgba(0,112,74,0.3)"
+                }}>확인</button>
+              </div>
+              <div style={{ fontSize:11, color:T.t4, fontFamily:F,
+                textAlign:"center", marginBottom:20 }}>
+                기존에 입력한 로컬 데이터는 유지됩니다
+              </div>
+              <button onClick={()=>{ LS.set("storeId","local"); setStoreId("local"); }}
+                style={{ width:"100%", padding:"12px", borderRadius:12,
+                  background:"rgba(0,0,0,0.04)", border:"1px solid rgba(0,0,0,0.08)",
+                  fontSize:13, color:T.t2, fontFamily:F, cursor:"pointer" }}>
+                동기화 없이 이 기기에서만 사용
+              </button>
+            </div>
           </div>
         )}
 
@@ -936,8 +984,9 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
     if (!window.confirm("이 기록을 삭제할까요?")) return;
     const toDelete = uploadHistory[idx];
     onSave(uploadHistory.filter((_,i) => i!==idx), null);
-    // Firebase에서도 삭제 (App의 deleteHistoryEntry 직접 호출 불가 → onSave 시그니처 활용)
-    if (toDelete && toDelete.id) window._deleteHistoryEntry && window._deleteHistoryEntry(toDelete.id);
+    // Firebase에서도 삭제
+    const delKey = toDelete?.date || toDelete?._id;
+    if (delKey) window._deleteHistoryEntry && window._deleteHistoryEntry(delKey);
   };
 
   const toggleExpand = (id) => setPending(prev => prev.map(p => p.id===id ? {...p,expanded:!p.expanded} : p));
@@ -1917,6 +1966,32 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
         .sort((a,b) => b[1]-a[1]).slice(0,3)
         .map(([sku,v]) => ({ sku, sold:rnd(v,1), name:(skuAliases[sku]||latest?.items?.[sku]?.name||sku).slice(0,16) }));
 
+      // 품목별 평일/주말 평균 (상위 8개 품목 기준)
+      const topSkus = Object.entries(skuSold).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([sku])=>sku);
+      const skuDayTypeAvg = {};
+      topSkus.forEach(sku => {
+        const wdVals=[], weVals=[], hlVals=[];
+        sorted.slice(-14).forEach(h => {
+          if (!h.items?.[sku]) return;
+          if (autoSkipSet && autoSkipSet.has(`${h.date}__${sku}`)) return;
+          const s = h.items[sku].sold||0;
+          if (s === 0) return;
+          const t = getDayType(h.date, h.dow);
+          if (t==="weekday") wdVals.push(s);
+          else if (t==="weekend") weVals.push(s);
+          else hlVals.push(s);
+        });
+        const avg = arr => arr.length ? rnd(arr.reduce((a,b)=>a+b,0)/arr.length, 1) : null;
+        skuDayTypeAvg[sku] = {
+          name: (skuAliases[sku]||latest?.items?.[sku]?.name||sku),
+          weekday: avg(wdVals),
+          weekend: avg(weVals),
+          holiday: avg(hlVals),
+          weekdayCnt: wdVals.length,
+          weekendCnt: weVals.length,
+        };
+      });
+
       // TOP 소진 품목 (재고=0 빈도)
       const skuZero = {};
       sorted.slice(-14).forEach(h => {
@@ -1974,7 +2049,7 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
       stats[cat] = {
         days, last7, thisTotal, prevTotal, diffPct, dayAvg, avgZero,
         totalSkus, zeroToday, expiringToday, stockoutRate,
-        topSold, topZero, dowAvg, typeAvg, foodSubs
+        topSold, topZero, dowAvg, typeAvg, foodSubs, skuDayTypeAvg
       };
     });
     return stats;
@@ -2069,19 +2144,51 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
             <div style={{ padding:"12px 16px" }}>
               {/* KPI 4개 */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginBottom:14 }}>
-                {[
-                  { label:"일 평균", value:s.dayAvg+"개", color:meta.color },
-                  { label:"소진율(오늘)", value:s.stockoutRate+"%", color:zeroColor },
-                  { label:"일평균 소진", value:s.avgZero+"개", color:s.avgZero>3?T.amber:T.t2 },
-                  { label:"유통임박(오늘)", value:s.expiringToday+"개", color:s.expiringToday>0?T.red:T.t2 },
-                ].map(k => (
+                {(() => {
+                  const wd = s.typeAvg?.weekday;
+                  const we = s.typeAvg?.weekend;
+                  const hl = s.typeAvg?.holiday;
+                  const weDiff = wd && we ? Math.round(((parseFloat(we)-parseFloat(wd))/parseFloat(wd))*100) : null;
+                  return [
+                    { label:"일 평균", value:s.dayAvg+"개", color:meta.color,
+                      sub: null },
+                    { label:"📅 평일 평균", value:wd ? wd+"개" : "-", color:T.t2,
+                      sub: null },
+                    { label:"🌅 주말 평균", value:we ? we+"개" : "-",
+                      color: weDiff !== null && weDiff >= 20 ? T.amber : T.t2,
+                      sub: weDiff !== null ? (weDiff>0?"▲":"▼")+Math.abs(weDiff)+"% vs 평일" : null },
+                    { label:"🎌 공휴일 평균", value:hl ? hl+"개" : "-", color:"#C04000",
+                      sub: s.expiringToday > 0 ? "유통임박 "+s.expiringToday+"개" : null },
+                  ];
+                })().map(k => (
                   <div key={k.label} style={{ background:T.card2, borderRadius:10,
-                    padding:"8px 8px", textAlign:"center" }}>
-                    <div style={{ fontSize:9, color:T.t3, fontFamily:F, marginBottom:3 }}>{k.label}</div>
+                    padding:"8px 6px", textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:T.t3, fontFamily:F, marginBottom:3, lineHeight:1.3 }}>{k.label}</div>
                     <div style={{ fontSize:15, fontWeight:800, color:k.color, fontFamily:F }}>{k.value}</div>
+                    {k.sub && <div style={{ fontSize:9, color:k.color, fontFamily:F, marginTop:2, opacity:0.8 }}>{k.sub}</div>}
                   </div>
                 ))}
               </div>
+
+              {/* 오늘 재고 상태 뱃지 */}
+              {(s.zeroToday > 0 || s.expiringToday > 0) && (
+                <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+                  {s.zeroToday > 0 && (
+                    <span style={{ fontSize:11, fontWeight:700, color:T.red,
+                      background:T.rDim, border:"1px solid "+T.rBdr,
+                      borderRadius:8, padding:"3px 10px", fontFamily:F }}>
+                      🚨 품절 {s.zeroToday}개 품목
+                    </span>
+                  )}
+                  {s.expiringToday > 0 && (
+                    <span style={{ fontSize:11, fontWeight:700, color:"#C04000",
+                      background:"rgba(192,64,0,0.08)", border:"1px solid rgba(192,64,0,0.2)",
+                      borderRadius:8, padding:"3px 10px", fontFamily:F }}>
+                      ⏰ 유통임박 {s.expiringToday}개 품목
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* 2컬럼: 미니차트 + 재고소진 게이지 */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:12, marginBottom:14, alignItems:"center" }}>
@@ -2256,6 +2363,63 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
                     })}
                 </div>
               </div>
+            </div>
+
+              {/* 품목별 평일/주말/공휴일 평균 테이블 */}
+              {s.skuDayTypeAvg && Object.keys(s.skuDayTypeAvg).length > 0 && (
+                <div style={{ marginTop:14 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:T.t3, fontFamily:F, marginBottom:8 }}>
+                    📊 품목별 평일 / 주말 / 공휴일 평균 판매량
+                  </div>
+                  <div style={{ overflowX:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, fontFamily:F }}>
+                      <thead>
+                        <tr style={{ background:T.brandDim }}>
+                          <th style={{ padding:"7px 8px", textAlign:"left", color:T.brand, fontWeight:700, minWidth:100 }}>품목</th>
+                          <th style={{ padding:"7px 8px", textAlign:"center", color:T.brand, fontWeight:700 }}>평일</th>
+                          <th style={{ padding:"7px 8px", textAlign:"center", color:T.amber, fontWeight:700 }}>주말</th>
+                          <th style={{ padding:"7px 8px", textAlign:"center", color:"#C04000", fontWeight:700 }}>공휴일 🎌</th>
+                          <th style={{ padding:"7px 8px", textAlign:"center", color:T.t3, fontWeight:700 }}>주말 증감</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.values(s.skuDayTypeAvg).map((row, i) => {
+                          const wdNum = parseFloat(row.weekday)||0;
+                          const weNum = parseFloat(row.weekend)||0;
+                          const hlNum = parseFloat(row.holiday)||0;
+                          const weDiff = wdNum > 0 && row.weekend !== null
+                            ? Math.round(((weNum - wdNum) / wdNum) * 100)
+                            : null;
+                          const weColor = weDiff === null ? T.t4 : weDiff >= 20 ? T.amber : weDiff <= -20 ? T.blue : T.t2;
+                          const weBadge = weDiff === null ? "-" : (weDiff > 0 ? "▲" : "▼") + Math.abs(weDiff) + "%";
+                          const shortName = row.name.length > 14 ? row.name.slice(0,13)+"…" : row.name;
+                          return (
+                            <tr key={row.name} style={{ background:i%2===0?T.card2:T.card }}>
+                              <td style={{ padding:"7px 8px", color:T.t1, fontWeight:500 }}>{shortName}</td>
+                              <td style={{ padding:"7px 8px", textAlign:"center", color:T.t2, fontWeight:600 }}>
+                                {row.weekday !== null ? row.weekday : <span style={{color:T.t4}}>-</span>}
+                              </td>
+                              <td style={{ padding:"7px 8px", textAlign:"center", color:T.amber, fontWeight:700 }}>
+                                {row.weekend !== null ? row.weekend : <span style={{color:T.t4}}>-</span>}
+                              </td>
+                              <td style={{ padding:"7px 8px", textAlign:"center", color:"#C04000", fontWeight:700 }}>
+                                {row.holiday !== null ? row.holiday : <span style={{color:T.t4}}>-</span>}
+                              </td>
+                              <td style={{ padding:"7px 8px", textAlign:"center", color:weColor, fontWeight:700 }}>
+                                {weBadge}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ fontSize:10, color:T.t4, fontFamily:F, marginTop:6 }}>
+                    * 최근 14일 기준, 판매량 0인 날 제외 · 상위 8개 품목
+                  </div>
+                </div>
+              )}
+
             </div>
           </div>
         );
