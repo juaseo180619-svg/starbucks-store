@@ -1107,6 +1107,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   const [catFilter, setCatFilter] = useState("전체");
   const [showBufEdit, setShowBufEdit] = useState(false);
   const [bufEdit, setBufEdit] = useState({});
+  const [bufCatFilter, setBufCatFilter] = useState("전체");
 
   if (!latestUpload) {
     return (
@@ -1243,7 +1244,25 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:10, lineHeight:1.6 }}>
             💡 추천 기준: 유통기한 D-2 이하 → 소량 / D-3~5 → 1일치 / D-6~10 → 1.5일치 / D+11 이상 → 2일치
           </div>
-          {items.slice(0,10).map(([sku, item]) => {
+          {/* 카테고리 필터 */}
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:12 }}>
+            {cats.map(c => (
+              <button key={c} onClick={()=>setBufCatFilter(c)} style={{
+                padding:"4px 10px", borderRadius:16,
+                border:"1px solid "+(bufCatFilter===c?T.brand:T.b1),
+                background:bufCatFilter===c?T.brandDim:T.card,
+                color:bufCatFilter===c?T.brand:T.t2,
+                fontSize:12, fontWeight:bufCatFilter===c?700:400,
+                cursor:"pointer", fontFamily:F
+              }}>{c}</button>
+            ))}
+          </div>
+          {/* 전체 품목 스크롤 컨테이너 */}
+          <div style={{ maxHeight:360, overflowY:"auto",
+            border:"1px solid "+T.b0, borderRadius:10, padding:"8px 10px" }}>
+          {items
+            .filter(([,item]) => bufCatFilter==="전체" || item.cat===bufCatFilter)
+            .map(([sku, item]) => {
             const key = sku;
             const cur = bufEdit[key]!==undefined ? bufEdit[key] : (buffers[key]??2);
             // 유통기한 기반 추천값 계산
@@ -1301,6 +1320,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
               </div>
             );
           })}
+          </div>{/* 스크롤 컨테이너 끝 */}
         </Card>
       )}
 
