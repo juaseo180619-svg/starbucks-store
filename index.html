@@ -907,7 +907,7 @@ function App() {
               { id:"order",    icon:"📦", label:"발주",   badge:0 },
               { id:"memo",     icon:"📝", label:"메모",   badge:0 },
             ].map(t=>(
-              <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
+              <button key={t.id} onClick={()=>{ if(t.id==="order"){ window.location.href="./order.html"; return; } setTab(t.id);setViewNotice(null);}} style={{
                 display:"flex", alignItems:"center", gap:10, width:"100%",
                 padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
                 fontFamily:F, fontSize:14, fontWeight:tab===t.id?600:400,
@@ -1062,7 +1062,7 @@ function App() {
             { id:"order",    icon:"📦", label:"발주" },
             { id:"memo",     icon:"📝", label:"메모" },
           ].map(t=>(
-            <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
+            <button key={t.id} onClick={()=>{ if(t.id==="order"){ window.location.href="./order.html"; return; } setTab(t.id);setViewNotice(null);}} style={{
               flex:1, display:"flex", flexDirection:"column", alignItems:"center",
               justifyContent:"flex-start", paddingTop:8, gap:2, border:"none", cursor:"pointer",
               background:"transparent", position:"relative",
@@ -1111,18 +1111,7 @@ function App() {
                   {now.toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
                 </div>
                 <div style={{ fontSize:18, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:16 }}>
-                  {(() => {
-                    const h = new Date().getHours();
-                    const name = profile.name;
-                    if (h >= 5  && h < 9)  return `좋은 아침이에요, ${name} ☀️`;
-                    if (h >= 9  && h < 11) return `오늘 하루도 힘내요, ${name}! 💪`;
-                    if (h >= 11 && h < 13) return `점심은 뭐 드셨어요, ${name}? 🍱`;
-                    if (h >= 13 && h < 15) return `오후도 잘 부탁해요, ${name} 😊`;
-                    if (h >= 15 && h < 18) return `커피 한 잔 하셨어요, ${name}? ☕`;
-                    if (h >= 18 && h < 21) return `저녁 시간이네요, ${name} 🌙`;
-                    if (h >= 21 && h < 24) return `오늘도 고생 많았어요, ${name} 🌟`;
-                    return `야근 중이에요? 힘내요, ${name} 💙`;
-                  })()}
+                  안녕하세요, {profile.name}! 👋
                 </div>
                 {/* 스탯 그리드 */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
@@ -1157,35 +1146,41 @@ function App() {
               </div>
             </div>
 
+            {/* 발주 앱 바로가기 - 작은 배너 */}
+            <div onClick={()=>window.location.href="./order.html"} style={{
+              display:"flex", alignItems:"center", gap:10, marginBottom:14,
+              padding:"10px 14px", borderRadius:12, cursor:"pointer",
+              background:T.glass1, border:"1px solid "+T.b0,
+              transition:"background .15s"
+            }}
+            onMouseEnter={e=>e.currentTarget.style.background=T.glass2}
+            onMouseLeave={e=>e.currentTarget.style.background=T.glass1}>
+              <span style={{ fontSize:18 }}>📦</span>
+              <div style={{ flex:1 }}>
+                <span style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F }}>발주·재고 관리</span>
+                <span style={{ fontSize:12, color:T.t3, fontFamily:F, marginLeft:6 }}>별도 앱으로 이동</span>
+              </div>
+              <span style={{ fontSize:14, color:T.t3 }}>›</span>
+            </div>
+
             {/* 오늘 할 일 */}
             {(todayEvents.length > 0 || (tasks||[]).filter(t=>!t.done).length > 0) && (
               <div style={{ marginBottom:18 }}>
                 <SH title="오늘 할 일" count={todayEvents.length+(tasks||[]).filter(t=>!t.done).length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-                  {todayEvents.map((e,i)=>{
-                    // noticeId가 있으면 공지 뷰어로 이동
-                    const linkedNotice = e.noticeId ? (notices||[]).find(n=>n.id===e.noticeId) : null;
-                    return (
-                    <div key={e.id}
-                      onClick={linkedNotice ? ()=>{ readNotice(linkedNotice.id); setViewNotice(linkedNotice); } : undefined}
-                      style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                        borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none",
-                        cursor:linkedNotice?"pointer":"default",
-                        transition:"background .12s" }}
-                      onMouseEnter={linkedNotice?e2=>e2.currentTarget.style.background=T.glass2:undefined}
-                      onMouseLeave={linkedNotice?e2=>e2.currentTarget.style.background="":undefined}>
+                  {todayEvents.map((e,i)=>(
+                    <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
+                      borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none" }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.title}</div>
-                      {linkedNotice && <span style={{ fontSize:11, color:T.l4, fontFamily:F, flexShrink:0 }}>공지 ›</span>}
                       <span style={{ fontSize:11, color:(CAT[e.category]||CAT["기타"]).color,
                         background:(CAT[e.category]||CAT["기타"]).dim, borderRadius:8, padding:"2px 8px",
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
-                    );
-                  })}
+                  ))}
                   {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
@@ -1342,9 +1337,7 @@ function App() {
             </div>
             <div style={{ ...glassBox({ overflow:"hidden",
               boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {((notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
-                // pinned 공지를 카테고리 내 최상단으로 정렬
-                .sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0)))
+              {(notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
                 .map((n,i,arr)=>(
                   <div key={n.id}>
                     <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
@@ -1505,15 +1498,9 @@ function App() {
 
         {/* -- ORDER CALCULATOR -- */}
         {tab==="order"&&(
-          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
-            <OrderTab
-              records={orderRecords||[]}
-              items={orderItems||DEFAULT_ORDER_ITEMS}
-              buffers={orderBuffers||{}}
-              onSaveRecords={saveOrderRecords}
-              onSaveItems={saveOrderItems}
-              onSaveBuffers={saveOrderBuffers}
-            />
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
+            justifyContent:"center", minHeight:"60vh", gap:12 }}>
+            {(()=>{ window.location.href="./order.html"; return null; })()}
           </div>
         )}
       </div>
@@ -1739,9 +1726,7 @@ function NRow({ n, onClick, onDelete }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:4 }}>
             <span style={{ fontSize:15, fontWeight:n._read?400:600, color:n._read?T.l2:T.l1,
-              fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-              {n.pinned && <span style={{ marginRight:4, fontSize:13 }}>📌</span>}{n.title}
-            </span>
+              fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</span>
             <span style={{ fontSize:12, color:T.l3, flexShrink:0, fontFamily:F }}>{n.date}</span>
           </div>
           <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
