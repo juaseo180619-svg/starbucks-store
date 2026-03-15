@@ -1111,7 +1111,18 @@ function App() {
                   {now.toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
                 </div>
                 <div style={{ fontSize:18, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:16 }}>
-                  안녕하세요, {profile.name}! 👋
+                  {(() => {
+                    const h = new Date().getHours();
+                    const name = profile.name;
+                    if (h >= 5  && h < 9)  return `좋은 아침이에요, ${name} ☀️`;
+                    if (h >= 9  && h < 11) return `오늘 하루도 힘내요, ${name}! 💪`;
+                    if (h >= 11 && h < 13) return `점심은 뭐 드셨어요, ${name}? 🍱`;
+                    if (h >= 13 && h < 15) return `오후도 잘 부탁해요, ${name} 😊`;
+                    if (h >= 15 && h < 18) return `커피 한 잔 하셨어요, ${name}? ☕`;
+                    if (h >= 18 && h < 21) return `저녁 시간이네요, ${name} 🌙`;
+                    if (h >= 21 && h < 24) return `오늘도 고생 많았어요, ${name} 🌟`;
+                    return `야근 중이에요? 힘내요, ${name} 💙`;
+                  })()}
                 </div>
                 {/* 스탯 그리드 */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
@@ -1152,18 +1163,29 @@ function App() {
                 <SH title="오늘 할 일" count={todayEvents.length+(tasks||[]).filter(t=>!t.done).length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-                  {todayEvents.map((e,i)=>(
-                    <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                      borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none" }}>
+                  {todayEvents.map((e,i)=>{
+                    // noticeId가 있으면 공지 뷰어로 이동
+                    const linkedNotice = e.noticeId ? (notices||[]).find(n=>n.id===e.noticeId) : null;
+                    return (
+                    <div key={e.id}
+                      onClick={linkedNotice ? ()=>{ readNotice(linkedNotice.id); setViewNotice(linkedNotice); } : undefined}
+                      style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
+                        borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none",
+                        cursor:linkedNotice?"pointer":"default",
+                        transition:"background .12s" }}
+                      onMouseEnter={linkedNotice?e2=>e2.currentTarget.style.background=T.glass2:undefined}
+                      onMouseLeave={linkedNotice?e2=>e2.currentTarget.style.background="":undefined}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.title}</div>
+                      {linkedNotice && <span style={{ fontSize:11, color:T.l4, fontFamily:F, flexShrink:0 }}>공지 ›</span>}
                       <span style={{ fontSize:11, color:(CAT[e.category]||CAT["기타"]).color,
                         background:(CAT[e.category]||CAT["기타"]).dim, borderRadius:8, padding:"2px 8px",
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                   {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
@@ -1320,7 +1342,9 @@ function App() {
             </div>
             <div style={{ ...glassBox({ overflow:"hidden",
               boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {(notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
+              {((notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
+                // pinned 공지를 카테고리 내 최상단으로 정렬
+                .sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0)))
                 .map((n,i,arr)=>(
                   <div key={n.id}>
                     <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
@@ -1715,7 +1739,9 @@ function NRow({ n, onClick, onDelete }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8, marginBottom:4 }}>
             <span style={{ fontSize:15, fontWeight:n._read?400:600, color:n._read?T.l2:T.l1,
-              fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</span>
+              fontFamily:F, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {n.pinned && <span style={{ marginRight:4, fontSize:13 }}>📌</span>}{n.title}
+            </span>
             <span style={{ fontSize:12, color:T.l3, flexShrink:0, fontFamily:F }}>{n.date}</span>
           </div>
           <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
@@ -3270,7 +3296,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
               </div>
               <div style={{ marginBottom:8 }}>
                 <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>날짜 <span style={{ color:T.l4 }}>(선택)</span></div>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                   <div>
                     <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>시작일</div>
                     <input type="date" value={noticeDate} onChange={e=>setNoticeDate(e.target.value)}
