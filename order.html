@@ -130,6 +130,45 @@ const DB = {
 
 /* ─── Utils ─────────────────────────────────────── */
 const todayStr = () => new Date().toISOString().slice(0,10);
+
+/* ─── 한국 공휴일 (반복 공휴일 + 2026년 이후 확장 가능) ─── */
+const KR_HOLIDAYS = new Set([
+  // 2025
+  "2025-01-01","2025-01-28","2025-01-29","2025-01-30",
+  "2025-03-01","2025-05-05","2025-05-06","2025-06-06",
+  "2025-08-15","2025-10-03","2025-10-05","2025-10-06","2025-10-07","2025-10-09",
+  "2025-12-25",
+  // 2026
+  "2026-01-01","2026-02-17","2026-02-18","2026-02-19",
+  "2026-03-01","2026-03-02","2026-05-05","2026-05-25","2026-06-06",
+  "2026-08-15","2026-08-17",
+  "2026-10-01","2026-10-02","2026-10-03","2026-10-09","2026-12-25",
+]);
+
+/* dayType: "holiday"(공휴일) | "weekend"(토일) | "weekday"(평일) */
+const getDayType = (dateStr, dow) => {
+  if (KR_HOLIDAYS.has(dateStr)) return "holiday";
+  if (dow === 0 || dow === 6) return "weekend";
+  return "weekday";
+};
+
+/* 푸드 서브카테고리 분류 (품목명 키워드 매핑) */
+const FOOD_SUB_KEYWORDS = {
+  "케이크":   ["케이크","롤케익","롤케이크","파운드","치즈케이크","치즈케익","타르트"],
+  "샌드위치": ["샌드위치","샌드","랩","버거","베이글","바게트","치아바타"],
+  "빵/페이스트리": ["파이","크루아상","스콘","머핀","빵","롤","번","크림빵","소시지빵","도넛","바나나","마들렌","휘낭시에","카스텔라","부쉐","크로플"],
+  "디저트":   ["마카롱","쿠키","브라우니","트뤼플","와플","아이스크림","요거트","푸딩"],
+  "간편식":   ["샐러드","수프","죽","라면","삼각","주먹밥"],
+};
+
+const getFoodSub = (name) => {
+  const lower = name.toLowerCase();
+  for (const [sub, keywords] of Object.entries(FOOD_SUB_KEYWORDS)) {
+    if (keywords.some(k => lower.includes(k))) return sub;
+  }
+  return "기타 푸드";
+};
+
 const DOW_KR = ["일","월","화","수","목","금","토"];
 const fmtDate = (s) => { if (!s) return ""; const d = new Date(s+"T00:00:00"); return d.toLocaleDateString("ko-KR",{month:"short",day:"numeric"}); };
 const getDow = (s) => new Date(s+"T00:00:00").getDay();
@@ -1300,6 +1339,8 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                   onBlur={() => {
                     if (bufEdit[key]!==undefined) {
                       onSaveBuffers({...buffers,[key]:parseFloat(bufEdit[key])||0});
+                      // 저장 후 bufEdit에서 제거 → buffers prop 새 값이 바로 반영됨
+                      setBufEdit(b=>{ const n={...b}; delete n[key]; return n; });
                     }
                   }}
                   style={{ width:58, padding:"6px 8px", borderRadius:8,
@@ -1309,8 +1350,9 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                     color:isSame?T.t1:T.brand, fontWeight:isSame?400:700 }}/>
                 {!isSame && (
                   <button onClick={()=>{
-                    setBufEdit(b=>({...b,[key]:suggested}));
                     onSaveBuffers({...buffers,[key]:suggested});
+                    // bufEdit에서 제거 → buffers prop 새 값 즉시 반영
+                    setBufEdit(b=>{ const n={...b}; delete n[key]; return n; });
                   }} style={{ padding:"4px 8px", borderRadius:6, border:"none",
                     background:T.brandDim, color:T.brand, fontSize:11,
                     fontWeight:700, cursor:"pointer", fontFamily:F, flexShrink:0 }}>
@@ -1897,10 +1939,42 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
         dowAvg[d] = vals.length ? rnd(vals.reduce((a,b)=>a+b,0)/vals.length, 1) : null;
       });
 
+      // 평일/주말/공휴일 평균
+      const typeMap = { weekday:[], weekend:[], holiday:[] };
+      days.forEach(d => {
+        if (d.sold > 0) {
+          const t = getDayType(d.date, d.dow);
+          typeMap[t].push(d.sold);
+        }
+      });
+      const typeAvg = {};
+      Object.entries(typeMap).forEach(([t,vals]) => {
+        typeAvg[t] = vals.length ? rnd(vals.reduce((a,b)=>a+b,0)/vals.length, 1) : null;
+      });
+
+      // 푸드 서브카테고리별 판매 (cat이 [20] Food일 때만)
+      let foodSubs = null;
+      if (cat === "[20] Food") {
+        const subMap = {};
+        sorted.slice(-14).forEach(h => {
+          Object.entries(h.items||{}).filter(([,i])=>i.cat===cat).forEach(([sku,i]) => {
+            if (autoSkipSet && autoSkipSet.has(`${h.date}__${sku}`)) return;
+            const sub = getFoodSub(i.name);
+            if (!subMap[sub]) subMap[sub] = { sold:0, zeroCount:0, skuSet:new Set() };
+            subMap[sub].sold += (i.sold||0);
+            subMap[sub].skuSet.add(sku);
+            if (i.actualSum === 0) subMap[sub].zeroCount++;
+          });
+        });
+        foodSubs = Object.entries(subMap)
+          .map(([sub,v]) => ({ sub, sold:rnd(v.sold,0), skus:v.skuSet.size, zeroCount:v.zeroCount }))
+          .sort((a,b) => b.sold - a.sold);
+      }
+
       stats[cat] = {
         days, last7, thisTotal, prevTotal, diffPct, dayAvg, avgZero,
         totalSkus, zeroToday, expiringToday, stockoutRate,
-        topSold, topZero, dowAvg
+        topSold, topZero, dowAvg, typeAvg, foodSubs
       };
     });
     return stats;
@@ -2057,6 +2131,68 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
                   })}
                 </div>
               </div>
+
+              {/* 평일 / 주말 / 공휴일 평균 */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+                {[
+                  { label:"평일 평균", key:"weekday", icon:"📅" },
+                  { label:"주말 평균", key:"weekend", icon:"🌅" },
+                  { label:"공휴일 평균", key:"holiday", icon:"🎌" },
+                ].map(({ label, key, icon }) => {
+                  const val = s.typeAvg[key];
+                  const weekend_val = s.typeAvg["weekend"];
+                  const weekday_val = s.typeAvg["weekday"];
+                  // 주말이 평일보다 높으면 강조
+                  const isHigh = key==="weekend" && weekend_val && weekday_val && parseFloat(weekend_val) > parseFloat(weekday_val)*1.2;
+                  const isHoliday = key==="holiday";
+                  const color = isHigh ? T.amber : isHoliday ? "#C04000" : meta.color;
+                  return (
+                    <div key={key} style={{ background:T.card2, borderRadius:10, padding:"8px 8px", textAlign:"center" }}>
+                      <div style={{ fontSize:14, marginBottom:2 }}>{icon}</div>
+                      <div style={{ fontSize:9, color:T.t3, fontFamily:F, marginBottom:2 }}>{label}</div>
+                      <div style={{ fontSize:16, fontWeight:800, color:val ? color : T.t4, fontFamily:F }}>
+                        {val !== null ? val+"개" : "-"}
+                      </div>
+                      {isHigh && <div style={{ fontSize:9, color:T.amber, fontFamily:F }}>▲ 평일 대비 높음</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 푸드 서브카테고리 (Food 전용) */}
+              {s.foodSubs && s.foodSubs.length > 0 && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:T.t3, fontFamily:F, marginBottom:8 }}>
+                    🥐 카테고리별 14일 판매 현황
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                    {s.foodSubs.map(sub => {
+                      const maxSold = s.foodSubs[0]?.sold || 1;
+                      return (
+                        <div key={sub.sub} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ fontSize:11, color:T.t1, fontFamily:F, width:90, flexShrink:0 }}>
+                            {sub.sub}
+                            <span style={{ fontSize:10, color:T.t4, marginLeft:4 }}>({sub.skus}종)</span>
+                          </div>
+                          <div style={{ flex:1, height:12, background:T.card3, borderRadius:4, overflow:"hidden" }}>
+                            <div style={{ width:(sub.sold/maxSold*100)+"%", height:"100%",
+                              background:meta.color, opacity:0.75, borderRadius:4 }}/>
+                          </div>
+                          <div style={{ fontSize:11, fontWeight:700, color:meta.color,
+                            fontFamily:F, width:32, textAlign:"right", flexShrink:0 }}>
+                            {sub.sold}
+                          </div>
+                          {sub.zeroCount > 0 && (
+                            <div style={{ fontSize:10, color:T.red, fontFamily:F, flexShrink:0 }}>
+                              소진{sub.zeroCount}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* TOP 판매 + TOP 소진 2컬럼 */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
