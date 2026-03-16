@@ -1225,7 +1225,6 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   // 발주 추천량 계산
   // 발주일 기준: 내일(+1) + 모레(+2=입고일) 사용량 커버
   function calcRecommend(sku, item) {
-    const current = item.actualSum;
     const tmrIn   = item.tmrIn;
     const d2In    = item.d2In;
     const dow1    = (todayDow + 1) % 7;
@@ -1234,8 +1233,29 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     const avg2    = parseFloat(getAvgSoldByDow(sku, dow2)) || parseFloat(getAvgSold(sku)) || 0;
     const totalUsage = avg1 + avg2;
     const buf     = parseFloat(buffers[sku] ?? buffers[item.name] ?? 2);
-    const rec     = Math.max(0, Math.ceil(totalUsage + buf - current - tmrIn - d2In));
-    return { rec, avg1, avg2, totalUsage, buf, current, tmrIn, d2In, dow1, dow2 };
+
+    // 유통기한 고려: 입고일(+2일) 이전에 만료되는 배치는 현재고에서 제외
+    // dday <= 1: 내일(발주일+1) 전에 폐기 → 해당 배치 재고 무효
+    // dday == 2: 입고 당일 폐기 → 해당 배치 재고 무효  
+    // dday >= 3: 입고 이후에도 유효 → 현재고로 인정
+    let effectiveStock = 0;
+    let expiringStock  = 0; // 무효 처리된 재고량
+    if (item.batches && item.batches.length > 0) {
+      item.batches.forEach(b => {
+        if (b.actual <= 0) return;
+        if (b.dday !== null && b.dday !== undefined && b.dday <= 1) {
+          expiringStock += b.actual; // 입고 전 폐기 → 무효
+        } else {
+          effectiveStock += b.actual;
+        }
+      });
+    } else {
+      effectiveStock = item.actualSum;
+    }
+
+    const rec = Math.max(0, Math.ceil(totalUsage + buf - effectiveStock - tmrIn - d2In));
+    return { rec, avg1, avg2, totalUsage, buf,
+             current: item.actualSum, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2 };
   }
 
   const cats = ["전체", ...new Set(Object.values(latestUpload.items).map(i=>i.cat))];
@@ -1385,11 +1405,17 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                 </div>
                 <input type="number" min="0" step="1" value={cur}
                   onChange={e => setBufEdit(b=>({...b,[key]:e.target.value}))}
-                  onBlur={() => {
-                    if (bufEdit[key]!==undefined) {
-                      onSaveBuffers({...buffers,[key]:parseFloat(bufEdit[key])||0});
-                      // 저장 후 bufEdit에서 제거 → buffers prop 새 값이 바로 반영됨
-                      setBufEdit(b=>{ const n={...b}; delete n[key]; return n; });
+                  onBlur={e => {
+                    // DOM 값 직접 읽기 → stale closure 완전 우회
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val) && val !== (buffers[key]??2)) {
+                      onSaveBuffers({...buffers,[key]:val});
+                    }
+                    setBufEdit(b=>{ const n={...b}; delete n[key]; return n; });
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.target.blur(); // Enter로도 저장
                     }
                   }}
                   style={{ width:58, padding:"6px 8px", borderRadius:8,
@@ -1437,7 +1463,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           ))}
         </div>
         {sortedItems.map(([sku, item], idx) => {
-          const { rec, avg1, avg2, totalUsage, buf, current, tmrIn, d2In, dow1, dow2 } = calcRecommend(sku, item);
+          const { rec, avg1, avg2, totalUsage, buf, current, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2 } = calcRecommend(sku, item);
           const dispName = skuAliases[sku] || item.name;
           const isNeed = rec > 0;
           return (
@@ -1452,8 +1478,15 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                 </div>
                 <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</div>
               </div>
-              <div style={{ textAlign:"center", fontSize:13, fontWeight:current===0?700:400,
-                color:current===0?T.red:T.t1, fontFamily:F }}>{current}</div>
+              <div style={{ textAlign:"center", fontFamily:F }}>
+                <div style={{ fontSize:13, fontWeight:current===0?700:400,
+                  color:current===0?T.red:T.t1 }}>{current}</div>
+                {expiringStock > 0 && (
+                  <div style={{ fontSize:9, color:T.red, lineHeight:1.2 }}>
+                    폐기예정 -{expiringStock}
+                  </div>
+                )}
+              </div>
               <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}
                 title={DOW_KR[dow1]+"요일 평균"}>{avg1||"-"}</div>
               <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}
@@ -1471,7 +1504,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
         })}
       </Card>
       <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:8 }}>
-        * 버퍼 기본값 2 · 예정입고(내일/모레) 차감 반영됨 · 과거 데이터 부족 시 "-" 표시
+        * 버퍼 기본값 2 · 예정입고(내일/모레) 차감 반영 · 폐기예정(D-1 이하) 재고 제외 · 과거 데이터 부족 시 "-" 표시
       </div>
     </div>
   );
