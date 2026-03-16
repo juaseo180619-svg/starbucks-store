@@ -16,6 +16,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
@@ -2440,550 +2441,615 @@ function CatOverview({ uploadHistory, skuAliases, autoSkipSet }) {
 
 
 function HistoryTab({ uploadHistory, manualRecords, manualItems, skuAliases }) {
-  const [viewMode, setViewMode] = useState("excel");
-  const [selSku, setSelSku]     = useState(null);
-  const [skuSearch, setSkuSearch] = useState("");
-  const [catFilter, setCatFilter] = useState("전체");
-
   const DOW_KR_L = ["일","월","화","수","목","금","토"];
+  const rnd = (v, d=1) => Math.round(v * Math.pow(10,d)) / Math.pow(10,d);
 
-  /* ── 숫자 반올림 헬퍼 ── */
-  const rnd = (v,d=1) => Math.round(v * Math.pow(10,d)) / Math.pow(10,d);
+  /* ── 기간 프리셋 ── */
+  const today = new Date(); today.setHours(0,0,0,0);
+  const fmt = (d) => d.toISOString().slice(0,10);
+  const sub = (d, n) => { const x=new Date(d); x.setDate(x.getDate()-n); return x; };
 
-  /* ── 자동 누락 감지 ──
-     조건: sold=0 이면서, 직전 날 재고 ≈ 당일 재고 (변동 없음)
-     → 파트너가 실사를 안 했거나 누락일 가능성 높음
-  */
-  const autoSkipSet = useMemo(() => {
+  const PRESETS = [
+    { label:"이번 주",  getRange: () => {
+        const mon = new Date(today); mon.setDate(today.getDate()-((today.getDay()+6)%7));
+        return [fmt(mon), fmt(today)];
+      }
+    },
+    { label:"저번 주",  getRange: () => {
+        const mon = new Date(today); mon.setDate(today.getDate()-((today.getDay()+6)%7)-7);
+        const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+        return [fmt(mon), fmt(sun)];
+      }
+    },
+    { label:"최근 14일", getRange: () => [fmt(sub(today,13)), fmt(today)] },
+    { label:"이번 달",   getRange: () => {
+        const s = new Date(today.getFullYear(), today.getMonth(), 1);
+        return [fmt(s), fmt(today)];
+      }
+    },
+    { label:"전체",     getRange: () => {
+        if (!uploadHistory.length) return [fmt(today), fmt(today)];
+        const sorted = [...uploadHistory].sort((a,b)=>a.date.localeCompare(b.date));
+        return [sorted[0].date, sorted[sorted.length-1].date];
+      }
+    },
+  ];
+
+  const [preset, setPreset]     = React.useState("최근 14일");
+  const [customFrom, setCustomFrom] = React.useState("");
+  const [customTo,   setCustomTo]   = React.useState("");
+  const [showCustom, setShowCustom] = React.useState(false);
+  const [catFilter, setCatFilter]   = React.useState("전체");
+  const [sortKey, setSortKey]       = React.useState("weekendDiff");
+  const [sortAsc, setSortAsc]       = React.useState(false);
+  const [viewMode, setViewMode]     = React.useState("insight"); // insight | manual
+  const exportRef = React.useRef(null);
+
+  /* ── 기간 범위 결정 ── */
+  const [rangeFrom, rangeTo] = React.useMemo(() => {
+    if (showCustom && customFrom && customTo) return [customFrom, customTo];
+    const p = PRESETS.find(p => p.label === preset);
+    return p ? p.getRange() : PRESETS[2].getRange();
+  }, [preset, showCustom, customFrom, customTo, uploadHistory]);
+
+  /* ── 기간 내 히스토리 필터 ── */
+  const periodHist = React.useMemo(() =>
+    uploadHistory.filter(h => h.date >= rangeFrom && h.date <= rangeTo)
+      .sort((a,b)=>a.date.localeCompare(b.date)),
+    [uploadHistory, rangeFrom, rangeTo]
+  );
+
+  /* ── 이전 기간 (비교용) ── */
+  const prevPeriodHist = React.useMemo(() => {
+    const days = periodHist.length || 7;
+    const prevTo   = fmt(sub(new Date(rangeFrom+"T00:00:00"), 1));
+    const prevFrom = fmt(sub(new Date(rangeFrom+"T00:00:00"), days));
+    return uploadHistory.filter(h => h.date >= prevFrom && h.date <= prevTo);
+  }, [uploadHistory, rangeFrom, periodHist.length]);
+
+  /* ── 자동 누락 감지 ── */
+  const autoSkipSet = React.useMemo(() => {
     const skipped = new Set();
-    if (uploadHistory.length < 2) return skipped;
-    const sorted = [...uploadHistory].sort((a,b) => a.date.localeCompare(b.date));
-    for (let i = 1; i < sorted.length; i++) {
-      const cur  = sorted[i];
-      const prev = sorted[i-1];
-      const skus = Object.keys(cur.items||{});
-      skus.forEach(sku => {
-        const ci = cur.items[sku];
-        const pi = prev.items?.[sku];
-        if (!ci || !pi) return;
-        // sold=0 이고 재고 변동이 없으면 (±0) 누락 의심
-        if (ci.sold === 0 && Math.abs(ci.actualSum - pi.actualSum) === 0 && pi.sold > 0) {
+    const sorted = [...uploadHistory].sort((a,b)=>a.date.localeCompare(b.date));
+    for (let i=1; i<sorted.length; i++) {
+      const cur=sorted[i], prev=sorted[i-1];
+      Object.keys(cur.items||{}).forEach(sku => {
+        const ci=cur.items[sku], pi=prev.items?.[sku];
+        if (!ci||!pi) return;
+        if (ci.sold===0 && Math.abs(ci.actualSum-pi.actualSum)===0 && pi.sold>0)
           skipped.add(`${cur.date}__${sku}`);
-        }
       });
     }
     return skipped;
   }, [uploadHistory]);
 
-  /* ── 전체 SKU 목록 + 카테고리 ── */
-  const allSkus = useMemo(() => {
-    const skus = {};
-    uploadHistory.forEach(h => {
-      Object.entries(h.items||{}).forEach(([sku, item]) => {
-        if (!skus[sku]) skus[sku] = { name: item.name, cat: item.cat };
-      });
-    });
-    return skus;
+  /* ── 전체 SKU 목록 ── */
+  const allCats = React.useMemo(() => {
+    const cats = new Set();
+    uploadHistory.forEach(h => Object.values(h.items||{}).forEach(i=>cats.add(i.cat)));
+    return [...cats].sort();
   }, [uploadHistory]);
 
-  const cats = useMemo(() => {
-    const c = new Set(["전체"]);
-    Object.values(allSkus).forEach(v => c.add(v.cat));
-    return [...c];
-  }, [allSkus]);
-
-  const filteredSkus = useMemo(() => {
-    return Object.entries(allSkus).filter(([sku, info]) => {
-      const disp = skuAliases[sku] || info.name;
-      const matchCat  = catFilter === "전체" || info.cat === catFilter;
-      const matchSearch = !skuSearch || disp.toLowerCase().includes(skuSearch.toLowerCase());
-      return matchCat && matchSearch;
-    });
-  }, [allSkus, catFilter, skuSearch, skuAliases]);
-
-  /* ── 선택 SKU 트렌드 (자동누락 제외) ── */
-  const skuTrend = useMemo(() => {
-    if (!selSku) return [];
-    return uploadHistory
-      .filter(h => h.items?.[selSku])
-      .map(h => {
-        const autoSkip = autoSkipSet.has(`${h.date}__${selSku}`);
-        return { date:h.date, dow:h.dow, sold: autoSkip ? null : (h.items[selSku].sold||0), stock:h.items[selSku].actualSum||0, autoSkip };
-      })
-      .sort((a,b) => a.date.localeCompare(b.date));
-  }, [selSku, uploadHistory, autoSkipSet]);
-
-  /* ── 요일별 평균 (자동누락 제외) ── */
-  const dowAvgs = useMemo(() => {
-    if (!selSku) return {};
-    const byDow = {};
-    uploadHistory.forEach(h => {
-      if (!h.items?.[selSku]) return;
-      if (autoSkipSet.has(`${h.date}__${selSku}`)) return;
-      const d = h.dow;
-      if (!byDow[d]) byDow[d] = [];
-      if ((h.items[selSku].sold||0) > 0) byDow[d].push(h.items[selSku].sold);
-    });
-    const avgs = {};
-    Object.entries(byDow).forEach(([d, vals]) => {
-      avgs[d] = vals.length ? rnd(vals.reduce((a,b)=>a+b,0)/vals.length) : null;
-    });
-    return avgs;
-  }, [selSku, uploadHistory, autoSkipSet]);
-
-  /* ── 일별 총 판매량 (누락 제외, 소수점 보정) ── */
-  const dailySales = useMemo(() => {
-    return [...uploadHistory]
-      .sort((a,b) => a.date.localeCompare(b.date))
-      .slice(-14)
-      .map(h => {
-        const total = Object.entries(h.items||{}).reduce((s,[sku,item]) => {
-          if (autoSkipSet.has(`${h.date}__${sku}`)) return s;
-          return s + (item.sold||0);
-        }, 0);
-        return { date: h.date, dow: h.dow, total: rnd(total,0) };
-      });
-  }, [uploadHistory, autoSkipSet]);
-
-  /* ── 주간 KPI ── */
-  const weekKpi = useMemo(() => {
-    if (dailySales.length === 0) return null;
-    const thisWeek = dailySales.slice(-7);
-    const lastWeek = dailySales.slice(-14, -7);
-    const thisTotal = thisWeek.reduce((s,d)=>s+d.total,0);
-    const lastTotal = lastWeek.reduce((s,d)=>s+d.total,0);
-    const thisDayAvg = thisWeek.length ? rnd(thisTotal/thisWeek.length,0) : 0;
-    const diff = lastTotal > 0 ? rnd(((thisTotal-lastTotal)/lastTotal)*100,1) : null;
-
-    // 재고소진 일수 (자동누락 제외)
-    const zeroCount = uploadHistory.slice(-7).reduce((s,h) => {
-      return s + Object.entries(h.items||{}).filter(([sku,i]) =>
-        i.actualSum === 0 && !autoSkipSet.has(`${h.date}__${sku}`)
-      ).length;
-    }, 0);
-
-    return { thisTotal, diff, thisDayAvg, zeroCount };
-  }, [dailySales, uploadHistory, autoSkipSet]);
-
-  /* ── TOP 소진 품목 (actualSum=0 빈도) ── */
-  const topStockout = useMemo(() => {
-    const cnt = {};
-    uploadHistory.forEach(h => {
-      Object.entries(h.items||{}).forEach(([sku,item]) => {
-        if (item.actualSum === 0 && !autoSkipSet.has(`${h.date}__${sku}`)) {
-          cnt[sku] = (cnt[sku]||0) + 1;
+  /* ── 품목별 통계 계산 (기간 적용) ── */
+  const skuStats = React.useMemo(() => {
+    const map = {};
+    periodHist.forEach(h => {
+      Object.entries(h.items||{}).forEach(([sku, item]) => {
+        if (autoSkipSet.has(`${h.date}__${sku}`)) return;
+        if (!map[sku]) map[sku] = {
+          name: skuAliases[sku]||item.name, cat: item.cat,
+          foodSub: item.cat==="[20] Food" ? getFoodSub(item.name) : null,
+          wd:[], we:[], hl:[], zeroCount:0, days:0,
+          soldDays:[], spark:[]
+        };
+        const s = map[sku];
+        const t = getDayType(h.date, h.dow);
+        const sold = item.sold||0;
+        s.days++;
+        s.spark.push({ date:h.date, sold, dow:h.dow });
+        if (item.actualSum===0) s.zeroCount++;
+        if (sold>0) {
+          if (t==="weekday") s.wd.push(sold);
+          else if (t==="weekend") s.we.push(sold);
+          else s.hl.push(sold);
         }
       });
     });
-    return Object.entries(cnt)
-      .sort((a,b) => b[1]-a[1])
-      .slice(0,8)
-      .map(([sku,count]) => ({ sku, count, name: skuAliases[sku]||allSkus[sku]?.name||sku }));
-  }, [uploadHistory, autoSkipSet, allSkus, skuAliases]);
+    const avg = arr => arr.length ? rnd(arr.reduce((a,b)=>a+b,0)/arr.length,1) : null;
+    return Object.entries(map).map(([sku, s]) => {
+      const wdAvg=avg(s.wd), weAvg=avg(s.we), hlAvg=avg(s.hl);
+      const weDiff = wdAvg&&weAvg ? Math.round(((weAvg-wdAvg)/wdAvg)*100) : null;
+      const zeroRate = s.days>0 ? rnd(s.zeroCount/s.days*100,0) : 0;
+      // 재고 회전 지수: 총 판매량 / 평균 재고
+      const totalSold = s.wd.concat(s.we,s.hl).reduce((a,b)=>a+b,0);
+      return { sku, ...s, wdAvg, weAvg, hlAvg, weDiff, zeroRate, totalSold };
+    });
+  }, [periodHist, autoSkipSet, skuAliases]);
 
-  /* ── 자동 누락 건수 ── */
-  const autoSkipCount = autoSkipSet.size;
+  /* ── 기간 KPI ── */
+  const kpi = React.useMemo(() => {
+    if (!periodHist.length) return null;
+    const totalSold = rnd(periodHist.reduce((s,h) =>
+      s + Object.entries(h.items||{}).reduce((ss,[sku,i]) =>
+        autoSkipSet.has(`${h.date}__${sku}`) ? ss : ss+(i.sold||0), 0), 0), 0);
+    const prevSold = rnd(prevPeriodHist.reduce((s,h) =>
+      s + Object.values(h.items||{}).reduce((ss,i)=>ss+(i.sold||0),0), 0), 0);
+    const diff = prevSold>0 ? rnd((totalSold-prevSold)/prevSold*100,1) : null;
+    const dayAvg = rnd(totalSold/(periodHist.length||1),0);
+    // 오늘 기준 Action Items
+    const latest = [...uploadHistory].sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const latestItems = latest ? Object.values(latest.items||{}) : [];
+    const zeroCount = latestItems.filter(i=>i.actualSum===0).length;
+    const expiringCount = latestItems.filter(i=>(i.batches||[]).some(b=>b.dday!==null&&b.dday<=3&&b.actual>0)).length;
+    const zeroSkus = periodHist.reduce((cnt, h) =>
+      cnt + Object.entries(h.items||{}).filter(([sku,i])=>
+        i.actualSum===0&&!autoSkipSet.has(`${h.date}__${sku}`)
+      ).length, 0);
+    return { totalSold, prevSold, diff, dayAvg, zeroCount, expiringCount, zeroSkus };
+  }, [periodHist, prevPeriodHist, autoSkipSet, uploadHistory]);
 
-  /* ── 라인차트 SVG ── */
-  const LineChart = ({ data }) => {
-    if (!data.length) return null;
-    const W=480, H=90, PL=36, PR=12, PT=8, PB=24;
-    const maxV = Math.max(...data.map(d=>d.total), 1);
-    const xs = data.map((_,i) => PL + i*(W-PL-PR)/(data.length-1||1));
-    const ys = data.map(d => PT + (H-PT-PB)*(1-d.total/maxV));
+  /* ── 일별 총 판매 (라인차트용) ── */
+  const dailySales = React.useMemo(() =>
+    periodHist.map(h => ({
+      date:h.date, dow:h.dow,
+      sold: rnd(Object.entries(h.items||{}).reduce((s,[sku,i])=>
+        autoSkipSet.has(`${h.date}__${sku}`) ? s : s+(i.sold||0), 0), 0)
+    })),
+    [periodHist, autoSkipSet]
+  );
+
+  /* ── 필터/정렬 적용 ── */
+  const tableData = React.useMemo(() => {
+    let rows = skuStats.filter(s => catFilter==="전체"||s.cat===catFilter);
+    rows.sort((a,b) => {
+      let va = a[sortKey] ?? -999, vb = b[sortKey] ?? -999;
+      return sortAsc ? va-vb : vb-va;
+    });
+    return rows;
+  }, [skuStats, catFilter, sortKey, sortAsc]);
+
+  /* ── 스파크라인 SVG ── */
+  const Spark = ({ data }) => {
+    const W=60, H=20;
+    if (!data||data.length<2) return <svg width={W} height={H}><text x="4" y="14" fontSize="8" fill="#CCC">-</text></svg>;
+    const maxV = Math.max(...data.map(d=>d.sold),1);
+    const xs = data.map((_,i)=>4+i*(W-8)/(data.length-1));
+    const ys = data.map(d=>H-4-(d.sold/maxV)*(H-8));
     const path = xs.map((x,i)=>(i===0?`M${x},${ys[i]}`:`L${x},${ys[i]}`)).join(" ");
-    const area = `${path} L${xs[xs.length-1]},${H-PB} L${xs[0]},${H-PB} Z`;
+    return (
+      <svg width={W} height={H} style={{ display:"block" }}>
+        <path d={path} fill="none" stroke={T.brand} strokeWidth="1.5"
+          strokeLinecap="round" strokeLinejoin="round"/>
+        {data.map((d,i)=>(
+          <circle key={i} cx={xs[i]} cy={ys[i]} r="1.8" fill={T.brand}/>
+        ))}
+      </svg>
+    );
+  };
+
+  /* ── 전체 라인차트 SVG ── */
+  const LineChart = ({ data }) => {
+    if (!data||data.length<2) return null;
+    const W=500, H=100, PL=40, PR=12, PT=10, PB=24;
+    const maxV = Math.max(...data.map(d=>d.sold),1);
+    const xtick = (i) => PL+i*(W-PL-PR)/(data.length-1);
+    const ytick = (v) => PT+(H-PT-PB)*(1-v/maxV);
+    const xs=data.map((_,i)=>xtick(i));
+    const ys=data.map(d=>ytick(d.sold));
+    const path=xs.map((x,i)=>(i===0?`M${x},${ys[i]}`:`L${x},${ys[i]}`)).join(" ");
+    const area=`${path} L${xs[xs.length-1]},${H-PB} L${PL},${H-PB} Z`;
+    const yLines = [0.25,0.5,0.75,1];
     return (
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:H, display:"block" }}>
         <defs>
-          <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#00704A" stopOpacity="0.25"/>
-            <stop offset="100%" stopColor="#00704A" stopOpacity="0.02"/>
+          <linearGradient id="lgrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={T.brand} stopOpacity="0.22"/>
+            <stop offset="100%" stopColor={T.brand} stopOpacity="0.02"/>
           </linearGradient>
         </defs>
-        {/* 가로선 */}
-        {[0.25,0.5,0.75,1].map(r => (
-          <line key={r} x1={PL} y1={PT+(H-PT-PB)*(1-r)} x2={W-PR} y2={PT+(H-PT-PB)*(1-r)}
+        {yLines.map(r=>(
+          <line key={r} x1={PL} y1={ytick(maxV*r)} x2={W-PR} y2={ytick(maxV*r)}
             stroke="#E5E5EA" strokeWidth="0.8"/>
         ))}
-        {/* Y축 레이블 */}
-        <text x={PL-4} y={PT+4} fontSize="8" fill="#8E8E93" textAnchor="end">{rnd(maxV,0)}</text>
-        <text x={PL-4} y={H-PB} fontSize="8" fill="#8E8E93" textAnchor="end">0</text>
-        {/* 면적 */}
-        <path d={area} fill="url(#sg)"/>
-        {/* 선 */}
-        <path d={path} fill="none" stroke="#00704A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        {/* 점 + X축 날짜 */}
-        {data.map((d,i) => (
+        <text x={PL-4} y={PT+4} fontSize="9" fill="#8E8E93" textAnchor="end">{maxV}</text>
+        <text x={PL-4} y={H-PB} fontSize="9" fill="#8E8E93" textAnchor="end">0</text>
+        <path d={area} fill="url(#lgrad)"/>
+        <path d={path} fill="none" stroke={T.brand} strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round"/>
+        {data.map((d,i)=>(
           <g key={d.date}>
-            <circle cx={xs[i]} cy={ys[i]} r="3" fill="#00704A"/>
-            {(i===0 || i===data.length-1 || data.length<=7 || i%2===0) && (
-              <text x={xs[i]} y={H-2} fontSize="8" fill="#8E8E93" textAnchor="middle">
-                {DOW_KR_L[d.dow]}
-              </text>
-            )}
+            <circle cx={xs[i]} cy={ys[i]} r="3" fill={T.brand}/>
+            <text x={xs[i]} y={H-2} fontSize="8.5" fill={d.dow===0?T.red:d.dow===6?T.blue:"#8E8E93"}
+              textAnchor="middle">{DOW_KR_L[d.dow]}</text>
           </g>
         ))}
       </svg>
     );
   };
 
-  return (
-    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
-      <SH title="📈 통계 & 히스토리"/>
+  /* ── 정렬 헤더 ── */
+  const SortTh = ({ k, label, color, minW=60 }) => {
+    const active = sortKey===k;
+    return (
+      <th onClick={()=>{ if(active) setSortAsc(a=>!a); else { setSortKey(k); setSortAsc(false); } }}
+        style={{ padding:"8px 8px", textAlign:"center", color:active?color:T.t3,
+          fontWeight:700, cursor:"pointer", minWidth:minW, whiteSpace:"nowrap",
+          background:active?color+"11":"transparent",
+          userSelect:"none" }}>
+        {label}{active ? (sortAsc?"↑":"↓") : ""}
+      </th>
+    );
+  };
 
-      {/* 모드 탭 */}
-      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
-        {[["cat","🗂 카테고리 개요"],["excel","📊 품목 분석"],["manual","📝 수동 입력"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setViewMode(id)} style={{
+  /* ── Excel 내보내기 ── */
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    // 시트 1: 기간 요약
+    const sumRows = [
+      ["기간", rangeFrom+" ~ "+rangeTo],
+      ["카테고리", catFilter],
+      ["총 판매량", kpi?.totalSold||0],
+      ["일 평균 판매", kpi?.dayAvg||0],
+      ["전기 대비", kpi?.diff !== null ? (kpi.diff>0?"+":"")+kpi.diff+"%" : "-"],
+      [],
+      ["품목명","카테고리","분류","평일 avg","주말 avg","공휴일 avg","주말 증감%","소진율%","7일 총 판매"],
+      ...tableData.map(s=>[
+        s.name, s.cat, s.foodSub||"",
+        s.wdAvg??"-", s.weAvg??"-", s.hlAvg??"-",
+        s.weDiff!==null?s.weDiff+"%":"-",
+        s.zeroRate+"%",
+        s.totalSold
+      ])
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), "통계 요약");
+    // 시트 2: 일별 판매
+    const dailyRows = [
+      ["날짜","요일","총 판매량"],
+      ...dailySales.map(d=>[d.date, DOW_KR_L[d.dow], d.sold])
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyRows), "일별 판매");
+    XLSX.writeFile(wb, `발주통계_${rangeFrom}_${rangeTo}.xlsx`);
+  };
+
+  /* ── 이미지 내보내기 ── */
+  const exportImage = async () => {
+    const el = exportRef.current;
+    if (!el || !window.html2canvas) { alert("html2canvas가 로드되지 않았어요"); return; }
+    try {
+      const canvas = await window.html2canvas(el, {
+        backgroundColor: "#F2F2F7", scale: 2,
+        useCORS: true, allowTaint: true,
+        scrollX: 0, scrollY: -window.scrollY
+      });
+      const link = document.createElement("a");
+      link.download = `발주통계_${rangeFrom}_${rangeTo}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch(e) {
+      alert("이미지 저장 중 오류가 발생했어요: "+e.message);
+    }
+  };
+
+  if (viewMode === "manual") {
+    return (
+      <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+        <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+          <button onClick={()=>setViewMode("insight")} style={{
             padding:"8px 16px", borderRadius:10, border:"none", cursor:"pointer",
-            fontFamily:F, fontSize:13, fontWeight:viewMode===id?700:500,
-            background:viewMode===id?T.brand:T.card2, color:viewMode===id?"#fff":T.t2 }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* ─── 실사 데이터 통계 ─── */}
-      {viewMode==="excel" && (
-        <div>
-          {uploadHistory.length === 0 ? (
-            <EmptyState emoji="📁" text="업로드된 실사 데이터가 없어요" sub="실사 탭에서 엑셀을 업로드해주세요"/>
-          ) : (
-            <div>
-              {/* ① 자동 누락 배너 */}
-              {autoSkipCount > 0 && (
-                <div style={{ background:"rgba(255,149,0,0.08)", border:"1px solid rgba(255,149,0,0.25)",
-                  borderRadius:12, padding:"10px 14px", marginBottom:14,
-                  display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ fontSize:18 }}>🔍</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.amber, fontFamily:F }}>
-                      자동 누락 감지 {autoSkipCount}건
-                    </div>
-                    <div style={{ fontSize:12, color:T.t2, fontFamily:F }}>
-                      재고 변동 없이 판매 0인 항목은 통계에서 제외했어요
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ② 주간 KPI 카드 */}
-              {weekKpi && (
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
-                  {[
-                    { label:"최근 7일 총 판매", value: weekKpi.thisTotal+"개",
-                      sub: weekKpi.diff !== null ? (weekKpi.diff >= 0 ? "▲" : "▼")+" 전주 대비 "+Math.abs(weekKpi.diff)+"%" : "전주 없음",
-                      color: weekKpi.diff === null ? T.brand : weekKpi.diff >= 0 ? T.brand : T.red, dim: T.brandDim },
-                    { label:"일 평균 판매", value: weekKpi.thisDayAvg+"개",
-                      sub: "최근 7일 기준", color: T.amber, dim: T.aDim },
-                    { label:"재고소진 횟수", value: weekKpi.zeroCount+"회",
-                      sub: "최근 7일 누적", color: T.red, dim: T.rDim },
-                  ].map(c => (
-                    <div key={c.label} style={{ background:c.dim, border:"1px solid "+c.color+"33",
-                      borderRadius:12, padding:"12px 12px" }}>
-                      <div style={{ fontSize:10, fontWeight:700, color:c.color, fontFamily:F }}>{c.label}</div>
-                      <div style={{ fontSize:18, fontWeight:900, color:c.color, fontFamily:F, margin:"4px 0 2px" }}>{c.value}</div>
-                      <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{c.sub}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* ③ 전체 판매 추이 라인차트 */}
-              {dailySales.length >= 2 && (
-                <Card style={{ padding:"14px 14px 10px", marginBottom:16 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F }}>
-                      일별 총 판매 추이 <span style={{ fontSize:11, color:T.t3, fontWeight:400 }}>(최근 {dailySales.length}일)</span>
-                    </div>
-                  </div>
-                  <LineChart data={dailySales}/>
-                  {/* 요일별 합계 작게 */}
-                  <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:8 }}>
-                    {["일","월","화","수","목","금","토"].map((d,dow) => {
-                      const days = dailySales.filter(x=>x.dow===dow);
-                      if (!days.length) return null;
-                      const avg = rnd(days.reduce((s,x)=>s+x.total,0)/days.length,0);
-                      return (
-                        <div key={dow} style={{ fontSize:11, color:dow===0?T.red:dow===6?T.blue:T.t2,
-                          background:T.card2, borderRadius:6, padding:"2px 7px", fontFamily:F }}>
-                          {d} avg {avg}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Card>
-              )}
-
-              {/* ④ TOP 소진 품목 */}
-              {topStockout.length > 0 && (
-                <Card style={{ padding:"14px", marginBottom:16 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
-                    🚨 재고소진 빈도 TOP {topStockout.length}
-                    <span style={{ fontSize:11, color:T.t3, fontWeight:400, marginLeft:6 }}>버퍼 추가 검토 대상</span>
-                  </div>
-                  {topStockout.map((item, i) => {
-                    const ratio = item.count / uploadHistory.length;
-                    const barColor = ratio > 0.5 ? T.red : ratio > 0.25 ? T.amber : T.brand;
+            fontFamily:F, fontSize:13, fontWeight:500,
+            background:T.card2, color:T.t2 }}>← 인사이트로</button>
+        </div>
+        <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>수동 입력 요일별 평균</div>
+        {manualRecords.length === 0
+          ? <EmptyState emoji="📝" text="수동 입력 기록이 없어요" sub="수동 입력 탭에서 재고를 입력해주세요"/>
+          : manualItems.slice(0,5).map(item => {
+            const avgs = [0,1,2,3,4,5,6].map(dow => {
+              const vals = manualRecords.filter(r=>r.dow===dow&&!r.items?.[item]?.skipped&&r.items?.[item]?.used>0)
+                .map(r=>r.items[item].used);
+              return vals.length ? rnd(vals.reduce((a,b)=>a+b,0)/vals.length) : null;
+            });
+            const maxAvg = Math.max(...avgs.map(v=>parseFloat(v)||0));
+            return (
+              <Card key={item} style={{ padding:"12px 14px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>{item}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+                  {avgs.map((avg,dow) => {
+                    const ratio=maxAvg>0?(parseFloat(avg)||0)/maxAvg:0;
+                    const col=dow===0?T.red:dow===6?T.blue:T.brand;
                     return (
-                      <div key={item.sku} style={{ display:"flex", alignItems:"center", gap:10,
-                        marginBottom: i < topStockout.length-1 ? 8 : 0 }}>
-                        <div style={{ width:22, fontSize:12, fontWeight:700,
-                          color:T.t3, fontFamily:F, textAlign:"right", flexShrink:0 }}>
-                          {i+1}
+                      <div key={dow} style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:10, color:col, fontWeight:700, fontFamily:F, marginBottom:2 }}>{["일","월","화","수","목","금","토"][dow]}</div>
+                        <div style={{ height:36, background:T.card3, borderRadius:4, position:"relative", overflow:"hidden", marginBottom:2 }}>
+                          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:(ratio*100)+"%", background:col, opacity:0.8 }}/>
                         </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:12, fontWeight:600, color:T.t1, fontFamily:F,
-                            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                            {item.name.length > 18 ? item.name.slice(0,18)+"…" : item.name}
-                          </div>
-                          <div style={{ height:5, background:T.card3, borderRadius:3, marginTop:3, overflow:"hidden" }}>
-                            <div style={{ width:(ratio*100)+"%", height:"100%",
-                              background:barColor, borderRadius:3, transition:"width .3s" }}/>
-                          </div>
-                        </div>
-                        <div style={{ fontSize:12, fontWeight:700, color:barColor,
-                          fontFamily:F, flexShrink:0, minWidth:36, textAlign:"right" }}>
-                          {item.count}회
-                        </div>
+                        <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F }}>{avg||"-"}</div>
                       </div>
                     );
                   })}
-                </Card>
-              )}
-
-              {/* ⑤ SKU 개별 분석 */}
-              <Card style={{ padding:"14px", marginBottom:16 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
-                  🔍 품목별 판매 분석
-                </div>
-                {/* 검색 + 카테고리 필터 */}
-                <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
-                  <input value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}
-                    placeholder="품목명 검색..."
-                    style={{ flex:1, minWidth:140, padding:"7px 12px", borderRadius:8,
-                      border:"1px solid "+T.b1, fontFamily:F, fontSize:13,
-                      background:T.card, color:T.t1 }}/>
-                  <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                    {cats.map(c => (
-                      <button key={c} onClick={()=>setCatFilter(c)} style={{
-                        padding:"5px 10px", borderRadius:8, border:"1px solid "+(catFilter===c?T.brand:T.b1),
-                        background:catFilter===c?T.brandDim:T.card, color:catFilter===c?T.brand:T.t2,
-                        fontSize:12, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* SKU 칩 목록 */}
-                <div style={{ display:"flex", gap:5, flexWrap:"wrap", maxHeight:100, overflowY:"auto" }}>
-                  {filteredSkus.slice(0,50).map(([sku, info]) => {
-                    const disp = skuAliases[sku] || info.name;
-                    const isSelected = selSku === sku;
-                    return (
-                      <button key={sku} onClick={()=>setSelSku(isSelected ? null : sku)} style={{
-                        padding:"4px 10px", borderRadius:16,
-                        border:"1px solid "+(isSelected?T.brand:T.b1),
-                        background:isSelected?T.brandDim:T.card,
-                        color:isSelected?T.brand:T.t2,
-                        fontSize:12, fontWeight:isSelected?700:400,
-                        cursor:"pointer", fontFamily:F, whiteSpace:"nowrap" }}>
-                        {disp.length > 12 ? disp.slice(0,12)+"…" : disp}
-                      </button>
-                    );
-                  })}
-                  {filteredSkus.length === 0 && (
-                    <div style={{ fontSize:12, color:T.t3, fontFamily:F, padding:"8px 0" }}>검색 결과 없음</div>
-                  )}
                 </div>
               </Card>
+            );
+          })
+        }
+      </div>
+    );
+  }
 
-              {/* ⑥ 선택 SKU 상세 */}
-              {selSku && (
-                <div style={{ marginBottom:16 }}>
-                  <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
-                    {skuAliases[selSku]||allSkus[selSku]?.name} — 상세 분석
+  return (
+    <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
+
+      {/* ── 상단 컨트롤 바 ── */}
+      <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:16, alignItems:"center" }}>
+        {/* 기간 프리셋 */}
+        <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+          {PRESETS.map(p=>(
+            <button key={p.label} onClick={()=>{setPreset(p.label);setShowCustom(false);}} style={{
+              padding:"6px 12px", borderRadius:20, border:"1px solid "+(preset===p.label&&!showCustom?T.brand:T.b1),
+              background:preset===p.label&&!showCustom?T.brandDim:T.card,
+              color:preset===p.label&&!showCustom?T.brand:T.t2,
+              fontSize:12, fontWeight:preset===p.label&&!showCustom?700:400,
+              cursor:"pointer", fontFamily:F
+            }}>{p.label}</button>
+          ))}
+          <button onClick={()=>setShowCustom(v=>!v)} style={{
+            padding:"6px 12px", borderRadius:20,
+            border:"1px solid "+(showCustom?T.brand:T.b1),
+            background:showCustom?T.brandDim:T.card,
+            color:showCustom?T.brand:T.t2,
+            fontSize:12, fontWeight:showCustom?700:400, cursor:"pointer", fontFamily:F
+          }}>직접 설정</button>
+        </div>
+        {/* 카테고리 필터 */}
+        <div style={{ display:"flex", gap:4, marginLeft:"auto", flexWrap:"wrap" }}>
+          {["전체",...allCats].map(c=>(
+            <button key={c} onClick={()=>setCatFilter(c)} style={{
+              padding:"6px 10px", borderRadius:16,
+              border:"1px solid "+(catFilter===c?T.brand:T.b1),
+              background:catFilter===c?T.brandDim:T.card,
+              color:catFilter===c?T.brand:T.t2,
+              fontSize:11, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F
+            }}>{c.replace("[10] ","").replace("[20] ","").replace("[50] ","")}</button>
+          ))}
+        </div>
+        {/* 내보내기 버튼 */}
+        <div style={{ display:"flex", gap:6 }}>
+          <button onClick={exportExcel} style={{
+            padding:"6px 12px", borderRadius:8, border:"1px solid "+T.b1,
+            background:T.card, color:T.t2, fontSize:11, fontWeight:600,
+            cursor:"pointer", fontFamily:F, display:"flex", alignItems:"center", gap:4
+          }}>📊 Excel</button>
+          <button onClick={exportImage} style={{
+            padding:"6px 12px", borderRadius:8, border:"1px solid "+T.b1,
+            background:T.card, color:T.t2, fontSize:11, fontWeight:600,
+            cursor:"pointer", fontFamily:F, display:"flex", alignItems:"center", gap:4
+          }}>🖼 이미지</button>
+          <button onClick={()=>setViewMode("manual")} style={{
+            padding:"6px 12px", borderRadius:8, border:"1px solid "+T.b1,
+            background:T.card, color:T.t2, fontSize:11, fontWeight:500,
+            cursor:"pointer", fontFamily:F
+          }}>📝 수동</button>
+        </div>
+      </div>
+
+      {/* 직접 설정 날짜 피커 */}
+      {showCustom && (
+        <div style={{ display:"flex", gap:8, marginBottom:12, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:T.t3, fontFamily:F }}>기간 직접 설정</span>
+          <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+            style={{ padding:"6px 10px", borderRadius:8, border:"1px solid "+T.b1,
+              fontFamily:F, fontSize:12, background:T.card }}/>
+          <span style={{ color:T.t3 }}>~</span>
+          <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+            style={{ padding:"6px 10px", borderRadius:8, border:"1px solid "+T.b1,
+              fontFamily:F, fontSize:12, background:T.card }}/>
+        </div>
+      )}
+
+      {/* 내보내기 대상 영역 */}
+      <div ref={exportRef}>
+
+        {/* 기간 표시 */}
+        <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:14 }}>
+          📅 {rangeFrom} ~ {rangeTo}
+          {periodHist.length > 0
+            ? ` (${periodHist.length}일치 데이터)`
+            : " — 해당 기간에 업로드된 데이터가 없어요"}
+        </div>
+
+        {uploadHistory.length === 0 ? (
+          <EmptyState emoji="📁" text="업로드된 실사 데이터가 없어요" sub="실사 탭에서 엑셀을 업로드해주세요"/>
+        ) : periodHist.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"40px 0", color:T.t3, fontFamily:F, fontSize:14 }}>
+            해당 기간에 데이터가 없어요
+          </div>
+        ) : (
+          <div>
+            {/* ── Action Items ── */}
+            {kpi && (kpi.zeroCount > 0 || kpi.expiringCount > 0) && (
+              <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+                {kpi.zeroCount > 0 && (
+                  <div style={{ display:"flex", alignItems:"center", gap:8,
+                    background:T.rDim, border:"1px solid "+T.rBdr,
+                    borderRadius:12, padding:"10px 14px", flex:1, minWidth:140 }}>
+                    <span style={{ fontSize:20 }}>🚨</span>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:700, color:T.red, fontFamily:F }}>오늘 품절 {kpi.zeroCount}개 품목</div>
+                      <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>발주 우선 검토</div>
+                    </div>
                   </div>
+                )}
+                {kpi.expiringCount > 0 && (
+                  <div style={{ display:"flex", alignItems:"center", gap:8,
+                    background:"rgba(192,64,0,0.07)", border:"1px solid rgba(192,64,0,0.2)",
+                    borderRadius:12, padding:"10px 14px", flex:1, minWidth:140 }}>
+                    <span style={{ fontSize:20 }}>⏰</span>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#C04000", fontFamily:F }}>유통임박 {kpi.expiringCount}개 품목</div>
+                      <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>D-3 이하</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
-                  {/* 요일별 평균 막대 */}
-                  <Card style={{ padding:"14px", marginBottom:10 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:T.t3, fontFamily:F, marginBottom:10 }}>요일별 평균 판매량 (누락 제외)</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6 }}>
-                      {[0,1,2,3,4,5,6].map(dow => {
-                        const avg = dowAvgs[dow];
-                        const maxAvg = Math.max(...Object.values(dowAvgs).map(v=>parseFloat(v)||0));
-                        const ratio = maxAvg > 0 ? (parseFloat(avg)||0)/maxAvg : 0;
-                        const col = dow===0?T.red:dow===6?T.blue:T.brand;
-                        return (
-                          <div key={dow} style={{ textAlign:"center" }}>
-                            <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F, marginBottom:4 }}>
-                              {DOW_KR_L[dow]}
-                            </div>
-                            <div style={{ height:52, background:T.card3, borderRadius:6,
-                              position:"relative", overflow:"hidden", marginBottom:4 }}>
-                              <div style={{ position:"absolute", bottom:0, left:0, right:0,
-                                height:(ratio*100)+"%", background:col, opacity:0.8, borderRadius:6 }}/>
-                            </div>
-                            <div style={{ fontSize:12, fontWeight:700, color:col, fontFamily:F }}>{avg||"-"}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
+            {/* ── KPI 카드 ── */}
+            {kpi && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
+                {[
+                  { label:"기간 총 판매", value:kpi.totalSold+"개", color:T.brand,
+                    sub: kpi.diff!==null ? (kpi.diff>=0?"▲":"▼")+Math.abs(kpi.diff)+"% 전기비" : "" },
+                  { label:"일 평균 판매", value:kpi.dayAvg+"개", color:T.t2, sub:"" },
+                  { label:"재고소진 횟수", value:kpi.zeroSkus+"회", color:kpi.zeroSkus>10?T.amber:T.t2,
+                    sub:"기간 누적" },
+                  { label:"자동 누락 제외", value:autoSkipSet.size+"건",
+                    color:T.t3, sub:"통계 정확도 보정" },
+                ].map(c=>(
+                  <div key={c.label} style={{ background:T.card, border:"1px solid "+T.b0,
+                    borderRadius:12, padding:"12px 14px" }}>
+                    <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:4 }}>{c.label}</div>
+                    <div style={{ fontSize:20, fontWeight:900, color:c.color, fontFamily:F, lineHeight:1 }}>{c.value}</div>
+                    {c.sub && <div style={{ fontSize:10, color:c.color, fontFamily:F, marginTop:4, opacity:0.8 }}>{c.sub}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
 
-                  {/* 날짜별 기록 + 평균 대비 표시 */}
-                  <Card>
-                    <div style={{ padding:"10px 14px 6px", fontSize:12, fontWeight:700, color:T.t1, fontFamily:F }}>
-                      날짜별 기록
-                    </div>
-                    <div style={{ overflowX:"auto" }}>
-                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
-                        <thead>
-                          <tr style={{ background:T.brandDim }}>
-                            {["날짜","요일","재고","판매","vs 평균"].map(h=>(
-                              <th key={h} style={{ padding:"7px 8px", textAlign:"center",
-                                color:T.brand, fontWeight:700 }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...skuTrend].reverse().map((row,i) => {
-                            const avgForDow = parseFloat(dowAvgs[row.dow]) || null;
-                            let diff = null, diffIcon = null, diffColor = T.t3;
-                            if (!row.autoSkip && avgForDow && row.sold > 0) {
-                              diff = rnd(((row.sold - avgForDow) / avgForDow) * 100, 0);
-                              diffIcon = diff > 10 ? "🔼" : diff < -10 ? "🔽" : "–";
-                              diffColor = diff > 10 ? T.brand : diff < -10 ? T.red : T.t3;
-                            }
-                            return (
-                              <tr key={row.date} style={{ background: row.autoSkip ? "rgba(255,149,0,0.05)" : i%2===0?T.card2:T.card }}>
-                                <td style={{ padding:"7px 8px", color:T.t2, textAlign:"center" }}>{fmtDate(row.date)}</td>
-                                <td style={{ padding:"7px 6px", textAlign:"center",
-                                  color:row.dow===0?T.red:row.dow===6?T.blue:T.t2, fontWeight:600 }}>
-                                  {DOW_KR_L[row.dow]}
-                                </td>
-                                <td style={{ padding:"7px 6px", textAlign:"center",
-                                  color:row.stock===0?T.red:T.t1, fontWeight:row.stock===0?700:400 }}>{row.stock}</td>
-                                <td style={{ padding:"7px 6px", textAlign:"center" }}>
-                                  {row.autoSkip
-                                    ? <span style={{ fontSize:10, color:T.amber, fontWeight:600 }}>누락</span>
-                                    : <span style={{ color:T.amber, fontWeight:600 }}>{row.sold||"-"}</span>}
-                                </td>
-                                <td style={{ padding:"7px 6px", textAlign:"center", color:diffColor, fontWeight:600 }}>
-                                  {row.autoSkip ? "-" : diff !== null ? `${diffIcon} ${diff>0?"+":""}${diff}%` : "-"}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card>
+            {/* ── 일별 판매 추이 라인차트 ── */}
+            {dailySales.length >= 2 && (
+              <Card style={{ padding:"14px 16px", marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
+                  일별 총 판매 추이
                 </div>
-              )}
-
-              {/* ⑦ 업로드 히스토리 목록 */}
-              <div style={{ marginTop:4 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
-                  업로드 히스토리 ({uploadHistory.length}건)
-                </div>
-                <Card>
-                  {[...uploadHistory].reverse().map((h,i,arr) => {
-                    const totalSold = rnd(Object.entries(h.items||{}).reduce((s,[sku,item]) => {
-                      if (autoSkipSet.has(`${h.date}__${sku}`)) return s;
-                      return s + (item.sold||0);
-                    }, 0), 0);
+                <LineChart data={dailySales}/>
+                {/* 요일 평균 요약 */}
+                <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:10 }}>
+                  {[0,1,2,3,4,5,6].map(dow=>{
+                    const days=dailySales.filter(d=>d.dow===dow);
+                    if (!days.length) return null;
+                    const avg=rnd(days.reduce((s,d)=>s+d.sold,0)/days.length,0);
+                    const isWeekend=dow===0||dow===6;
                     return (
-                      <div key={h.date} style={{ padding:"12px 16px",
-                        display:"flex", alignItems:"center", gap:12,
-                        borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
-                        <div style={{ width:42, height:42, borderRadius:11, background:T.brandDim,
-                          display:"flex", flexDirection:"column", alignItems:"center",
-                          justifyContent:"center", flexShrink:0 }}>
-                          <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1 }}>
-                            {new Date(h.date+"T00:00:00").getDate()}
-                          </div>
-                          <div style={{ fontSize:9, color:T.brand, opacity:0.7 }}>
-                            {new Date(h.date+"T00:00:00").toLocaleDateString("ko-KR",{month:"short"})}
-                          </div>
-                        </div>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F }}>
-                            {fmtDate(h.date)} ({DOW_KR_L[h.dow]}요일)
-                          </div>
-                          <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
-                            {Object.keys(h.items||{}).length}개 SKU ·
-                            총 판매 {totalSold}개 ·
-                            재고없음 {Object.values(h.items||{}).filter(i=>i.actualSum===0).length}개
-                          </div>
-                        </div>
+                      <div key={dow} style={{ fontSize:11, background:isWeekend?T.aDim:T.card2,
+                        borderRadius:6, padding:"3px 9px", fontFamily:F,
+                        color:dow===0?T.red:dow===6?T.blue:T.t2, fontWeight:isWeekend?700:400 }}>
+                        {DOW_KR_L[dow]} avg {avg}
                       </div>
                     );
                   })}
-                </Card>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+                </div>
+              </Card>
+            )}
 
-      {/* ─── 카테고리 개요 ─── */}
-      {viewMode==="cat" && (
-        <div>
-          {uploadHistory.length === 0 ? (
-            <EmptyState emoji="📁" text="업로드된 실사 데이터가 없어요" sub="실사 탭에서 엑셀을 업로드해주세요"/>
-          ) : <CatOverview uploadHistory={uploadHistory} skuAliases={skuAliases} autoSkipSet={autoSkipSet}/>}
-        </div>
-      )}
-
-      {/* ─── 수동 입력 통계 ─── */}
-      {viewMode==="manual" && (
-        <div>
-          {manualRecords.length === 0 ? (
-            <EmptyState emoji="📝" text="수동 입력 기록이 없어요" sub="수동 입력 탭에서 재고를 입력해주세요"/>
-          ) : (
-            <div>
-              <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>
-                수동 입력 요일별 평균
+            {/* ── 스마트 통합 테이블 ── */}
+            <Card style={{ overflow:"hidden", marginBottom:8 }}>
+              <div style={{ padding:"12px 14px", borderBottom:"1px solid "+T.b0,
+                display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F }}>
+                  📋 전체 품목 인사이트
+                  <span style={{ fontSize:11, color:T.t3, fontWeight:400, marginLeft:8 }}>
+                    {tableData.length}개 품목
+                  </span>
+                </div>
+                <div style={{ fontSize:11, color:T.t4, fontFamily:F, marginLeft:"auto" }}>
+                  헤더 클릭 → 정렬
+                </div>
               </div>
-              {manualItems.slice(0,5).map(item => {
-                const avgs = [0,1,2,3,4,5,6].map(dow => {
-                  const vals = manualRecords.filter(r=>r.dow===dow&&!r.items?.[item]?.skipped&&r.items?.[item]?.used>0)
-                    .map(r=>r.items[item].used);
-                  return vals.length ? rnd(vals.reduce((a,b)=>a+b,0)/vals.length) : null;
-                });
-                const maxAvg = Math.max(...avgs.map(v=>parseFloat(v)||0));
-                const DOW_KR_LOCAL = ["일","월","화","수","목","금","토"];
-                return (
-                  <Card key={item} style={{ padding:"12px 14px", marginBottom:10 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:10 }}>{item}</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
-                      {avgs.map((avg,dow) => {
-                        const ratio = maxAvg > 0 ? (parseFloat(avg)||0)/maxAvg : 0;
-                        const col = dow===0?T.red:dow===6?T.blue:T.brand;
-                        return (
-                          <div key={dow} style={{ textAlign:"center" }}>
-                            <div style={{ fontSize:10, color:col, fontWeight:700, fontFamily:F, marginBottom:2 }}>
-                              {DOW_KR_LOCAL[dow]}
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
+                  <thead>
+                    <tr style={{ background:T.brandDim, position:"sticky", top:0, zIndex:1 }}>
+                      <th style={{ padding:"8px 10px", textAlign:"left", color:T.brand, fontWeight:700, minWidth:140 }}>품목명</th>
+                      {catFilter==="전체"&&<th style={{ padding:"8px 8px", textAlign:"center", color:T.t3, fontWeight:700, minWidth:60 }}>카테고리</th>}
+                      {catFilter==="[20] Food"&&<th style={{ padding:"8px 8px", textAlign:"center", color:T.t3, fontWeight:700, minWidth:75 }}>분류</th>}
+                      <SortTh k="wdAvg"       label="📅 평일avg"  color={T.brand}  minW={65}/>
+                      <SortTh k="weAvg"       label="🌅 주말avg"  color={T.amber}  minW={65}/>
+                      <SortTh k="hlAvg"       label="🎌 공휴일"   color="#C04000"  minW={60}/>
+                      <SortTh k="weDiff"      label="주말증감"    color={T.amber}  minW={65}/>
+                      <SortTh k="zeroRate"    label="소진율"      color={T.red}    minW={60}/>
+                      <SortTh k="totalSold"   label="기간 판매"   color={T.brand}  minW={65}/>
+                      <th style={{ padding:"8px 8px", textAlign:"center", color:T.t3, fontWeight:700, minWidth:70 }}>추이</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableData.map((s, i) => {
+                      const weColor = s.weDiff===null ? T.t4
+                        : s.weDiff >= 30 ? T.amber
+                        : s.weDiff <= -30 ? T.blue : T.t2;
+                      const zeroColor = s.zeroRate > 50 ? T.red : s.zeroRate > 25 ? T.amber : T.t3;
+                      const isHighWeekend = s.weDiff !== null && s.weDiff >= 30;
+                      return (
+                        <tr key={s.sku} style={{
+                          background:isHighWeekend
+                            ? "rgba(255,149,0,0.04)"
+                            : i%2===0 ? T.card2 : T.card,
+                          borderTop:"1px solid "+T.b0
+                        }}>
+                          <td style={{ padding:"7px 10px", color:T.t1, fontWeight:isHighWeekend?600:400, maxWidth:180 }}>
+                            <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {s.name}
                             </div>
-                            <div style={{ height:36, background:T.card3, borderRadius:4,
-                              position:"relative", overflow:"hidden", marginBottom:2 }}>
-                              <div style={{ position:"absolute", bottom:0, left:0, right:0,
-                                height:(ratio*100)+"%", background:col, opacity:0.8 }}/>
-                            </div>
-                            <div style={{ fontSize:11, fontWeight:700, color:col, fontFamily:F }}>{avg||"-"}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
-                );
-              })}
+                          </td>
+                          {catFilter==="전체"&&(
+                            <td style={{ padding:"7px 6px", textAlign:"center" }}>
+                              <span style={{ fontSize:10, color:T.t3, background:T.card3,
+                                borderRadius:4, padding:"1px 5px", whiteSpace:"nowrap" }}>
+                                {s.cat.replace("[10] ","").replace("[20] ","").replace("[50] ","")}
+                              </span>
+                            </td>
+                          )}
+                          {catFilter==="[20] Food"&&(
+                            <td style={{ padding:"7px 6px", textAlign:"center" }}>
+                              {s.foodSub && (
+                                <span style={{ fontSize:10, color:T.t2, background:T.card3,
+                                  borderRadius:4, padding:"1px 5px", whiteSpace:"nowrap" }}>
+                                  {s.foodSub}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:T.t2, fontWeight:600 }}>
+                            {s.wdAvg ?? <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:T.amber, fontWeight:700 }}>
+                            {s.weAvg ?? <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:"#C04000", fontWeight:700 }}>
+                            {s.hlAvg ?? <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:weColor, fontWeight:700 }}>
+                            {s.weDiff !== null
+                              ? (s.weDiff>0?"▲":"▼")+Math.abs(s.weDiff)+"%"+(isHighWeekend?" 🌅":"")
+                              : <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:zeroColor, fontWeight:600 }}>
+                            {s.zeroRate > 0 ? s.zeroRate+"%" : <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"7px 8px", textAlign:"center", color:T.brand, fontWeight:700 }}>
+                            {s.totalSold > 0 ? s.totalSold : <span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{ padding:"4px 8px", textAlign:"center" }}>
+                            <Spark data={s.spark.slice(-7)}/>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {tableData.length === 0 && (
+                      <tr>
+                        <td colSpan="10" style={{ padding:"30px", textAlign:"center", color:T.t3, fontFamily:F }}>
+                          해당 기간에 데이터가 없어요
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            <div style={{ fontSize:10, color:T.t4, fontFamily:F, textAlign:"center", paddingBottom:4 }}>
+              주말증감 🌅 = 평일 대비 +30% 이상 · 소진율 = 기간 내 재고=0 비율 · 추이 = 최근 7일 판매 스파크라인
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
