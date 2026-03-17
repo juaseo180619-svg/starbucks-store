@@ -907,7 +907,7 @@ function App() {
               { id:"order",    icon:"📦", label:"발주",   badge:0 },
               { id:"memo",     icon:"📝", label:"메모",   badge:0 },
             ].map(t=>(
-              <button key={t.id} onClick={()=>{ if(t.id==="order"){ window.location.href="./order.html"; return; } setTab(t.id);setViewNotice(null);}} style={{
+              <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
                 display:"flex", alignItems:"center", gap:10, width:"100%",
                 padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
                 fontFamily:F, fontSize:14, fontWeight:tab===t.id?600:400,
@@ -1062,7 +1062,7 @@ function App() {
             { id:"order",    icon:"📦", label:"발주" },
             { id:"memo",     icon:"📝", label:"메모" },
           ].map(t=>(
-            <button key={t.id} onClick={()=>{ if(t.id==="order"){ window.location.href="./order.html"; return; } setTab(t.id);setViewNotice(null);}} style={{
+            <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
               flex:1, display:"flex", flexDirection:"column", alignItems:"center",
               justifyContent:"flex-start", paddingTop:8, gap:2, border:"none", cursor:"pointer",
               background:"transparent", position:"relative",
@@ -1144,23 +1144,6 @@ function App() {
                     fontWeight:700, cursor:"pointer", fontFamily:F }}>✨ AI 채팅</button>
                 </div>
               </div>
-            </div>
-
-            {/* 발주 앱 바로가기 - 작은 배너 */}
-            <div onClick={()=>window.location.href="./order.html"} style={{
-              display:"flex", alignItems:"center", gap:10, marginBottom:14,
-              padding:"10px 14px", borderRadius:12, cursor:"pointer",
-              background:T.glass1, border:"1px solid "+T.b0,
-              transition:"background .15s"
-            }}
-            onMouseEnter={e=>e.currentTarget.style.background=T.glass2}
-            onMouseLeave={e=>e.currentTarget.style.background=T.glass1}>
-              <span style={{ fontSize:18 }}>📦</span>
-              <div style={{ flex:1 }}>
-                <span style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F }}>발주·재고 관리</span>
-                <span style={{ fontSize:12, color:T.t3, fontFamily:F, marginLeft:6 }}>별도 앱으로 이동</span>
-              </div>
-              <span style={{ fontSize:14, color:T.t3 }}>›</span>
             </div>
 
             {/* 오늘 할 일 */}
@@ -1270,7 +1253,9 @@ function App() {
                   <div style={{ ...glassBox({ overflow:"hidden" }) }}>
                     {(notices||[]).length===0
                       ? <EmptyState emoji="📢" text="공지가 없어요" action={()=>setAddNotice(true)} actionLabel="작성하기"/>
-                      : (notices||[]).slice(0,4).map((n,i,arr)=>(
+                      : (notices||[])
+                          .slice().sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0))
+                          .slice(0,4).map((n,i,arr)=>(
                           <div key={n.id}>
                             <NRow n={n} onClick={()=>{ readNotice(n.id); setViewNotice(n); }}/>
                             {i<arr.length-1 && <div style={{ height:1, background:T.b0, margin:"0 16px" }}/>}
@@ -1337,7 +1322,14 @@ function App() {
             </div>
             <div style={{ ...glassBox({ overflow:"hidden",
               boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {(notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
+              {(notices||[])
+                .filter(n=>noticeCat==="전체"||n.category===noticeCat)
+                .sort((a,b)=> {
+                  // 1순위: pinned 먼저
+                  if (b.pinned !== a.pinned) return (b.pinned?1:0)-(a.pinned?1:0);
+                  // 2순위: 최신 날짜 먼저
+                  return (b.date||"").localeCompare(a.date||"");
+                })
                 .map((n,i,arr)=>(
                   <div key={n.id}>
                     <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
@@ -1498,9 +1490,15 @@ function App() {
 
         {/* -- ORDER CALCULATOR -- */}
         {tab==="order"&&(
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
-            justifyContent:"center", minHeight:"60vh", gap:12 }}>
-            {(()=>{ window.location.href="./order.html"; return null; })()}
+          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
+            <OrderTab
+              records={orderRecords||[]}
+              items={orderItems||DEFAULT_ORDER_ITEMS}
+              buffers={orderBuffers||{}}
+              onSaveRecords={saveOrderRecords}
+              onSaveItems={saveOrderItems}
+              onSaveBuffers={saveOrderBuffers}
+            />
           </div>
         )}
       </div>
