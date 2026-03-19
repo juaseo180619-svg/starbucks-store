@@ -1152,18 +1152,27 @@ function App() {
                 <SH title="오늘 할 일" count={todayEvents.length+(tasks||[]).filter(t=>!t.done).length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-                  {todayEvents.map((e,i)=>(
-                    <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                      borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none" }}>
+                  {todayEvents.map((e,i)=>{
+                    const linked = e.noticeId ? (notices||[]).find(n=>n.id===e.noticeId) : null;
+                    return (
+                    <div key={e.id}
+                      onClick={linked ? ()=>{ readNotice(linked.id); setViewNotice(linked); } : undefined}
+                      style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
+                        borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none",
+                        cursor:linked?"pointer":"default", transition:"background .12s" }}
+                      onMouseEnter={linked?e2=>e2.currentTarget.style.background=T.glass2:undefined}
+                      onMouseLeave={linked?e2=>e2.currentTarget.style.background="":undefined}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.title}</div>
+                      {linked && <span style={{ fontSize:11, color:T.l4, fontFamily:F, flexShrink:0 }}>공지 ›</span>}
                       <span style={{ fontSize:11, color:(CAT[e.category]||CAT["기타"]).color,
                         background:(CAT[e.category]||CAT["기타"]).dim, borderRadius:8, padding:"2px 8px",
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                   {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
@@ -2809,6 +2818,7 @@ function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors 
 
 function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const cats = categories && categories.length ? categories : DEFAULT_CATS;
+  const [aiDrafting, setAiDrafting] = useState(false);
   const [title, setTitle]       = useState(initial ? initial.title : "");
   const [category, setCategory] = useState(initial ? initial.category : cats[0]);
   const [pinned, setPinned]     = useState(initial ? !!initial.pinned : false);
@@ -3125,6 +3135,39 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                 </div>
               </div>
               <div style={{ marginTop:"auto", paddingTop:12 }}>
+                {/* AI 편집 버튼 - PC */}
+                {title.trim() && (
+                  <button onClick={async()=>{
+                    const currentText = editorRef.current ? editorRef.current.innerText : "";
+                    if (!currentText.trim()) { alert("먼저 내용을 입력해주세요"); return; }
+                    setAiDrafting(true);
+                    try {
+                      const res = await fetch("https://api.anthropic.com/v1/messages", {
+                        method:"POST",
+                        headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+                        body:JSON.stringify({
+                          model:"claude-sonnet-4-20250514", max_tokens:800,
+                          messages:[{role:"user",content:(()=>{
+                          const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 공지 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
+                          return "아래 공지를 가독성 위주로 HTML 형식으로 편집해줘.\\n\\n★ 절대 규칙:\\n- 원본의 모든 텍스트 내용을 반드시 빠짐없이 유지 (단 한 글자도 삭제/생략/요약 금지)\\n- 내용 추가도 금지, 오직 서식만 변경 가능\\n\\n✅ 허용 서식 개선:\\n- 줄바꿈 정리, 항목별 <ul><li> 구조화\\n- 핵심 단어에 <b> 강조 추가\\n- 이모지로 항목 구분 (기존 이모지 유지)\\n\\n[공지 제목]\\n"+title+"\\n\\n[공지 내용 — 이 내용 전체를 반드시 유지할 것]\\n"+currentText+"\\n\\nHTML로만 반환 (마크다운 코드블록 없이)";
+                        })()}]
+                        })
+                      });
+                      const d = await res.json();
+                      const edited = (d.content||[]).map(b=>b.text||"").join("");
+                      if (edited && editorRef.current) {
+                        editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
+                      }
+                    } catch(e) { alert("AI API 키를 확인해주세요"); }
+                    setAiDrafting(false);
+                  }} style={{
+                    width:"100%", padding:"9px 14px", borderRadius:10, border:"1px solid "+T.brandBorder,
+                    background:T.brandDim, color:T.brand, cursor:"pointer", fontFamily:F,
+                    fontSize:12, fontWeight:600, display:"flex", alignItems:"center",
+                    justifyContent:"center", gap:6, marginBottom:8 }}>
+                    {aiDrafting ? <><Spin size={13} color={T.brand}/> AI 편집 중...</> : <>✨ AI로 내용 다듬기</>}
+                  </button>
+                )}
                 <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10,
                   padding:"10px 14px", background:T.glass1, border:"1px solid "+T.border0, borderRadius:12 }}>
                   <input type="checkbox" id="richpin-pc" checked={pinned}
@@ -3252,6 +3295,45 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                 </div>
               </div>
             </div>
+
+            
+            {/* AI 편집 */}
+            {title.trim() && (
+              <div style={{ flexShrink:0 }}>
+                <button onClick={async()=>{
+                  const currentHTML = editorRef.current ? editorRef.current.innerHTML : "";
+                  const currentText = editorRef.current ? editorRef.current.innerText : "";
+                  if (!currentText.trim()) { alert("먼저 내용을 입력해주세요"); return; }
+                  setAiDrafting(true);
+                  try {
+                    const res = await fetch("https://api.anthropic.com/v1/messages", {
+                      method:"POST",
+                      headers:{"Content-Type":"application/json","x-api-key":window.ANTHROPIC_API_KEY||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+                      body:JSON.stringify({
+                        model:"claude-sonnet-4-20250514", max_tokens:800,
+                        messages:[{role:"user",content:(()=>{
+                          const styleExamples=(notices||[]).filter(n=>n.content&&n.id!==(initial&&initial.id)).slice(0,3).map(n=>{const txt=n.content.replace(/<[^>]*>/g,"");return "[예시 - "+n.category+"]\n"+txt.slice(0,200);}).join("\n\n");
+                          return "아래 공지를 가독성 위주로 HTML 형식으로 편집해줘.\\n\\n★ 절대 규칙:\\n- 원본의 모든 텍스트 내용을 반드시 빠짐없이 유지 (단 한 글자도 삭제/생략/요약 금지)\\n- 내용 추가도 금지, 오직 서식만 변경 가능\\n\\n✅ 허용 서식 개선:\\n- 줄바꿈 정리, 항목별 <ul><li> 구조화\\n- 핵심 단어에 <b> 강조 추가\\n- 이모지로 항목 구분 (기존 이모지 유지)\\n\\n[공지 제목]\\n"+title+"\\n\\n[공지 내용 — 이 내용 전체를 반드시 유지할 것]\\n"+currentText+"\\n\\nHTML로만 반환 (마크다운 코드블록 없이)";
+                        })()}]
+                      })
+                    });
+                    const d = await res.json();
+                    const edited = (d.content||[]).map(b=>b.text||"").join("");
+                    if (edited && editorRef.current) {
+                      editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
+                    }
+                  } catch(e) { alert("AI API 키를 확인해주세요"); }
+                  setAiDrafting(false);
+                }} style={{
+                  width:"100%", padding:"10px 14px", border:"none",
+                  background:"linear-gradient(135deg,rgba(0,112,74,0.10),rgba(0,112,74,0.06))",
+                  borderTop:"1px solid "+T.brandBorder,
+                  color:T.brand, cursor:"pointer", fontFamily:F, fontSize:13, fontWeight:600,
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                  {aiDrafting ? <><Spin size={14} color={T.brand}/> AI가 편집 중...</> : <>✨ AI로 내용 다듬기</>}
+                </button>
+              </div>
+            )}
 
             {/* ③ 툴바 - 항상 고정 (flex 레이아웃으로 고정, sticky/position 아님) */}
             <div style={{ flexShrink:0, padding:"8px 22px",
