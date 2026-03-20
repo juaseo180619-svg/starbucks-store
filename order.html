@@ -321,6 +321,8 @@ function App() {
   const [wasteTarget,   setWasteTarget]   = useState(() => LS.get("wasteTarget", 5.6));
   // 발주 피드백 기록
   const [orderFeedbacks, setOrderFeedbacks] = useState(() => LS.get("orderFeedbacks", []));
+  // 이벤트 발주 보정 (샌드위치 이벤트, 음료 프로모션 등)
+  const [orderEvents, setOrderEvents] = useState(() => LS.get("orderEvents", []));
   // 발주 학습 로그
   const [orderLog, setOrderLog] = useState(() => LS.get("orderLog", []));
 
@@ -506,6 +508,7 @@ function App() {
   };
   const saveWasteTarget = (v) => { setWasteTarget(v); LS.set("wasteTarget", v); };
   const saveOrderFeedbacks = (v) => { setOrderFeedbacks(v); LS.set("orderFeedbacks", v); };
+  const saveOrderEvents = (v) => { setOrderEvents(v); LS.set("orderEvents", v); };
 
   // 매장번호 등록
   const handleSetStore = () => {
@@ -796,6 +799,8 @@ function App() {
             orderLog={orderLog}
             sameDaySkus={sameDaySkus}
             onSaveSameDaySkus={saveSameDaySkus}
+            orderEvents={orderEvents}
+            onSaveOrderEvents={saveOrderEvents}
           />
         )}
         {storeId && dataLoaded && tab==="manual" && (
@@ -1560,7 +1565,7 @@ function BufInputCell({ sku, buffers, onSaveBuffers, suggested, suggLabel, avgSo
 }
 
 
-function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, onSaveBuffers, skuAliases, wasteTarget=5.6, onSaveWasteTarget, orderFeedbacks=[], onSaveFeedbacks, orderLog=[], sameDaySkus={}, onSaveSameDaySkus }) {
+function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, onSaveBuffers, skuAliases, wasteTarget=5.6, onSaveWasteTarget, orderFeedbacks=[], onSaveFeedbacks, orderLog=[], sameDaySkus={}, onSaveSameDaySkus, orderEvents=[], onSaveOrderEvents }) {
   const [catFilter, setCatFilter] = useState("전체");
   const [showBufEdit, setShowBufEdit] = useState(false);
   const [bufEdit, setBufEdit] = useState({});
@@ -1568,6 +1573,8 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   const [showWasteEdit, setShowWasteEdit] = useState(false);
   const [showSameDayEdit, setShowSameDayEdit] = useState(false);
   const [sdSearch, setSdSearch] = useState("");
+  const [showEventEdit, setShowEventEdit] = useState(false);
+  const [newEvent, setNewEvent] = useState({ name:"", date:"", keyword:"", targetCat:"", adj:2 });
   const [wasteInput, setWasteInput] = useState(String(wasteTarget));
   const [showFeedback, setShowFeedback] = useState(null); // sku or null
   const [fbNote, setFbNote] = useState("");
@@ -1591,7 +1598,22 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     return Math.round(total/hist.length * 10) / 10;
   }
   function getAvgSoldByDow(sku, dow) {
-    const hist = uploadHistory.filter(h => h.dow===dow && h.date<=today && h.items?.[sku]?.sold > 0);
+    // 공휴일은 제외하고 일반 요일 평균만 계산
+    const hist = uploadHistory.filter(h =>
+      h.dow===dow && h.date<=today && h.items?.[sku]?.sold > 0
+      && getDayType(h.date, h.dow) !== "holiday"
+    );
+    if (!hist.length) return null;
+    const total = hist.reduce((s,h) => s+(h.items[sku]?.sold||0), 0);
+    return Math.round(total/hist.length * 10) / 10;
+  }
+
+  // 공휴일 평균 판매량 (해당 SKU)
+  function getAvgSoldOnHoliday(sku) {
+    const hist = uploadHistory.filter(h =>
+      h.date<=today && h.items?.[sku]?.sold > 0
+      && getDayType(h.date, h.dow) === "holiday"
+    );
     if (!hist.length) return null;
     const total = hist.reduce((s,h) => s+(h.items[sku]?.sold||0), 0);
     return Math.round(total/hist.length * 10) / 10;
@@ -1633,9 +1655,25 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     const d2In    = item.d2In;
     const dow1    = (todayDow + 1) % 7;
     const dow2    = (todayDow + 2) % 7;
-    const avg1    = parseFloat(getAvgSoldByDow(sku, dow1)) || parseFloat(getAvgSold(sku)) || 0;
-    const avg2    = parseFloat(getAvgSoldByDow(sku, dow2)) || parseFloat(getAvgSold(sku)) || 0;
-    const totalUsage = avg1 + avg2;
+    // 내일/입고일이 공휴일이면 공휴일 평균 사용 (없으면 주말 수준으로 보정)
+    const tmrDate  = (() => { const d=new Date(today+"T00:00:00"); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
+    const d2Date   = (() => { const d=new Date(today+"T00:00:00"); d.setDate(d.getDate()+2); return d.toISOString().slice(0,10); })();
+    const tmrIsHol = getDayType(tmrDate, dow1) === "holiday";
+    const d2IsHol  = getDayType(d2Date,  dow2) === "holiday";
+
+    const hlAvg1   = parseFloat(getAvgSoldOnHoliday(sku));
+    const hlAvg2   = parseFloat(getAvgSoldOnHoliday(sku));
+    const weAvg1   = parseFloat(getAvgSoldByDow(sku, dow1==="0"||dow1===0?0:dow1)) || parseFloat(getAvgSold(sku)) || 0;
+    const weAvg2   = parseFloat(getAvgSoldByDow(sku, dow2==="0"||dow2===0?0:dow2)) || parseFloat(getAvgSold(sku)) || 0;
+
+    // 공휴일이면 공휴일 평균 → 없으면 평소 대비 20% 증가 추정
+    const avg1 = tmrIsHol
+      ? (isNaN(hlAvg1) ? (parseFloat(getAvgSold(sku))||0)*1.2 : hlAvg1)
+      : (parseFloat(getAvgSoldByDow(sku, dow1)) || parseFloat(getAvgSold(sku)) || 0);
+    const avg2 = d2IsHol
+      ? (isNaN(hlAvg2) ? (parseFloat(getAvgSold(sku))||0)*1.2 : hlAvg2)
+      : (parseFloat(getAvgSoldByDow(sku, dow2)) || parseFloat(getAvgSold(sku)) || 0);
+    const totalUsage = Math.round((avg1 + avg2) * 10) / 10;
     const buf     = parseFloat(buffers[sku] ?? buffers[item.name] ?? 2);
 
     // ── 당일소진 품목 판별 ──
@@ -1689,6 +1727,29 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       .reduce((adj, f) => adj + (f.type === "shortage" ? 1 : f.type === "excess" ? -1 : 0), 0);
     const feedbackClamp = Math.max(-2, Math.min(2, feedbackAdj));
 
+    // ── 이벤트 보정 ──
+    // 내일 또는 입고일에 적용되는 이벤트가 있으면 해당 카테고리/SKU 발주량 보정
+    const activeEvents = (orderEvents||[]).filter(ev => {
+      if (!ev.active) return false;
+      const evDate = ev.date; // 이벤트 날짜
+      return evDate === tmrDate || evDate === d2Date;
+    });
+    let eventAdj = 0, eventLabel = null;
+    activeEvents.forEach(ev => {
+      // 이벤트 대상 카테고리/키워드와 현재 품목 매칭
+      const itemName = (skuAliases[sku]||item.name||"").toLowerCase();
+      const matches = ev.targetCat
+        ? item.cat === ev.targetCat
+        : ev.keyword
+          ? itemName.includes(ev.keyword.toLowerCase())
+          : true; // 전체 적용
+      if (matches) {
+        eventAdj += ev.adj || 0;
+        eventLabel = ev.name;
+      }
+    });
+    eventAdj = Math.max(-3, Math.min(5, eventAdj));
+
     // ── orderLog 학습 보정 ──
     const relevantLogs = orderLog
       .filter(l => l.items?.[sku] && l.orderDow === todayDow)
@@ -1711,7 +1772,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     const effectiveBuf = isSameDay ? Math.min(buf, 1) : buf;
 
     const rec = Math.max(0, Math.ceil(
-      totalUsage + effectiveBuf + wasteAdj + feedbackClamp + learnAdj
+      totalUsage + effectiveBuf + wasteAdj + feedbackClamp + learnAdj + eventAdj
       - effectiveStock - tmrIn - d2In
     ));
     return {
@@ -1721,7 +1782,9 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       wasteAdj, feedbackClamp, learnAdj, learnInsight,
       isSameDay, ddayRate: Math.round(ddayRate*100),
       currentWasteRate: Math.round(currentWasteRate*10)/10,
-      learnSampleSize: relevantLogs.length
+      learnSampleSize: relevantLogs.length,
+      eventAdj, eventLabel,
+      tmrIsHol, d2IsHol
     };
   }
 
@@ -1761,6 +1824,14 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
               fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
               🗑 당일폐기 설정
             </button>
+            <button onClick={() => setShowEventEdit(!showEventEdit)} style={{
+              padding:"5px 12px", borderRadius:8,
+              border:"1px solid "+(showEventEdit?"#AF52DE":T.b1),
+              background:showEventEdit?"rgba(175,82,222,0.1)":T.card,
+              color:showEventEdit?"#AF52DE":T.t2,
+              fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
+              🎉 이벤트
+            </button>
             <button onClick={() => setShowWasteEdit(!showWasteEdit)} style={{
               padding:"5px 12px", borderRadius:8, border:"1px solid "+(showWasteEdit?T.amber:T.b1),
               background:showWasteEdit?T.aDim:T.card,
@@ -1793,6 +1864,115 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
         <span style={{ color:T.t2 }}>내일({DOW_KR[(todayDow+1)%7]}) + 입고일({DOW_KR[(todayDow+2)%7]}) 평균판매량 합산 → 현재고/예정입고 차감</span>
       </div>
 
+      {/* 이벤트 발주 보정 패널 */}
+      {showEventEdit && (
+        <Card style={{ marginBottom:14, padding:"14px" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:6 }}>
+            🎉 이벤트 발주 보정
+          </div>
+          <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:12, lineHeight:1.7 }}>
+            샌드위치 이벤트, 음료 프로모션 등 특정 날짜에 발주량을 늘려야 할 때 등록해요.<br/>
+            등록한 이벤트 날짜가 내일 또는 입고일이면 해당 품목에 자동으로 보정이 적용돼요.
+          </div>
+          {/* 이벤트 추가 폼 */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+            <div>
+              <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:3 }}>이벤트명</div>
+              <input value={newEvent.name} onChange={e=>setNewEvent(v=>({...v,name:e.target.value}))}
+                placeholder="예: 샌드위치 프로모션"
+                style={{ width:"100%", padding:"7px 10px", borderRadius:8,
+                  border:"1px solid "+T.b1, fontFamily:F, fontSize:12, background:T.card }}/>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:3 }}>이벤트 날짜</div>
+              <input type="date" value={newEvent.date} onChange={e=>setNewEvent(v=>({...v,date:e.target.value}))}
+                style={{ width:"100%", padding:"7px 10px", borderRadius:8,
+                  border:"1px solid "+T.b1, fontFamily:F, fontSize:12, background:T.card }}/>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:3 }}>품목명 키워드 (비워두면 전체)</div>
+              <input value={newEvent.keyword} onChange={e=>setNewEvent(v=>({...v,keyword:e.target.value}))}
+                placeholder="예: 샌드위치"
+                style={{ width:"100%", padding:"7px 10px", borderRadius:8,
+                  border:"1px solid "+T.b1, fontFamily:F, fontSize:12, background:T.card }}/>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:3 }}>카테고리 (키워드 없을 때)</div>
+              <select value={newEvent.targetCat} onChange={e=>setNewEvent(v=>({...v,targetCat:e.target.value}))}
+                style={{ width:"100%", padding:"7px 10px", borderRadius:8,
+                  border:"1px solid "+T.b1, fontFamily:F, fontSize:12, background:T.card }}>
+                <option value="">전체</option>
+                <option value="[10] Bev">Bev</option>
+                <option value="[20] Food">Food</option>
+                <option value="[50] 원재료">원재료</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginBottom:3 }}>추가 발주량 (+개)</div>
+              <input type="number" min="1" max="10" value={newEvent.adj}
+                onChange={e=>setNewEvent(v=>({...v,adj:parseInt(e.target.value)||1}))}
+                style={{ width:"100%", padding:"7px 10px", borderRadius:8,
+                  border:"1px solid "+T.b1, fontFamily:F, fontSize:12, background:T.card,
+                  textAlign:"center" }}/>
+            </div>
+            <div style={{ display:"flex", alignItems:"flex-end" }}>
+              <button onClick={()=>{
+                if (!newEvent.name || !newEvent.date) { alert("이벤트명과 날짜를 입력해주세요"); return; }
+                const ev = { ...newEvent, id:"ev"+Date.now(), active:true };
+                onSaveOrderEvents && onSaveOrderEvents([...(orderEvents||[]), ev]);
+                setNewEvent({ name:"", date:"", keyword:"", targetCat:"", adj:2 });
+              }} style={{ width:"100%", padding:"8px", borderRadius:8, border:"none",
+                background:"#AF52DE", color:"#fff", fontSize:12, fontWeight:700,
+                cursor:"pointer", fontFamily:F }}>
+                + 추가
+              </button>
+            </div>
+          </div>
+          {/* 이벤트 목록 */}
+          {(orderEvents||[]).length > 0 && (
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:T.t3, fontFamily:F, marginBottom:6 }}>등록된 이벤트</div>
+              {[...(orderEvents||[])].reverse().map((ev,i) => {
+                const isPast = ev.date < today;
+                return (
+                  <div key={ev.id} style={{ display:"flex", alignItems:"center", gap:8,
+                    padding:"8px 10px", borderRadius:8, marginBottom:4,
+                    background:isPast?"rgba(0,0,0,0.03)":ev.active?"rgba(175,82,222,0.07)":T.card2,
+                    border:"1px solid "+(isPast?T.b0:ev.active?"rgba(175,82,222,0.2)":T.b0),
+                    opacity:isPast?0.6:1 }}>
+                    <div style={{ flex:1 }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:T.t1, fontFamily:F }}>
+                        {ev.name}
+                      </span>
+                      <span style={{ fontSize:11, color:T.t3, fontFamily:F, marginLeft:8 }}>
+                        {ev.date} · {ev.keyword||ev.targetCat||"전체"} · +{ev.adj}개
+                      </span>
+                      {isPast && <span style={{ fontSize:10, color:T.t4, marginLeft:6 }}>완료</span>}
+                    </div>
+                    {/* 활성/비활성 토글 */}
+                    <button onClick={()=>{
+                      const updated = (orderEvents||[]).map(e=>e.id===ev.id?{...e,active:!e.active}:e);
+                      onSaveOrderEvents && onSaveOrderEvents(updated);
+                    }} style={{ padding:"3px 8px", borderRadius:6, fontSize:10, fontWeight:700,
+                      border:"1px solid "+(ev.active?"#AF52DE":T.b1), cursor:"pointer",
+                      background:ev.active?"rgba(175,82,222,0.1)":"transparent",
+                      color:ev.active?"#AF52DE":T.t4, fontFamily:F }}>
+                      {ev.active?"ON":"OFF"}
+                    </button>
+                    {/* 삭제 */}
+                    <button onClick={()=>{
+                      onSaveOrderEvents && onSaveOrderEvents((orderEvents||[]).filter(e=>e.id!==ev.id));
+                    }} style={{ padding:"3px 8px", borderRadius:6, fontSize:10,
+                      border:"1px solid "+T.b1, cursor:"pointer", background:"transparent",
+                      color:T.t4, fontFamily:F }}>삭제</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* 폐기율 설정 패널 */}
       {showWasteEdit && (
         <Card style={{ marginBottom:14, padding:"14px" }}>
@@ -1824,12 +2004,13 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
         </Card>
       )}
 
-      {/* 발주 피드백 입력 모달 */}
-      {showFeedback && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.35)", zIndex:300,
+      {/* 발주 피드백 입력 모달 - Portal로 body에 직접 렌더링 (fixed 차단 방지) */}
+      {showFeedback && ReactDOM.createPortal(
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:9999,
           display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}
           onClick={()=>setShowFeedback(null)}>
-          <div style={{ background:T.card, borderRadius:16, padding:20, width:"100%", maxWidth:340 }}
+          <div style={{ background:T.card, borderRadius:16, padding:20, width:"100%", maxWidth:340,
+            boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}
             onClick={e=>e.stopPropagation()}>
             <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:4 }}>
               📝 발주 피드백 기록
@@ -1890,7 +2071,8 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 당일폐기 설정 패널 */}
@@ -2114,7 +2296,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           ))}
         </div>
         {sortedItems.map(([sku, item], idx) => {
-          const { rec, avg1, avg2, totalUsage, buf, current, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2, wasteAdj=0, feedbackClamp=0, learnAdj=0, learnInsight=null, learnSampleSize=0, isSameDay=false, ddayRate=0, currentWasteRate=0 } = calcRecommend(sku, item);
+          const { rec, avg1, avg2, totalUsage, buf, current, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2, wasteAdj=0, feedbackClamp=0, learnAdj=0, learnInsight=null, learnSampleSize=0, isSameDay=false, ddayRate=0, currentWasteRate=0, eventAdj=0, eventLabel=null, tmrIsHol=false, d2IsHol=false } = calcRecommend(sku, item);
           const dispName = skuAliases[sku] || item.name;
           const isNeed = rec > 0;
           return (
@@ -2182,6 +2364,17 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                 {learnInsight && learnAdj!==0 && (
                   <div style={{ fontSize:8, color:learnAdj>0?T.red:T.blue, lineHeight:1.2 }}>
                     {learnInsight}
+                  </div>
+                )}
+                {eventAdj!==0 && (
+                  <div style={{ fontSize:8, color:"#AF52DE", lineHeight:1.2 }}
+                    title={eventLabel||""}>
+                    🎉+{eventAdj}
+                  </div>
+                )}
+                {(tmrIsHol||d2IsHol) && (
+                  <div style={{ fontSize:8, color:"#C04000", lineHeight:1.2 }}>
+                    🎌공휴일
                   </div>
                 )}
               </div>
