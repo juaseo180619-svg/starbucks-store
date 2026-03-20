@@ -315,6 +315,8 @@ function App() {
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
   const [buffers,       setBuffers]       = useState(() => LS.get("buffers", {}));
   const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {}));
+  // 수동 당일폐기 설정: { [sku]: true(강제 당일) | false(강제 해제) }
+  const [sameDaySkus,   setSameDaySkus]   = useState(() => LS.get("sameDaySkus", {}));
   // 폐기율 설정 (전사 목표: 5.6%)
   const [wasteTarget,   setWasteTarget]   = useState(() => LS.get("wasteTarget", 5.6));
   // 발주 피드백 기록
@@ -377,6 +379,7 @@ function App() {
           if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
           if (cfg.buffers)      { setBuffers(cfg.buffers);          LS.set("buffers", cfg.buffers); }
           if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
+          if (cfg.sameDaySkus)  { setSameDaySkus(cfg.sameDaySkus); LS.set("sameDaySkus", cfg.sameDaySkus); }
         }
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
         if (hist !== null && hist.length > 0) {
@@ -494,6 +497,12 @@ function App() {
   const saveSkuAliases = async (v) => {
     setSkuAliases(v); LS.set("skuAliases", v);
     await syncConfig(manualItems, buffers, v);
+  };
+  const saveSameDaySkus = async (v) => {
+    setSameDaySkus(v); LS.set("sameDaySkus", v);
+    if (storeId && window.db) {
+      await DB.saveConfig(storeId, { manualItems, buffers, skuAliases, sameDaySkus: v });
+    }
   };
   const saveWasteTarget = (v) => { setWasteTarget(v); LS.set("wasteTarget", v); };
   const saveOrderFeedbacks = (v) => { setOrderFeedbacks(v); LS.set("orderFeedbacks", v); };
@@ -785,6 +794,8 @@ function App() {
             orderFeedbacks={orderFeedbacks}
             onSaveFeedbacks={saveOrderFeedbacks}
             orderLog={orderLog}
+            sameDaySkus={sameDaySkus}
+            onSaveSameDaySkus={saveSameDaySkus}
           />
         )}
         {storeId && dataLoaded && tab==="manual" && (
@@ -918,6 +929,12 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
               { v:totalSku, l:"총 SKU", tab:"upload" },
               { v:expiring.length, l:"유통임박", tab:"recommend" },
               { v:needOrder, l:"발주필요", tab:"recommend" },
+              { v: latestUpload ? Object.entries(latestUpload.items||{}).filter(([sku]) => {
+                  const hist = uploadHistory.filter(h=>h.items?.[sku]);
+                  if (hist.length < 3) return false;
+                  const dc = hist.filter(h=>(h.items[sku]?.batches||[]).some(b=>b.dday!==null&&b.dday<=0)).length;
+                  return dc/hist.length >= 0.6;
+                }).length : 0, l:"당일소진", tab:"recommend" },
             ].map(s => (
               <button key={s.l} onClick={() => setTab(s.tab)} style={{
                 background:"rgba(255,255,255,0.14)", borderRadius:12,
@@ -1454,12 +1471,14 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
 }
 
 /* ─── 발주 추천 탭 ───────────────────────────────── */
-function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, onSaveBuffers, skuAliases, wasteTarget=5.6, onSaveWasteTarget, orderFeedbacks=[], onSaveFeedbacks, orderLog=[] }) {
+function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems, buffers, onSaveBuffers, skuAliases, wasteTarget=5.6, onSaveWasteTarget, orderFeedbacks=[], onSaveFeedbacks, orderLog=[], sameDaySkus={}, onSaveSameDaySkus }) {
   const [catFilter, setCatFilter] = useState("전체");
   const [showBufEdit, setShowBufEdit] = useState(false);
   const [bufEdit, setBufEdit] = useState({});
   const [bufCatFilter, setBufCatFilter] = useState("전체");
   const [showWasteEdit, setShowWasteEdit] = useState(false);
+  const [showSameDayEdit, setShowSameDayEdit] = useState(false);
+  const [sdSearch, setSdSearch] = useState("");
   const [wasteInput, setWasteInput] = useState(String(wasteTarget));
   const [showFeedback, setShowFeedback] = useState(null); // sku or null
   const [fbNote, setFbNote] = useState("");
@@ -1489,8 +1508,37 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     return Math.round(total/hist.length * 10) / 10;
   }
 
+  // ── 당일소진 품목 자동 감지 ──
+  // 히스토리 전체에서 D-day 출현율 계산
+  const ddayRateCache = {};
+  function getDdayRate(sku) {
+    if (ddayRateCache[sku] !== undefined) return ddayRateCache[sku];
+    const hist = uploadHistory.filter(h => h.items?.[sku]);
+    if (hist.length < 3) { ddayRateCache[sku] = 0; return 0; }
+    const ddayCount = hist.filter(h =>
+      (h.items[sku]?.batches||[]).some(b => b.dday !== null && b.dday <= 0)
+    ).length;
+    ddayRateCache[sku] = ddayCount / hist.length;
+    return ddayRateCache[sku];
+  }
+
+  // ── 품목별 실제 폐기율 계산 (입고량 vs 판매량 기반) ──
+  const wasteRateCache = {};
+  function getItemWasteRate(sku) {
+    if (wasteRateCache[sku] !== undefined) return wasteRateCache[sku];
+    const hist = uploadHistory.filter(h => h.items?.[sku]);
+    if (hist.length < 3) { wasteRateCache[sku] = wasteTarget; return wasteTarget; }
+    const totalIn   = hist.reduce((s,h) => s + (h.items[sku]?.dayIn||0), 0);
+    const totalSold = hist.reduce((s,h) => s + (h.items[sku]?.sold||0), 0);
+    if (totalIn === 0) { wasteRateCache[sku] = wasteTarget; return wasteTarget; }
+    // 폐기 추정 = 입고 - 판매 (음수면 0으로 처리)
+    const estWaste = Math.max(0, totalIn - totalSold);
+    const rate = (estWaste / totalIn) * 100;
+    wasteRateCache[sku] = Math.round(rate * 10) / 10;
+    return wasteRateCache[sku];
+  }
+
   // 발주 추천량 계산
-  // 발주일 기준: 내일(+1) + 모레(+2=입고일) 사용량 커버
   function calcRecommend(sku, item) {
     const tmrIn   = item.tmrIn;
     const d2In    = item.d2In;
@@ -1501,17 +1549,27 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     const totalUsage = avg1 + avg2;
     const buf     = parseFloat(buffers[sku] ?? buffers[item.name] ?? 2);
 
-    // 유통기한 고려: 입고일(+2일) 이전에 만료되는 배치는 현재고에서 제외
-    // dday <= 1: 내일(발주일+1) 전에 폐기 → 해당 배치 재고 무효
-    // dday == 2: 입고 당일 폐기 → 해당 배치 재고 무효  
-    // dday >= 3: 입고 이후에도 유효 → 현재고로 인정
-    let effectiveStock = 0;
-    let expiringStock  = 0; // 무효 처리된 재고량
-    if (item.batches && item.batches.length > 0) {
+    // ── 당일소진 품목 판별 ──
+    // 수동 설정이 있으면 최우선 적용, 없으면 자동 감지
+    const ddayRate  = getDdayRate(sku);
+    const manualOverride = sameDaySkus[sku]; // true=강제 당일폐기, false=강제 해제
+    const isSameDay = manualOverride === true
+      ? true
+      : manualOverride === false
+        ? false
+        : ddayRate >= 0.6; // 설정 없으면 자동 (60% 기준)
+
+    // ── 재고 유효성 계산 ──
+    let effectiveStock = 0, expiringStock = 0;
+    if (isSameDay) {
+      // 당일소진 품목: 현재 재고는 오늘 모두 폐기될 것 → 발주 계산에서 제외
+      expiringStock = item.actualSum;
+      effectiveStock = 0;
+    } else if (item.batches && item.batches.length > 0) {
       item.batches.forEach(b => {
         if (b.actual <= 0) return;
         if (b.dday !== null && b.dday !== undefined && b.dday <= 1) {
-          expiringStock += b.actual; // 입고 전 폐기 → 무효
+          expiringStock += b.actual;
         } else {
           effectiveStock += b.actual;
         }
@@ -1521,58 +1579,61 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
     }
 
     // ── 폐기율 보정 ──
-    // 전사 목표 폐기율(wasteTarget %) vs 현재 폐기율로 발주량 조정
-    // 현재 폐기율 < 목표: 조금 더 발주 가능 (너무 아끼고 있음)
-    // 현재 폐기율 > 목표: 발주량 축소 필요
-    const currentWasteRate = (() => {
-      const hist = uploadHistory.filter(h => h.items?.[sku]);
-      if (hist.length < 3) return wasteTarget; // 데이터 부족 시 목표값 사용
-      const totalReceived = hist.reduce((s,h) => s + (h.items[sku]?.dayIn||0), 0);
-      if (totalReceived === 0) return wasteTarget;
-      // 폐기 추정: D-0~1 배치가 있었던 날의 해당 재고량
-      const totalExpired = hist.reduce((s,h) => {
-        return s + (h.items[sku]?.batches||[])
-          .filter(b => b.dday !== null && b.dday <= 0 && b.actual > 0)
-          .reduce((ss,b) => ss + b.actual, 0);
-      }, 0);
-      return totalReceived > 0 ? (totalExpired / totalReceived) * 100 : wasteTarget;
-    })();
-    // 폐기율 차이에 따른 보정 (-1 ~ +2 범위로 제한)
+    const currentWasteRate = getItemWasteRate(sku);
     const wasteDiff = wasteTarget - currentWasteRate; // 양수 = 더 발주 가능
-    const wasteAdj  = Math.max(-1, Math.min(2, Math.round(wasteDiff / 2)));
+    let wasteAdj = 0;
+    if (isSameDay) {
+      // 당일소진 품목: 폐기율 기반으로 더 강하게 보정
+      // 현재 폐기율 > 목표 → 과발주 줄이기 (-1 ~ -3)
+      // 현재 폐기율 < 목표 → 판매 기회 소실 가능, 약간 증가 (+1)
+      if (wasteDiff < -10)     wasteAdj = -2; // 폐기율 목표 10%p 초과 → -2
+      else if (wasteDiff < -5) wasteAdj = -1; // 5~10%p 초과 → -1
+      else if (wasteDiff > 5)  wasteAdj = 1;  // 5%p 미만 → +1 (판매 기회)
+    } else {
+      // 일반 품목
+      wasteAdj = Math.max(-1, Math.min(2, Math.round(wasteDiff / 2)));
+    }
 
     // ── 피드백 가중치 반영 ──
-    // 같은 요일+입고요일 조합에서 "부족했음" 피드백이 있으면 +1, "과잉" 피드백이면 -1
     const feedbackAdj = orderFeedbacks
       .filter(f => f.sku === sku && f.orderDow === todayDow)
       .reduce((adj, f) => adj + (f.type === "shortage" ? 1 : f.type === "excess" ? -1 : 0), 0);
-    const feedbackClamp = Math.max(-2, Math.min(2, feedbackAdj)); // -2 ~ +2 범위
+    const feedbackClamp = Math.max(-2, Math.min(2, feedbackAdj));
 
     // ── orderLog 학습 보정 ──
-    // 최근 8회 같은 요일 발주 결과 분석
     const relevantLogs = orderLog
       .filter(l => l.items?.[sku] && l.orderDow === todayDow)
       .slice(-8);
     let learnAdj = 0, learnInsight = null;
     if (relevantLogs.length >= 2) {
-      const shorts  = relevantLogs.filter(l => l.items[sku].result === "shortage").length;
+      const shorts   = relevantLogs.filter(l => l.items[sku].result === "shortage").length;
       const excesses = relevantLogs.filter(l => l.items[sku].result === "excess").length;
-      const total   = relevantLogs.length;
-      const sRate   = shorts  / total;
-      const eRate   = excesses / total;
-      if (sRate >= 0.5)       { learnAdj = Math.min(3, Math.ceil(sRate * 3)); learnInsight = `부족 ${Math.round(sRate*100)}%`; }
-      else if (sRate >= 0.3)  { learnAdj = 1; learnInsight = `부족 ${Math.round(sRate*100)}%`; }
-      if (eRate >= 0.5)       { learnAdj -= Math.min(2, Math.ceil(eRate * 2)); learnInsight = `과잉 ${Math.round(eRate*100)}%`; }
-      else if (eRate >= 0.3)  { learnAdj -= 1; learnInsight = `과잉 ${Math.round(eRate*100)}%`; }
+      const total    = relevantLogs.length;
+      const sRate    = shorts / total;
+      const eRate    = excesses / total;
+      if (sRate >= 0.5)      { learnAdj = Math.min(3, Math.ceil(sRate * 3)); learnInsight = `부족 ${Math.round(sRate*100)}%`; }
+      else if (sRate >= 0.3) { learnAdj = 1; learnInsight = `부족 ${Math.round(sRate*100)}%`; }
+      if (eRate >= 0.5)      { learnAdj -= Math.min(2, Math.ceil(eRate * 2)); learnInsight = `과잉 ${Math.round(eRate*100)}%`; }
+      else if (eRate >= 0.3) { learnAdj -= 1; learnInsight = `과잉 ${Math.round(eRate*100)}%`; }
       learnAdj = Math.max(-3, Math.min(3, learnAdj));
     }
 
-    const rec = Math.max(0, Math.ceil(totalUsage + buf + wasteAdj + feedbackClamp + learnAdj - effectiveStock - tmrIn - d2In));
-    return { rec, avg1, avg2, totalUsage, buf,
-             current: item.actualSum, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2,
-             wasteAdj, feedbackClamp, learnAdj, learnInsight,
-             currentWasteRate: Math.round(currentWasteRate*10)/10,
-             learnSampleSize: relevantLogs.length };
+    // 당일소진 품목은 버퍼를 줄임 (어차피 남으면 폐기)
+    const effectiveBuf = isSameDay ? Math.min(buf, 1) : buf;
+
+    const rec = Math.max(0, Math.ceil(
+      totalUsage + effectiveBuf + wasteAdj + feedbackClamp + learnAdj
+      - effectiveStock - tmrIn - d2In
+    ));
+    return {
+      rec, avg1, avg2, totalUsage, buf: effectiveBuf,
+      current: item.actualSum, effectiveStock, expiringStock,
+      tmrIn, d2In, dow1, dow2,
+      wasteAdj, feedbackClamp, learnAdj, learnInsight,
+      isSameDay, ddayRate: Math.round(ddayRate*100),
+      currentWasteRate: Math.round(currentWasteRate*10)/10,
+      learnSampleSize: relevantLogs.length
+    };
   }
 
   const cats = ["전체", ...new Set(Object.values(latestUpload.items).map(i=>i.cat))];
@@ -1595,13 +1656,21 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       <SH title="📦 발주 추천"
         sub={fmtDate(today)+" 기준"}
         action={
-          <div style={{ display:"flex", gap:6 }}>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             <button onClick={() => setShowBufEdit(!showBufEdit)} style={{
               padding:"5px 12px", borderRadius:8, border:"1px solid "+T.b1,
               background:showBufEdit?T.brandDim:T.card,
               color:showBufEdit?T.brand:T.t2,
               fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
               🛡 버퍼 설정
+            </button>
+            <button onClick={() => setShowSameDayEdit(!showSameDayEdit)} style={{
+              padding:"5px 12px", borderRadius:8,
+              border:"1px solid "+(showSameDayEdit?T.red:T.b1),
+              background:showSameDayEdit?T.rDim:T.card,
+              color:showSameDayEdit?T.red:T.t2,
+              fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:F }}>
+              🗑 당일폐기 설정
             </button>
             <button onClick={() => setShowWasteEdit(!showWasteEdit)} style={{
               padding:"5px 12px", borderRadius:8, border:"1px solid "+(showWasteEdit?T.amber:T.b1),
@@ -1734,6 +1803,113 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           </div>
         </div>
       )}
+
+      {/* 당일폐기 설정 패널 */}
+      {showSameDayEdit && (() => {
+        // 전체 SKU 목록 (최신 업로드 기준)
+        const allSkus = latestUpload
+          ? Object.entries(latestUpload.items)
+              .filter(([,i]) => {
+                const n = (skuAliases[i.sku]||i.name||"").toLowerCase();
+                return !sdSearch || n.includes(sdSearch.toLowerCase());
+              })
+              .sort((a,b) => a[1].name.localeCompare(b[1].name))
+          : [];
+        // 수동 설정된 것 먼저
+        const manualSet  = allSkus.filter(([sku]) => sameDaySkus[sku] === true);
+        const manualOff  = allSkus.filter(([sku]) => sameDaySkus[sku] === false);
+        const autoOn     = allSkus.filter(([sku]) => sameDaySkus[sku] === undefined && getDdayRate(sku) >= 0.6);
+        const rest       = allSkus.filter(([sku]) => sameDaySkus[sku] === undefined && getDdayRate(sku) < 0.6);
+        const ordered    = [...manualSet, ...manualOff, ...autoOn, ...rest];
+        return (
+          <Card style={{ marginBottom:14, padding:"14px" }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:6 }}>
+              🗑 당일폐기 품목 설정
+            </div>
+            <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:12, lineHeight:1.7 }}>
+              당일폐기로 설정하면 현재 재고를 발주 계산에서 제외하고 버퍼를 최소화해요.<br/>
+              <b>자동</b> = 데이터 기반 자동 감지 · <b style={{color:T.red}}>강제 ON</b> = 항상 당일폐기 · <b style={{color:T.blue}}>강제 OFF</b> = 절대 당일폐기 안 함
+            </div>
+            {/* 검색 */}
+            <input value={sdSearch} onChange={e=>setSdSearch(e.target.value)}
+              placeholder="품목명 검색..."
+              style={{ width:"100%", padding:"7px 12px", borderRadius:8,
+                border:"1px solid "+T.b1, fontFamily:F, fontSize:13,
+                background:T.card, color:T.t1, marginBottom:10 }}/>
+            {/* 목록 */}
+            <div style={{ maxHeight:360, overflowY:"auto", border:"1px solid "+T.b0, borderRadius:10, padding:"6px 8px" }}>
+              {ordered.map(([sku, item]) => {
+                const dispName = skuAliases[sku]||item.name;
+                const override = sameDaySkus[sku]; // true|false|undefined
+                const autoDetect = getDdayRate(sku) >= 0.6;
+                const ddayPct = Math.round(getDdayRate(sku)*100);
+                const effectiveState = override === true ? "on"
+                  : override === false ? "off"
+                  : autoDetect ? "auto-on" : "auto-off";
+                const stateColor = effectiveState==="on" ? T.red
+                  : effectiveState==="off" ? T.blue
+                  : effectiveState==="auto-on" ? T.amber : T.t4;
+                const stateLabel = effectiveState==="on" ? "강제 당일폐기"
+                  : effectiveState==="off" ? "강제 해제"
+                  : effectiveState==="auto-on" ? `자동 ON (${ddayPct}%)`
+                  : `자동 OFF (${ddayPct}%)`;
+                return (
+                  <div key={sku} style={{ display:"flex", alignItems:"center", gap:8,
+                    padding:"8px 6px", borderBottom:"1px solid "+T.b0+"44" }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, color:T.t1, fontFamily:F,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        fontWeight: effectiveState==="on"||effectiveState==="auto-on" ? 600 : 400 }}>
+                        {dispName}
+                      </div>
+                      <div style={{ fontSize:10, color:stateColor, fontFamily:F }}>{stateLabel}</div>
+                    </div>
+                    {/* 3-way 토글: ON / 자동 / OFF */}
+                    <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                      {[
+                        { val:true,      label:"당일폐기",  color:T.red,  dim:T.rDim },
+                        { val:undefined, label:"자동",      color:T.t3,   dim:T.card2 },
+                        { val:false,     label:"해제",      color:T.blue, dim:T.bDim },
+                      ].map(opt => {
+                        const isActive = override === opt.val;
+                        return (
+                          <button key={String(opt.val)} onClick={()=>{
+                            const updated = {...sameDaySkus};
+                            if (opt.val === undefined) delete updated[sku];
+                            else updated[sku] = opt.val;
+                            onSaveSameDaySkus && onSaveSameDaySkus(updated);
+                          }} style={{
+                            padding:"4px 8px", borderRadius:6, cursor:"pointer",
+                            border:"1px solid "+(isActive?opt.color:T.b1),
+                            background:isActive?opt.dim:"transparent",
+                            color:isActive?opt.color:T.t4,
+                            fontSize:11, fontWeight:isActive?700:400, fontFamily:F,
+                            transition:"all .12s"
+                          }}>
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {ordered.length === 0 && (
+                <div style={{ padding:"20px", textAlign:"center", color:T.t3, fontFamily:F, fontSize:12 }}>
+                  실사 데이터가 없거나 검색 결과가 없어요
+                </div>
+              )}
+            </div>
+            {/* 수동 설정 요약 */}
+            {Object.keys(sameDaySkus).length > 0 && (
+              <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:8 }}>
+                수동 설정: 당일폐기 {Object.values(sameDaySkus).filter(v=>v===true).length}개 ·
+                해제 {Object.values(sameDaySkus).filter(v=>v===false).length}개
+              </div>
+            )}
+          </Card>
+        );
+      })()}
 
       {/* 버퍼 설정 패널 */}
       {showBufEdit && (
@@ -1902,14 +2078,30 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                   overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {dispName}
                 </div>
-                <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</div>
+                <div style={{ display:"flex", gap:4, alignItems:"center", marginTop:1 }}>
+                  <span style={{ fontSize:10, color:T.t3, fontFamily:F }}>{item.cat}</span>
+                  {isSameDay && (
+                    <span style={{ fontSize:9, fontWeight:700, color:T.amber,
+                      background:T.aDim, borderRadius:4, padding:"0px 4px",
+                      lineHeight:"14px" }} title={`D-day 출현율 ${ddayRate}% — 재고 폐기 반영`}>
+                      당일소진 {ddayRate}%
+                    </span>
+                  )}
+                </div>
               </div>
               <div style={{ textAlign:"center", fontFamily:F }}>
                 <div style={{ fontSize:13, fontWeight:current===0?700:400,
                   color:current===0?T.red:T.t1 }}>{current}</div>
-                {expiringStock > 0 && (
-                  <div style={{ fontSize:9, color:T.red, lineHeight:1.2 }}>
-                    폐기예정 -{expiringStock}
+                {isSameDay && current > 0 && (
+                  <div style={{ fontSize:9, color:T.amber, lineHeight:1.2 }}>오늘 전량폐기</div>
+                )}
+                {!isSameDay && expiringStock > 0 && (
+                  <div style={{ fontSize:9, color:T.red, lineHeight:1.2 }}>폐기예정 -{expiringStock}</div>
+                )}
+                {currentWasteRate > 0 && Math.abs(currentWasteRate - wasteTarget) > 2 && (
+                  <div style={{ fontSize:9, lineHeight:1.2,
+                    color:currentWasteRate > wasteTarget ? T.amber : T.blue }}>
+                    폐기율{currentWasteRate}%
                   </div>
                 )}
               </div>
@@ -1959,7 +2151,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
         })}
       </Card>
       <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:8 }}>
-        * 버퍼 기본값 2 · 예정입고/폐기재고 차감 · 폐기율 보정(목표 5.6%) · 피드백 📝 버튼으로 부족/과잉 기록 → 다음 발주에 자동 반영
+        * 당일소진(D-day 60%↑) 품목은 현재고 무효처리 · 버퍼 최소화 · 폐기율 자동 반영 · 🧠 학습 보정 · 📝 피드백 학습
       </div>
     </div>
   );
