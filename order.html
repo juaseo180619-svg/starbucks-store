@@ -2065,7 +2065,7 @@ function RecommendTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           ))}
         </div>
         {sortedItems.map(([sku, item], idx) => {
-          const { rec, avg1, avg2, totalUsage, buf, current, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2, wasteAdj=0, feedbackClamp=0, learnAdj=0, learnInsight=null, learnSampleSize=0 } = calcRecommend(sku, item);
+          const { rec, avg1, avg2, totalUsage, buf, current, effectiveStock, expiringStock, tmrIn, d2In, dow1, dow2, wasteAdj=0, feedbackClamp=0, learnAdj=0, learnInsight=null, learnSampleSize=0, isSameDay=false, ddayRate=0, currentWasteRate=0 } = calcRecommend(sku, item);
           const dispName = skuAliases[sku] || item.name;
           const isNeed = rec > 0;
           return (
