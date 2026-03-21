@@ -1579,9 +1579,10 @@ function BevStatView({ bevHistory, onSwitchMode }) {
     periodHist.forEach(h=>{
       Object.values(h.items||{}).forEach(item=>{
         if(macroFilter!=="전체"&&item.macro!==macroFilter) return;
-        const k=item.catName||item.name;
+        // 한국어 이름을 키로 사용 (catName은 영어라 표시에 부적합)
+        const k=item.name||item.catName;
         if(!map[k]) map[k]={
-          catName:k, macro:item.macro||"기타",
+          catName:item.catName, korName:k, macro:item.macro||"기타",
           days:[], qtyArr:[], salesArr:[],
           sizeDist:{}, spark:[]
         };
@@ -1606,7 +1607,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       const wdAvg=rnd(([1,2,3,4,5].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>a.length?s+v/a.length:s,0),1)||null;
       const weAvg=rnd(([0,6].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>a.length?s+v/a.length:s,0),1)||null;
       const weDiff=(wdAvg&&weAvg)?Math.round(((weAvg-wdAvg)/wdAvg)*100):null;
-      return {catName:k,macro:s.macro,totalQty,totalSales,avgQty,dowAvg,wdAvg,weAvg,weDiff,
+      return {catName:k, korName:k, macro:s.macro, totalQty,totalSales,avgQty,dowAvg,wdAvg,weAvg,weDiff,
               sizeDist:s.sizeDist,spark:s.spark,days:s.days.length};
     });
   },[periodHist,macroFilter]);
@@ -1649,11 +1650,23 @@ function BevStatView({ bevHistory, onSwitchMode }) {
   // 테이블 데이터
   const tableData = React.useMemo(()=>{
     let rows=[...menuStats];
-    if(search) rows=rows.filter(s=>s.catName.toLowerCase().includes(search.toLowerCase()));
-    rows.sort((a,b)=>{
-      const va=a[sortKey]??-999, vb=b[sortKey]??-999;
-      return sortAsc?va-vb:vb-va;
-    });
+    if(search) rows=rows.filter(s=>(s.korName||s.catName||"").toLowerCase().includes(search.toLowerCase()));
+    // 정렬: 헤더 클릭 정렬 중에는 해당 키로, 아니면 기본(macro 그룹 → totalQty 내림차순)
+    if(sortKey==="totalQty"&&!sortAsc) {
+      // 기본 정렬: macro 알파벳 → totalQty 내림차순 (같은 카테고리끼리 묶임)
+      const macroOrder=["에스프레소","Cold Brew","Drip","Frappuccino","Blended","Tea","Fizzio","Chocolate","기타음료","기타"];
+      rows.sort((a,b)=>{
+        const mi=macroOrder.indexOf(a.macro), mj=macroOrder.indexOf(b.macro);
+        const mo=(mi===-1?99:mi)-(mj===-1?99:mj);
+        if(mo!==0) return mo;
+        return (b.totalQty??0)-(a.totalQty??0);
+      });
+    } else {
+      rows.sort((a,b)=>{
+        const va=a[sortKey]??-999, vb=b[sortKey]??-999;
+        return sortAsc?va-vb:vb-va;
+      });
+    }
     return rows;
   },[menuStats,search,sortKey,sortAsc]);
 
@@ -1701,7 +1714,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
     if(!rows.length||!dates.length) return <div style={{padding:20,textAlign:"center",color:T.t3,fontFamily:F}}>데이터 없음</div>;
     const qtyMap={};
     periodHist.forEach(h=>Object.values(h.items||{}).forEach(item=>{
-      const k=item.catName||item.name;
+      const k=item.name||item.catName;
       qtyMap[`${k}__${h.date}`]=(qtyMap[`${k}__${h.date}`]||0)+(item.qty||0);
     }));
     const maxQ=Math.max(...rows.flatMap(r=>dates.map(d=>qtyMap[`${r.catName}__${d}`]||0)),1);
@@ -2109,15 +2122,28 @@ function BevStatView({ bevHistory, onSwitchMode }) {
                   <tbody>
                     {tableData.map((s,i)=>{
                       const weColor=s.weDiff===null?T.t4:s.weDiff>=30?T.amber:s.weDiff<=-30?T.blue:T.t2;
+                      const showGroupHeader=sortKey==="totalQty"&&!sortAsc&&macroFilter==="전체"&&(i===0||tableData[i-1].macro!==s.macro);
                       return(
-                        <tr key={s.catName} onClick={()=>{setDrillKey({type:"menu",key:s.catName});setViewMode("drill");}}
-                          style={{borderTop:"1px solid "+T.b0,cursor:"pointer",
-                            background:i%2===0?T.card2:T.card,transition:"background .1s"}}
-                          onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.06)"}
-                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?T.card2:T.card}>
-                          <td style={{padding:"7px 10px",color:T.t1,fontWeight:500,maxWidth:160}}>
-                            <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.catName}</div>
-                          </td>
+                        <React.Fragment key={s.catName}>
+                          {showGroupHeader&&(
+                            <tr>
+                              <td colSpan="8" style={{padding:"6px 10px 3px",
+                                fontSize:10,fontWeight:800,color:"#3B82F6",fontFamily:F,
+                                background:"rgba(59,130,246,0.06)",
+                                borderTop:i===0?"none":"2px solid rgba(59,130,246,0.15)",
+                                letterSpacing:0.5}}>
+                                {s.macro}
+                              </td>
+                            </tr>
+                          )}
+                          <tr onClick={()=>{setDrillKey({type:"menu",key:s.catName});setViewMode("drill");}}
+                            style={{borderTop:"1px solid "+T.b0,cursor:"pointer",
+                              background:i%2===0?T.card2:T.card,transition:"background .1s"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.06)"}
+                            onMouseLeave={e=>e.currentTarget.style.background=i%2===0?T.card2:T.card}>
+                            <td style={{padding:"7px 10px",color:T.t1,fontWeight:500,maxWidth:160}}>
+                              <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.korName||s.catName}</div>
+                            </td>
                           {macroFilter==="전체"&&(
                             <td style={{padding:"7px 6px",textAlign:"center"}}>
                               <span style={{fontSize:9,color:T.t3,background:T.card3,
@@ -2135,6 +2161,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
                             <Spark data={s.spark.slice(-7)}/>
                           </td>
                         </tr>
+                        </React.Fragment>
                       );
                     })}
                     {tableData.length===0&&(
@@ -2295,10 +2322,21 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
   const tableData=React.useMemo(()=>{
     let rows=[...skuStats];
     if(search) rows=rows.filter(s=>(s.name||"").toLowerCase().includes(search.toLowerCase()));
-    rows.sort((a,b)=>{
-      const va=a[sortKey]??-999, vb=b[sortKey]??-999;
-      return sortAsc?va-vb:vb-va;
-    });
+    // 기본 정렬: 카테고리 그룹(Bev→Food→원재료) → totalSold 내림차순
+    if(sortKey==="totalSold"&&!sortAsc) {
+      const catOrder=["[10] Bev","[20] Food","[50] 원재료"];
+      rows.sort((a,b)=>{
+        const ci=catOrder.indexOf(a.cat), cj=catOrder.indexOf(b.cat);
+        const co=(ci===-1?99:ci)-(cj===-1?99:cj);
+        if(co!==0) return co;
+        return (b.totalSold??0)-(a.totalSold??0);
+      });
+    } else {
+      rows.sort((a,b)=>{
+        const va=a[sortKey]??-999, vb=b[sortKey]??-999;
+        return sortAsc?va-vb:vb-va;
+      });
+    }
     return rows;
   },[skuStats,search,sortKey,sortAsc]);
 
@@ -2845,17 +2883,31 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
                       const weColor=s.weDiff===null?T.t4:s.weDiff>=30?T.amber:s.weDiff<=-30?T.blue:T.t2;
                       const zeroColor=s.zeroRate>30?T.red:s.zeroRate>15?T.amber:T.t3;
                       const wasteColor=s.wasteRate!==null&&s.wasteRate>8?T.amber:T.t3;
+                      const showCatHeader=sortKey==="totalSold"&&!sortAsc&&catFilter==="전체"&&(i===0||tableData[i-1].cat!==s.cat);
+                      const catLabel=s.cat.replace("[10] ","").replace("[20] ","").replace("[50] ","");
                       return(
-                        <tr key={s.sku} onClick={()=>{setDrillSku(s.sku);setViewMode("drill");}}
-                          style={{borderTop:"1px solid "+T.b0,cursor:"pointer",
-                            background:i%2===0?T.card2:T.card,transition:"background .1s"}}
-                          onMouseEnter={e=>e.currentTarget.style.background=T.brandDim}
-                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?T.card2:T.card}>
-                          <td style={{padding:"7px 10px",color:T.t1,fontWeight:500,maxWidth:160}}>
-                            <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                              {s.name}
-                            </div>
-                          </td>
+                        <React.Fragment key={s.sku}>
+                          {showCatHeader&&(
+                            <tr>
+                              <td colSpan="10" style={{padding:"6px 10px 3px",
+                                fontSize:10,fontWeight:800,color:T.brand,fontFamily:F,
+                                background:T.brandDim,
+                                borderTop:i===0?"none":"2px solid "+T.brandBorder,
+                                letterSpacing:0.5}}>
+                                {catLabel}
+                              </td>
+                            </tr>
+                          )}
+                          <tr onClick={()=>{setDrillSku(s.sku);setViewMode("drill");}}
+                            style={{borderTop:"1px solid "+T.b0,cursor:"pointer",
+                              background:i%2===0?T.card2:T.card,transition:"background .1s"}}
+                            onMouseEnter={e=>e.currentTarget.style.background=T.brandDim}
+                            onMouseLeave={e=>e.currentTarget.style.background=i%2===0?T.card2:T.card}>
+                            <td style={{padding:"7px 10px",color:T.t1,fontWeight:500,maxWidth:160}}>
+                              <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {s.name}
+                              </div>
+                            </td>
                           {catFilter==="전체"&&(
                             <td style={{padding:"7px 6px",textAlign:"center"}}>
                               <span style={{fontSize:9,color:T.t3,background:T.card3,
@@ -2889,6 +2941,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
                             <Spark data={s.spark.slice(-7)}/>
                           </td>
                         </tr>
+                          </React.Fragment>
                       );
                     })}
                     {tableData.length===0&&(
