@@ -159,6 +159,21 @@ const DB = {
       return snap.empty ? [] : snap.docs.map(d => d.data());
     } catch(e) { console.warn("Firestore loadOrderLog error:", e); return []; }
   },
+  // ── 음료 판매 히스토리 ──
+  saveBevEntry: async (storeId, entry) => {
+    try {
+      await DB.path(storeId).collection("bevHistory").doc(entry.date).set({
+        ...entry, _savedAt: Date.now()
+      });
+      return true;
+    } catch(e) { console.warn("Firestore saveBevEntry error:", e); return false; }
+  },
+  loadBevHistory: async (storeId) => {
+    try {
+      const snap = await DB.path(storeId).collection("bevHistory").orderBy("date","asc").get();
+      return snap.empty ? null : snap.docs.map(d => d.data());
+    } catch(e) { console.warn("Firestore loadBevHistory error:", e); return null; }
+  },
 };
 
 /* ─── Utils ─────────────────────────────────────── */
@@ -298,6 +313,95 @@ function parseInventoryExcel(arrayBuffer, dateOverride) {
   return { date: dateStr, dow: getDow(dateStr), items };
 }
 
+/* ── 음료 판매 파일 파싱 ── */
+// 제외 카테고리: 1050(Dairy/Fruit), 1090(Syrup/Shot/Custom 등)
+const BEV_EXCLUDE_PREFIX = ['1050', '1090'];
+
+// 에스프레소 대분류 매핑 (코드 앞자리)
+function getBevMacro(catCode) {
+  const c = String(catCode);
+  if (c.startsWith('1010010')) return 'Drip';
+  if (c.startsWith('1010040')) return 'Cold Brew';
+  if (c.startsWith('1020010')) return '에스프레소';
+  if (c.startsWith('1030010')) return 'Frappuccino';
+  if (c.startsWith('1030030')) return 'Blended';
+  if (c.startsWith('1040010')) return 'Tea';
+  if (c.startsWith('1040030')) return 'Fizzio';
+  if (c.startsWith('1040040')) return 'Chocolate';
+  if (c.startsWith('1040090')) return '기타음료';
+  return '기타';
+}
+
+// SKU명에서 사이즈 추출: (T)=Tall, (G)=Grande, (V)=Venti, (S)=Short, (TR)=Trenta
+function getSizeFromName(name) {
+  const m = String(name||"").match(/^\(([A-Z]+)\)/);
+  if (!m) return "기타";
+  switch(m[1]) {
+    case "S":  return "Short";
+    case "T":  return "Tall";
+    case "G":  return "Grande";
+    case "V":  return "Venti";
+    case "TR": return "Trenta";
+    default:   return m[1];
+  }
+}
+
+function parseBeverageExcel(arrayBuffer, dateOverride) {
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  let curCatCode = null, curCatName = null, curMacro = null;
+  const items = {};
+  const categories = {};
+
+  rows.forEach(row => {
+    if (!row || row.length < 5) return;
+    const rawCode = row[0], catNameEn = row[1], skuNo = row[2], skuName = row[3];
+    const qty     = parseFloat(row[4]) || 0;
+    const sales   = parseFloat(row[7]) || 0;
+
+    // 카테고리 행 감지
+    if (rawCode && String(rawCode) !== "분류코드" && String(rawCode) !== "합 계") {
+      curCatCode = String(rawCode);
+      curCatName = catNameEn || curCatCode;
+      curMacro   = getBevMacro(curCatCode);
+    }
+    // 소계/합계 행, 헤더, 데이터 없는 행 제외
+    if (!skuNo || !skuName || qty === 0) return;
+    if (String(skuName).includes("소") && String(skuName).includes("계")) return;
+    // 제외 카테고리
+    if (!curCatCode || BEV_EXCLUDE_PREFIX.some(p => curCatCode.startsWith(p))) return;
+
+    const size = getSizeFromName(skuName);
+    const key  = String(skuNo);
+
+    items[key] = {
+      sku:     key,
+      catCode: curCatCode,
+      catName: curCatName,
+      macro:   curMacro,
+      name:    String(skuName).replace(/^\([A-Z]+\)/, "").trim(),
+      fullName: String(skuName),
+      size,
+      qty,
+      sales: Math.round(sales),
+    };
+
+    if (!categories[curCatName]) {
+      categories[curCatName] = { catCode:curCatCode, catName:curCatName, macro:curMacro, qty:0, sales:0 };
+    }
+    categories[curCatName].qty   += qty;
+    categories[curCatName].sales += Math.round(sales);
+  });
+
+  const totalQty   = Object.values(categories).reduce((s,c)=>s+c.qty,   0);
+  const totalSales = Object.values(categories).reduce((s,c)=>s+c.sales, 0);
+
+  const dateStr = dateOverride || todayStr();
+  return { date: dateStr, dow: getDow(dateStr), categories, items, totalQty, totalSales };
+}
+
 /* ─── App Entry ──────────────────────────────────── */
 function App() {
   const [tab, setTab] = useState("dashboard");
@@ -311,6 +415,7 @@ function App() {
 
   // 핵심 데이터
   const [uploadHistory, setUploadHistory] = useState(() => LS.get("history", []));
+  const [bevHistory,    setBevHistory]    = useState(() => LS.get("bevHistory", []));
   const [manualItems,   setManualItems]   = useState(() => LS.get("manualItems", ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"]));
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
   // 수동 당일폐기 설정: { [sku]: true(강제 당일) | false(강제 해제) }
@@ -321,10 +426,11 @@ function App() {
     setSyncStatus("loading");
     (async () => {
       try {
-        const [cfg, recs, hist] = await Promise.all([
+        const [cfg, recs, hist, bev] = await Promise.all([
           DB.loadConfig(storeId),
           DB.loadManualRecords(storeId),
           DB.loadHistory(storeId),
+          DB.loadBevHistory(storeId),
         ]);
         if (cfg) {
           if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
@@ -333,6 +439,9 @@ function App() {
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
         if (hist !== null && hist.length > 0) {
           setUploadHistory(hist); LS.set("history", hist);
+        }
+        if (bev !== null && bev.length > 0) {
+          setBevHistory(bev); LS.set("bevHistory", bev);
         } else {
           // Firebase에 히스토리 없음 → 로컬 데이터를 Firebase에 업로드 (최초 동기화)
           const localHist = LS.get("history", []);
@@ -352,6 +461,13 @@ function App() {
   }, [storeId]);
 
   // ── Firebase + LS 통합 저장 함수 ──
+  const saveBevHistory = async (v, newEntry) => {
+    setBevHistory(v); LS.set("bevHistory", v);
+    if (storeId && window.db && newEntry) {
+      await DB.saveBevEntry(storeId, newEntry);
+    }
+  };
+
   const saveHistory = async (v, newEntry) => {
     // 업로드 전후 변화 계산
     if (newEntry && uploadHistory.length > 0) {
@@ -668,6 +784,8 @@ function App() {
           <UploadTab
             uploadHistory={uploadHistory}
             onSave={saveHistory}
+            bevHistory={bevHistory}
+            onSaveBev={saveBevHistory}
             skuAliases={skuAliases}
             onSaveAliases={saveSkuAliases}
           />
@@ -676,6 +794,7 @@ function App() {
         {storeId && dataLoaded && tab==="history" && (
           <HistoryTab
             uploadHistory={uploadHistory}
+            bevHistory={bevHistory}
             skuAliases={skuAliases}
           />
         )}
@@ -947,11 +1066,14 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 }
 
 /* ─── 실사 업로드 탭 ─────────────────────────────── */
-function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
+function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
+  const [uploadMode, setUploadMode] = useState("inventory"); // "inventory" | "bev"
   const [dragging, setDragging] = useState(false);
-  const [pending,  setPending]  = useState([]); // [{id,filename,data,customDate,expanded}]
+  const [pending,  setPending]  = useState([]);
+  const [bevPending, setBevPending] = useState([]);
   const [error,    setError]    = useState("");
   const fileRef = useRef();
+  const bevFileRef = useRef();
 
   const parseFiles = async (files) => {
     setError("");
@@ -1024,12 +1146,62 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
 
   const toggleExpand = (id) => setPending(prev => prev.map(p => p.id===id ? {...p,expanded:!p.expanded} : p));
 
+  // ── 음료 파일 파싱 ──
+  const parseBevFiles = async (files) => {
+    setError("");
+    const newItems = [];
+    for (const file of files) {
+      const ext = file.name.split(".").pop().toLowerCase();
+      if (!["xlsx","xls"].includes(ext)) { setError('"'+file.name+'" — xlsx 또는 xls 파일만 지원해요'); continue; }
+      try {
+        const buf = await file.arrayBuffer();
+        const guessDate = extractDateFromFilename(file.name);
+        const data = parseBeverageExcel(buf, guessDate);
+        newItems.push({ id:Date.now()+Math.random(), filename:file.name, data, customDate:guessDate });
+      } catch(e) { setError('"'+file.name+'" 파싱 오류: '+e.message); }
+    }
+    if (newItems.length) setBevPending(prev => [...prev, ...newItems]);
+  };
+
+  const saveBevOne = (item) => {
+    const exists = bevHistory.findIndex(h => h.date === item.data.date);
+    let updated;
+    if (exists >= 0) {
+      if (!window.confirm(item.data.date+" 날짜의 기존 음료 데이터가 있어요. 덮어쓸까요?")) return;
+      updated = bevHistory.map((h,i) => i===exists ? item.data : h);
+    } else {
+      updated = [...bevHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
+    }
+    onSaveBev(updated, item.data);
+    setBevPending(prev => prev.filter(p => p.id !== item.id));
+  };
+
   return (
     <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
-      <SH title="📁 실사 데이터 업로드"
-        sub="엑셀 파일 업로드 → 날짜 설정 → 발주 추천에 반영"/>
 
-      {/* 드롭존 — 항상 표시, multiple 지원 */}
+      {/* ── 업로드 모드 세그먼트 컨트롤 ── */}
+      <div style={{ display:"flex", background:T.card2, borderRadius:12, padding:3,
+        marginBottom:16, border:"1px solid "+T.b0 }}>
+        {[["inventory","📋 재고 실사"],["bev","🧃 음료 판매"]].map(([id,label])=>(
+          <button key={id} onClick={()=>{ setUploadMode(id); setError(""); }}
+            style={{ flex:1, padding:"8px 0", borderRadius:10, border:"none",
+              cursor:"pointer", fontFamily:F, fontSize:13, fontWeight:uploadMode===id?700:400,
+              background:uploadMode===id?T.card:"transparent",
+              color:uploadMode===id?T.t1:T.t3,
+              boxShadow:uploadMode===id?"0 1px 4px rgba(0,0,0,0.1)":"none",
+              transition:"all .15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── 재고 실사 업로드 ── */}
+      {uploadMode==="inventory" && (
+      <div>
+      <SH title="📋 재고 실사 업로드"
+        sub="실사 엑셀 파일 업로드 → 날짜 확인 → 저장"/>
+
+      {/* 드롭존 */}
       <div
         onDragOver={e=>{e.preventDefault();setDragging(true);}}
         onDragLeave={()=>setDragging(false)}
@@ -1118,6 +1290,130 @@ function UploadTab({ uploadHistory, onSave, skuAliases, onSaveAliases }) {
           </Card>
         </div>
       )}
+      </div>  {/* inventory mode end */}
+      )}
+
+      {/* ── 음료 판매 업로드 ── */}
+      {uploadMode==="bev" && (
+        <div>
+          <SH title="🧃 음료 판매 업로드"
+            sub="POS 음료 판매 리포트 (xlsx) 업로드 → 날짜 확인 → 저장"/>
+
+          {/* 드롭존 */}
+          <div
+            onDragOver={e=>{e.preventDefault();setDragging(true);}}
+            onDragLeave={()=>setDragging(false)}
+            onDrop={e=>{e.preventDefault();setDragging(false);parseBevFiles(Array.from(e.dataTransfer.files));}}
+            onClick={()=>bevFileRef.current?.click()}
+            style={{ border:"2px dashed "+(dragging?T.blue:T.b1),
+              borderRadius:18, padding:"28px 20px", textAlign:"center",
+              background:dragging?"rgba(0,122,255,0.06)":T.card, cursor:"pointer",
+              transition:"all .2s", marginBottom:14 }}>
+            <input ref={bevFileRef} type="file" accept=".xlsx,.xls" multiple style={{ display:"none" }}
+              onChange={e=>{ parseBevFiles(Array.from(e.target.files)); e.target.value=""; }}/>
+            <div style={{ fontSize:28, marginBottom:8 }}>🧃</div>
+            <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F, marginBottom:4 }}>
+              음료 판매 파일을 드래그하거나 클릭해서 업로드
+            </div>
+            <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+              POS 음료 판매 리포트 xlsx · 파일명에 날짜 포함 권장 (예: 260301.xlsx)
+            </div>
+          </div>
+
+          {error && <div style={{ padding:"10px 14px", borderRadius:10, background:T.rDim,
+            color:T.red, fontSize:12, fontFamily:F, marginBottom:10 }}>{error}</div>}
+
+          {/* 대기 목록 */}
+          {bevPending.map(item => (
+            <Card key={item.id} style={{ marginBottom:10, padding:"14px 16px", border:"1px solid rgba(0,122,255,0.25)" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                <span style={{ fontSize:20 }}>📄</span>
+                <div style={{ flex:1, fontFamily:F }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:T.t1 }}>{item.filename}</div>
+                  <div style={{ fontSize:11, color:T.t3 }}>
+                    음료 {Object.keys(item.data.items||{}).length}개 SKU ·
+                    총 {Math.round(item.data.totalQty||0)}잔 · ₩{(item.data.totalSales||0).toLocaleString()}
+                  </div>
+                </div>
+                <input type="date" value={item.customDate}
+                  onChange={e=>setBevPending(prev=>prev.map(p=>p.id!==item.id?p:
+                    {...p, customDate:e.target.value, data:{...p.data,date:e.target.value,dow:getDow(e.target.value)}}))}
+                  style={{ padding:"5px 10px", borderRadius:8, border:"1px solid "+T.b1,
+                    fontFamily:F, fontSize:12, background:T.card }}/>
+              </div>
+              {/* 카테고리별 요약 */}
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+                {Object.entries(
+                  Object.values(item.data.items||{}).reduce((acc,i)=>{
+                    if(!acc[i.macro]) acc[i.macro]={qty:0};
+                    acc[i.macro].qty+=i.qty; return acc;
+                  },{})
+                ).sort((a,b)=>b[1].qty-a[1].qty).map(([macro,v])=>(
+                  <span key={macro} style={{ fontSize:11, padding:"2px 9px", borderRadius:12,
+                    background:"rgba(0,122,255,0.08)", color:T.blue,
+                    border:"1px solid rgba(0,122,255,0.2)", fontFamily:F, fontWeight:600 }}>
+                    {macro} {v.qty}잔
+                  </span>
+                ))}
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>saveBevOne(item)} style={{ flex:1, padding:"10px", borderRadius:10,
+                  border:"none", background:T.blue||"#007AFF", color:"#fff", fontSize:13,
+                  fontWeight:700, cursor:"pointer", fontFamily:F }}>
+                  💾 저장
+                </button>
+                <button onClick={()=>setBevPending(prev=>prev.filter(p=>p.id!==item.id))}
+                  style={{ padding:"10px 14px", borderRadius:10, border:"1px solid "+T.b1,
+                    background:T.card, color:T.t3, fontSize:12, cursor:"pointer", fontFamily:F }}>
+                  제거
+                </button>
+              </div>
+            </Card>
+          ))}
+
+          {/* 음료 업로드 이력 */}
+          {bevHistory.length > 0 && (
+            <div style={{ marginTop:12 }}>
+              <SH title="음료 업로드 기록" sub={bevHistory.length+"건"}/>
+              <Card>
+                {[...bevHistory].reverse().map((h, i, arr) => (
+                  <div key={h.date} style={{ padding:"12px 16px",
+                    display:"flex", alignItems:"center", gap:12,
+                    borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
+                    <div style={{ width:40, height:40, borderRadius:10,
+                      background:"rgba(0,122,255,0.1)",
+                      display:"flex", flexDirection:"column", alignItems:"center",
+                      justifyContent:"center", flexShrink:0 }}>
+                      <div style={{ fontSize:14, fontWeight:800, color:T.blue, lineHeight:1 }}>
+                        {new Date(h.date+"T00:00:00").getDate()}
+                      </div>
+                      <div style={{ fontSize:9, color:T.blue, opacity:0.7 }}>
+                        {new Date(h.date+"T00:00:00").toLocaleDateString("ko-KR",{month:"short"})}
+                      </div>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F }}>
+                        {fmtDate(h.date)} ({DOW_KR[h.dow]}요일)
+                      </div>
+                      <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
+                        {Object.keys(h.items||{}).length}개 SKU · {Math.round(h.totalQty||0)}잔
+                      </div>
+                    </div>
+                    <button onClick={()=>{
+                      if(!window.confirm("이 날짜 음료 데이터를 삭제할까요?")) return;
+                      const updated = bevHistory.filter(b=>b.date!==h.date);
+                      onSaveBev(updated, null);
+                    }} style={{ padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
+                      background:T.rDim, color:T.red, cursor:"pointer",
+                      fontSize:12, fontFamily:F }}>삭제</button>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1227,7 +1523,631 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
 /* ─── 버퍼 입력 셀: 독립 로컬 state로 stale closure 완전 제거 ─── */
 /* ─── 테이블 인라인 버퍼 수정 ─── */
 
-function HistoryTab({ uploadHistory, skuAliases }) {
+
+/* ─── 음료 통계 뷰 ────────────────────────────────── */
+function BevStatView({ bevHistory, onSwitchMode }) {
+  const DOW   = ["일","월","화","수","목","금","토"];
+  const rnd   = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
+  const today = new Date().toISOString().slice(0,10);
+
+  const PRESETS = [
+    { label:"이번 주",  getRange:()=>{ const d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7)); return [d.toISOString().slice(0,10),today]; }},
+    { label:"저번 주",  getRange:()=>{ const d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7)-7); const e=new Date(d); e.setDate(e.getDate()+6); return [d.toISOString().slice(0,10),e.toISOString().slice(0,10)]; }},
+    { label:"최근 14일",getRange:()=>{ const d=new Date(); d.setDate(d.getDate()-13); return [d.toISOString().slice(0,10),today]; }},
+    { label:"이번 달",  getRange:()=>{ const d=new Date(new Date().getFullYear(),new Date().getMonth(),1); return [d.toISOString().slice(0,10),today]; }},
+    { label:"전체",     getRange:()=>{ if(!bevHistory.length) return [today,today]; const s=[...bevHistory].sort((a,b)=>a.date.localeCompare(b.date)); return [s[0].date,s[s.length-1].date]; }},
+  ];
+
+  const [preset,     setPreset]     = React.useState("최근 14일");
+  const [showCustom, setShowCustom] = React.useState(false);
+  const [customFrom, setCustomFrom] = React.useState("");
+  const [customTo,   setCustomTo]   = React.useState("");
+  const [macroFilter,setMacroFilter]= React.useState("전체");
+  const [viewMode,   setViewMode]   = React.useState("overview"); // overview | heatmap | drill
+  const [drillKey,   setDrillKey]   = React.useState(null); // {type:"menu"|"cat", key}
+  const [sortKey,    setSortKey]    = React.useState("totalQty");
+  const [sortAsc,    setSortAsc]    = React.useState(false);
+  const [search,     setSearch]     = React.useState("");
+
+  const [rangeFrom, rangeTo] = React.useMemo(()=>{
+    if(showCustom&&customFrom&&customTo) return [customFrom,customTo];
+    const p=PRESETS.find(p=>p.label===preset);
+    return p?p.getRange():PRESETS[2].getRange();
+  },[preset,showCustom,customFrom,customTo,bevHistory]);
+
+  const periodHist = React.useMemo(()=>
+    [...bevHistory].filter(h=>h.date>=rangeFrom&&h.date<=rangeTo)
+      .sort((a,b)=>a.date.localeCompare(b.date)),
+    [bevHistory,rangeFrom,rangeTo]);
+
+  // 전체 대분류(macro) 목록
+  const allMacros = React.useMemo(()=>{
+    const s=new Set();
+    bevHistory.forEach(h=>Object.values(h.items||{}).forEach(i=>s.add(i.macro)));
+    return [...s].filter(Boolean).sort();
+  },[bevHistory]);
+
+  // ── 메뉴별 집계 (catName 기준) ──
+  const menuStats = React.useMemo(()=>{
+    const map={};
+    periodHist.forEach(h=>{
+      Object.values(h.items||{}).forEach(item=>{
+        if(macroFilter!=="전체"&&item.macro!==macroFilter) return;
+        const k=item.catName||item.name;
+        if(!map[k]) map[k]={
+          catName:k, macro:item.macro||"기타",
+          days:[], qtyArr:[], salesArr:[],
+          sizeDist:{}, spark:[]
+        };
+        const s=map[k];
+        s.days.push({date:h.date,dow:h.dow});
+        s.qtyArr.push(item.qty||0);
+        s.salesArr.push(item.sales||0);
+        if(!s.sizeDist[item.size]) s.sizeDist[item.size]=0;
+        s.sizeDist[item.size]+=(item.qty||0);
+        s.spark.push({date:h.date,dow:h.dow,qty:item.qty||0});
+      });
+    });
+    return Object.entries(map).map(([k,s])=>{
+      const totalQty  = rnd(s.qtyArr.reduce((a,b)=>a+b,0),0);
+      const totalSales= rnd(s.salesArr.reduce((a,b)=>a+b,0),0);
+      const avgQty    = s.qtyArr.length?rnd(totalQty/s.qtyArr.length,1):0;
+      // 요일별 평균
+      const dowMap={};
+      s.days.forEach((d,i)=>{ if(!dowMap[d.dow]) dowMap[d.dow]=[]; if(s.qtyArr[i]>0) dowMap[d.dow].push(s.qtyArr[i]); });
+      const dowAvg={};
+      [0,1,2,3,4,5,6].forEach(d=>{ const v=dowMap[d]; dowAvg[d]=v&&v.length?rnd(v.reduce((a,b)=>a+b,0)/v.length,1):null; });
+      const wdAvg=rnd(([1,2,3,4,5].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>a.length?s+v/a.length:s,0),1)||null;
+      const weAvg=rnd(([0,6].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>a.length?s+v/a.length:s,0),1)||null;
+      const weDiff=(wdAvg&&weAvg)?Math.round(((weAvg-wdAvg)/wdAvg)*100):null;
+      return {catName:k,macro:s.macro,totalQty,totalSales,avgQty,dowAvg,wdAvg,weAvg,weDiff,
+              sizeDist:s.sizeDist,spark:s.spark,days:s.days.length};
+    });
+  },[periodHist,macroFilter]);
+
+  // 대분류별 집계
+  const macroStats = React.useMemo(()=>{
+    const map={};
+    periodHist.forEach(h=>{
+      Object.values(h.items||{}).forEach(item=>{
+        const m=item.macro||"기타";
+        if(macroFilter!=="전체"&&m!==macroFilter) return;
+        if(!map[m]) map[m]={macro:m,totalQty:0,totalSales:0};
+        map[m].totalQty  +=(item.qty||0);
+        map[m].totalSales+=(item.sales||0);
+      });
+    });
+    return Object.values(map).sort((a,b)=>b.totalQty-a.totalQty);
+  },[periodHist,macroFilter]);
+
+  // KPI
+  const kpi = React.useMemo(()=>{
+    if(!periodHist.length) return null;
+    const totalQty   = rnd(periodHist.reduce((s,h)=>s+(h.totalQty||0),0),0);
+    const totalSales = rnd(periodHist.reduce((s,h)=>s+(h.totalSales||0),0),0);
+    const dayAvg     = rnd(totalQty/(periodHist.length||1),0);
+    const latest     = [...bevHistory].sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const todayTop   = latest ? Object.values(latest.items||{})
+      .sort((a,b)=>(b.qty||0)-(a.qty||0)).slice(0,1)[0]?.catName : null;
+    return {totalQty,totalSales,dayAvg,days:periodHist.length,todayTop};
+  },[periodHist,bevHistory]);
+
+  // 일별 총 판매
+  const dailySales = React.useMemo(()=>periodHist.map(h=>({
+    date:h.date, dow:h.dow,
+    qty: macroFilter==="전체"
+      ? (h.totalQty||0)
+      : rnd(Object.values(h.items||{}).filter(i=>i.macro===macroFilter).reduce((s,i)=>s+(i.qty||0),0),0)
+  })),[periodHist,macroFilter]);
+
+  // 테이블 데이터
+  const tableData = React.useMemo(()=>{
+    let rows=[...menuStats];
+    if(search) rows=rows.filter(s=>s.catName.toLowerCase().includes(search.toLowerCase()));
+    rows.sort((a,b)=>{
+      const va=a[sortKey]??-999, vb=b[sortKey]??-999;
+      return sortAsc?va-vb:vb-va;
+    });
+    return rows;
+  },[menuStats,search,sortKey,sortAsc]);
+
+  // ── 차트 컴포넌트 ──
+  const BarChart=({data,colorFn})=>{
+    if(!data||data.length<1) return null;
+    const maxV=Math.max(...data.map(d=>d.qty),1);
+    return(
+      <div style={{display:"flex",gap:3,alignItems:"flex-end",height:72}}>
+        {data.map((d,i)=>{
+          const h=Math.max(3,(d.qty/maxV)*64);
+          const isWe=d.dow===0||d.dow===6;
+          return(
+            <div key={d.date} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+              <div style={{fontSize:7.5,color:T.t4,lineHeight:1}}>{d.qty>0?d.qty:""}</div>
+              <div style={{width:"100%",height:h,background:colorFn?colorFn(d,isWe):(isWe?T.amber:T.blue),
+                borderRadius:"3px 3px 0 0",opacity:0.85}}/>
+              <div style={{fontSize:8,color:isWe?T.amber:T.t4}}>{DOW[d.dow]}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const Spark=({data})=>{
+    const W=56,H=18;
+    if(!data||data.length<2) return <svg width={W} height={H}/>;
+    const maxV=Math.max(...data.map(d=>d.qty),1);
+    const xs=data.map((_,i)=>2+i*(W-4)/(data.length-1));
+    const ys=data.map(d=>H-3-(d.qty/maxV)*(H-6));
+    const path=xs.map((x,i)=>(i===0?`M${x},${ys[i]}`:`L${x},${ys[i]}`)).join(" ");
+    return(
+      <svg width={W} height={H} style={{display:"block"}}>
+        <path d={path} fill="none" stroke={T.blue} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx={xs[xs.length-1]} cy={ys[ys.length-1]} r="2" fill={T.blue}/>
+      </svg>
+    );
+  };
+
+  // 히트맵
+  const HeatmapView=()=>{
+    const rows=tableData.slice(0,25);
+    const dates=periodHist.map(h=>h.date);
+    if(!rows.length||!dates.length) return <div style={{padding:20,textAlign:"center",color:T.t3,fontFamily:F}}>데이터 없음</div>;
+    const qtyMap={};
+    periodHist.forEach(h=>Object.values(h.items||{}).forEach(item=>{
+      const k=item.catName||item.name;
+      qtyMap[`${k}__${h.date}`]=(qtyMap[`${k}__${h.date}`]||0)+(item.qty||0);
+    }));
+    const maxQ=Math.max(...rows.flatMap(r=>dates.map(d=>qtyMap[`${r.catName}__${d}`]||0)),1);
+    const getColor=(v,max)=>{
+      if(v===0) return "#F2F2F7";
+      const t=v/max;
+      if(t<0.25) return "#C6D9F7";
+      if(t<0.5)  return "#7DAAEF";
+      if(t<0.75) return "#3B82F6";
+      return "#1D4ED8";
+    };
+    return(
+      <div style={{overflowX:"auto"}}>
+        <table style={{borderCollapse:"collapse",fontSize:10,fontFamily:F,minWidth:"100%"}}>
+          <thead>
+            <tr>
+              <th style={{padding:"4px 8px",textAlign:"left",color:T.t3,fontWeight:600,minWidth:110,
+                position:"sticky",left:0,background:T.card,zIndex:1}}>메뉴</th>
+              {dates.map(d=>{
+                const dd=new Date(d+"T00:00:00");
+                return(
+                  <th key={d} style={{padding:"2px 3px",textAlign:"center",
+                    color:dd.getDay()===0||dd.getDay()===6?T.red:T.t3,fontWeight:400,minWidth:26}}>
+                    <div>{d.slice(8)}</div><div>{DOW[dd.getDay()]}</div>
+                  </th>
+                );
+              })}
+              <th style={{padding:"4px 8px",textAlign:"right",color:T.blue,fontWeight:700}}>합계</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row,ri)=>(
+              <tr key={row.catName} style={{cursor:"pointer"}}
+                onClick={()=>{setDrillKey({type:"menu",key:row.catName});setViewMode("drill");}}>
+                <td style={{padding:"4px 8px",color:T.t1,fontWeight:500,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110,
+                  position:"sticky",left:0,background:ri%2===0?T.card2:T.card,zIndex:1}}>
+                  {row.catName.length>14?row.catName.slice(0,13)+"…":row.catName}
+                </td>
+                {dates.map(d=>{
+                  const v=qtyMap[`${row.catName}__${d}`]||0;
+                  return(
+                    <td key={d} style={{padding:"2px 3px",textAlign:"center",
+                      background:getColor(v,maxQ),color:v>maxQ*0.5?"#fff":"#333",
+                      borderRadius:3,fontSize:9}}>
+                      {v>0?v:""}
+                    </td>
+                  );
+                })}
+                <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:T.blue,fontSize:11}}>
+                  {row.totalQty}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{fontSize:10,color:T.t4,fontFamily:F,marginTop:8,textAlign:"center"}}>
+          행 클릭 → 메뉴 상세 · 상위 25개 표시
+        </div>
+      </div>
+    );
+  };
+
+  // 드릴다운
+  const DrillView=()=>{
+    if(!drillKey) return null;
+    const stat=menuStats.find(s=>s.catName===drillKey.key);
+    if(!stat) return null;
+    const sparkData=stat.spark.slice(-21);
+    const maxQ=Math.max(...sparkData.map(d=>d.qty),1);
+    // 사이즈 비율 계산
+    const sizeTotal=Object.values(stat.sizeDist).reduce((a,b)=>a+b,0)||1;
+    const sizeEntries=Object.entries(stat.sizeDist).sort((a,b)=>b[1]-a[1]);
+    const SIZE_COLORS={"Short":"#8B5CF6","Tall":"#3B82F6","Grande":"#10B981","Venti":"#F59E0B","Trenta":"#EF4444","기타":"#9CA3AF"};
+    return(
+      <div>
+        <button onClick={()=>setViewMode("overview")} style={{
+          fontSize:12,color:T.blue,background:"rgba(0,122,255,0.1)",
+          border:"1px solid rgba(0,122,255,0.3)",
+          borderRadius:8,padding:"5px 12px",cursor:"pointer",fontFamily:F,marginBottom:14}}>
+          ← 목록으로
+        </button>
+        <div style={{fontSize:16,fontWeight:800,color:T.t1,fontFamily:F,marginBottom:3}}>{stat.catName}</div>
+        <div style={{fontSize:12,color:T.t3,fontFamily:F,marginBottom:14}}>
+          {stat.macro} · {rangeFrom} ~ {rangeTo}
+        </div>
+        {/* KPI */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+          {[
+            {label:"기간 총 판매",value:stat.totalQty+"잔",color:T.blue},
+            {label:"일 평균",value:stat.avgQty+"잔",color:T.t2},
+            {label:"매출",value:"₩"+(stat.totalSales||0).toLocaleString(),color:T.t2},
+          ].map(k=>(
+            <div key={k.label} style={{background:T.card,border:"1px solid "+T.b0,
+              borderRadius:12,padding:"10px 12px",textAlign:"center"}}>
+              <div style={{fontSize:10,color:T.t3,fontFamily:F,marginBottom:3}}>{k.label}</div>
+              <div style={{fontSize:16,fontWeight:900,color:k.color,fontFamily:F,lineHeight:1}}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+        {/* 바차트 */}
+        <Card style={{padding:"14px 16px",marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:8}}>일별 판매 추이</div>
+          <div style={{display:"flex",gap:3,alignItems:"flex-end",height:80}}>
+            {sparkData.map((d,i)=>{
+              const h=Math.max(4,(d.qty/maxQ)*72);
+              const isWe=d.dow===0||d.dow===6;
+              return(
+                <div key={d.date} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{fontSize:8,color:T.t4}}>{d.qty>0?d.qty:""}</div>
+                  <div style={{width:"100%",height:h,
+                    background:isWe?T.amber:"#3B82F6",
+                    borderRadius:"3px 3px 0 0",opacity:0.85}}/>
+                  <div style={{fontSize:8,color:isWe?T.amber:T.t4}}>{DOW[d.dow]}</div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+        {/* 요일별 평균 + 사이즈 분포 */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <Card style={{padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:8}}>요일별 평균</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+              {[0,1,2,3,4,5,6].map(dow=>{
+                const avg=stat.dowAvg[dow];
+                const maxA=Math.max(...Object.values(stat.dowAvg).map(v=>parseFloat(v)||0),1);
+                const ratio=(parseFloat(avg)||0)/maxA;
+                const col=dow===0?T.red:dow===6?T.amber:"#3B82F6";
+                return(
+                  <div key={dow} style={{textAlign:"center"}}>
+                    <div style={{fontSize:9,fontWeight:700,color:col,fontFamily:F,marginBottom:2}}>{DOW[dow]}</div>
+                    <div style={{height:32,background:T.card3,borderRadius:3,position:"relative",overflow:"hidden",marginBottom:2}}>
+                      <div style={{position:"absolute",bottom:0,left:0,right:0,
+                        height:(ratio*100)+"%",background:col,opacity:0.8,borderRadius:3}}/>
+                    </div>
+                    <div style={{fontSize:9,fontWeight:700,color:col,fontFamily:F}}>{avg??"-"}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {stat.wdAvg&&stat.weAvg&&(
+              <div style={{display:"flex",gap:8,marginTop:8,fontSize:10,fontFamily:F,flexWrap:"wrap"}}>
+                <span style={{color:T.t2}}>평일 {stat.wdAvg}잔</span>
+                <span style={{color:T.amber}}>주말 {stat.weAvg}잔</span>
+                {stat.weDiff!==null&&(
+                  <span style={{color:stat.weDiff>0?T.amber:T.blue,fontWeight:700}}>
+                    주말 {stat.weDiff>0?"▲":"▼"}{Math.abs(stat.weDiff)}%
+                  </span>
+                )}
+              </div>
+            )}
+          </Card>
+          <Card style={{padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:8}}>사이즈 분포</div>
+            {sizeEntries.map(([size,qty])=>{
+              const pct=Math.round(qty/sizeTotal*100);
+              const col=SIZE_COLORS[size]||"#9CA3AF";
+              return(
+                <div key={size} style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <span style={{fontSize:11,color:T.t1,fontFamily:F,fontWeight:600}}>{size}</span>
+                    <span style={{fontSize:11,color:col,fontFamily:F,fontWeight:700}}>{qty}잔 ({pct}%)</span>
+                  </div>
+                  <div style={{height:7,background:T.card3,borderRadius:4,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:pct+"%",background:col,borderRadius:4,opacity:0.85}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      </div>
+    );
+  };
+
+  const SortTh=({k,label,color=T.t3,minW=55})=>{
+    const active=sortKey===k;
+    return(
+      <th onClick={()=>{if(active)setSortAsc(a=>!a);else{setSortKey(k);setSortAsc(false);}}}
+        style={{padding:"8px 8px",textAlign:"center",color:active?color:T.t3,
+          fontWeight:700,cursor:"pointer",minWidth:minW,whiteSpace:"nowrap",
+          background:active?color+"11":"transparent",userSelect:"none",fontSize:11}}>
+        {label}{active?(sortAsc?"↑":"↓"):""}
+      </th>
+    );
+  };
+
+  if(!bevHistory.length) return(
+    <div>
+      {/* 세그먼트 컨트롤 */}
+      <div style={{padding:"12px 14px 0"}}>
+        <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
+          marginBottom:20,border:"1px solid "+T.b0}}>
+          {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+            <button key={id} onClick={()=>onSwitchMode&&onSwitchMode(id)}
+              style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
+                fontFamily:F,fontSize:13,fontWeight:id==="bev"?700:400,
+                background:id==="bev"?T.card:"transparent",
+                color:id==="bev"?T.t1:T.t3,
+                boxShadow:id==="bev"?"0 1px 4px rgba(0,0,0,0.1)":"none",
+                transition:"all .15s"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{padding:"0 14px 40px"}}>
+        <EmptyState emoji="🧃" text="음료 판매 데이터가 없어요" sub="실사 탭 → 음료 판매 탭에서 POS 리포트를 업로드하면 통계를 볼 수 있어요"/>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{padding:window.innerWidth>=768?"24px 28px":"12px"}}>
+      {/* 세그먼트 컨트롤 */}
+      <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
+        marginBottom:14,border:"1px solid "+T.b0}}>
+        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+          <button key={id} onClick={()=>onSwitchMode&&onSwitchMode(id)}
+            style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:F,fontSize:13,fontWeight:id==="bev"?700:400,
+              background:id==="bev"?T.card:"transparent",
+              color:id==="bev"?T.t1:T.t3,
+              boxShadow:id==="bev"?"0 1px 4px rgba(0,0,0,0.1)":"none",
+              transition:"all .15s"}}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* 컨트롤 바 */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14,
+        position:"sticky",top:0,zIndex:10,background:T.bg,
+        paddingTop:8,paddingBottom:10,marginLeft:window.innerWidth>=768?-28:-12,
+        marginRight:window.innerWidth>=768?-28:-12,
+        paddingLeft:window.innerWidth>=768?28:12,
+        paddingRight:window.innerWidth>=768?28:12,
+        borderBottom:"1px solid "+T.b0}}>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {PRESETS.map(p=>(
+            <button key={p.label} onClick={()=>{setPreset(p.label);setShowCustom(false);}} style={{
+              padding:"5px 11px",borderRadius:20,cursor:"pointer",fontFamily:F,fontSize:12,
+              border:"1px solid "+(preset===p.label&&!showCustom?"#3B82F6":T.b1),
+              background:preset===p.label&&!showCustom?"rgba(59,130,246,0.1)":T.card,
+              color:preset===p.label&&!showCustom?"#3B82F6":T.t2,
+              fontWeight:preset===p.label&&!showCustom?700:400}}>
+              {p.label}
+            </button>
+          ))}
+          <button onClick={()=>setShowCustom(v=>!v)} style={{
+            padding:"5px 11px",borderRadius:20,cursor:"pointer",fontFamily:F,fontSize:12,
+            border:"1px solid "+(showCustom?"#3B82F6":T.b1),
+            background:showCustom?"rgba(59,130,246,0.1)":T.card,
+            color:showCustom?"#3B82F6":T.t2,fontWeight:showCustom?700:400}}>직접설정</button>
+        </div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginLeft:"auto"}}>
+          {["전체",...allMacros].map(m=>(
+            <button key={m} onClick={()=>setMacroFilter(m)} style={{
+              padding:"5px 10px",borderRadius:16,cursor:"pointer",fontFamily:F,fontSize:11,
+              border:"1px solid "+(macroFilter===m?"#3B82F6":T.b1),
+              background:macroFilter===m?"rgba(59,130,246,0.1)":T.card,
+              color:macroFilter===m?"#3B82F6":T.t2,fontWeight:macroFilter===m?700:400}}>
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      {showCustom&&(
+        <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:12,color:T.t3,fontFamily:F}}>기간</span>
+          <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+            style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
+          <span style={{color:T.t3}}>~</span>
+          <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+            style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
+        </div>
+      )}
+
+      {viewMode==="drill" ? <DrillView/> : (
+        <>
+          <div style={{fontSize:11,color:T.t3,fontFamily:F,marginBottom:12}}>
+            📅 {rangeFrom} ~ {rangeTo}{periodHist.length>0?` (${periodHist.length}일)`:" — 해당 기간 데이터 없음"}
+          </div>
+
+          {/* KPI */}
+          {kpi&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+              {[
+                {label:"기간 총 판매",value:kpi.totalQty+"잔",color:"#3B82F6"},
+                {label:"일 평균",value:kpi.dayAvg+"잔",color:T.t2},
+                {label:"총 매출",value:"₩"+(kpi.totalSales||0).toLocaleString(),color:T.t2},
+              ].map(c=>(
+                <div key={c.label} style={{background:T.card,border:"1px solid "+T.b0,
+                  borderRadius:12,padding:"12px 14px",textAlign:"center"}}>
+                  <div style={{fontSize:10,color:T.t3,fontFamily:F,marginBottom:4}}>{c.label}</div>
+                  <div style={{fontSize:18,fontWeight:900,color:c.color,fontFamily:F,lineHeight:1}}>{c.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 대분류 카드 */}
+          {macroStats.length>0&&macroFilter==="전체"&&(
+            <Card style={{padding:"14px 16px",marginBottom:14,overflow:"hidden"}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:10}}>카테고리별 판매</div>
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"flex",gap:8,minWidth:"max-content"}}>
+                  {macroStats.map(m=>{
+                    const pct=kpi?Math.round(m.totalQty/kpi.totalQty*100):0;
+                    return(
+                      <div key={m.macro} onClick={()=>setMacroFilter(m.macro)}
+                        style={{background:"rgba(59,130,246,0.07)",border:"1px solid rgba(59,130,246,0.2)",
+                          borderRadius:12,padding:"10px 14px",cursor:"pointer",minWidth:100,
+                          textAlign:"center",transition:"all .15s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.14)"}
+                        onMouseLeave={e=>e.currentTarget.style.background="rgba(59,130,246,0.07)"}>
+                        <div style={{fontSize:20,fontWeight:900,color:"#3B82F6",fontFamily:F,lineHeight:1}}>{m.totalQty}</div>
+                        <div style={{fontSize:10,color:T.t2,fontFamily:F,marginTop:3}}>{m.macro}</div>
+                        <div style={{fontSize:10,color:T.t4,fontFamily:F}}>{pct}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* 일별 바차트 */}
+          {dailySales.length>=2&&(
+            <Card style={{padding:"14px 16px",marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:8}}>일별 판매 추이</div>
+              <BarChart data={dailySales}/>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:8}}>
+                {[0,1,2,3,4,5,6].map(dow=>{
+                  const days=dailySales.filter(d=>d.dow===dow);
+                  if(!days.length) return null;
+                  const avg=Math.round(days.reduce((s,d)=>s+d.qty,0)/days.length);
+                  const isWe=dow===0||dow===6;
+                  return(
+                    <div key={dow} style={{fontSize:11,
+                      background:isWe?T.aDim:T.card2,borderRadius:6,padding:"2px 8px",
+                      fontFamily:F,color:dow===0?T.red:dow===6?T.amber:T.t2,fontWeight:isWe?700:400}}>
+                      {DOW[dow]} avg {avg}잔
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* 뷰 탭 */}
+          <div style={{display:"flex",gap:6,marginBottom:12}}>
+            {[["overview","📋 메뉴 분석"],["heatmap","🟦 히트맵"]].map(([id,label])=>(
+              <button key={id} onClick={()=>setViewMode(id)} style={{
+                padding:"7px 14px",borderRadius:10,border:"none",cursor:"pointer",
+                fontFamily:F,fontSize:12,fontWeight:viewMode===id?700:400,
+                background:viewMode===id?"#3B82F6":T.card2,
+                color:viewMode===id?"#fff":T.t2}}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {viewMode==="heatmap"&&(
+            <Card style={{padding:"14px 16px",overflow:"hidden"}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.t1,fontFamily:F,marginBottom:6}}>메뉴별 일별 판매 히트맵</div>
+              <div style={{fontSize:10,color:T.t3,fontFamily:F,marginBottom:10}}>상위 25개 메뉴 · 행 클릭 → 상세</div>
+              <HeatmapView/>
+            </Card>
+          )}
+
+          {viewMode==="overview"&&(
+            <Card style={{overflow:"hidden"}}>
+              <div style={{padding:"12px 14px",borderBottom:"1px solid "+T.b0}}>
+                <div style={{position:"relative"}}>
+                  <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:14,pointerEvents:"none"}}>🔍</span>
+                  <input value={search} onChange={e=>setSearch(e.target.value)}
+                    placeholder="메뉴명 검색..."
+                    style={{width:"100%",padding:"8px 10px 8px 32px",borderRadius:8,
+                      border:"1px solid "+T.b1,fontFamily:F,fontSize:12,
+                      background:T.card,outline:"none",boxSizing:"border-box"}}/>
+                  {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,
+                    top:"50%",transform:"translateY(-50%)",fontSize:14,background:"none",
+                    border:"none",cursor:"pointer",color:T.t3}}>✕</button>}
+                </div>
+                <div style={{fontSize:11,color:T.t4,fontFamily:F,marginTop:6}}>
+                  {tableData.length}개 메뉴 · 헤더 클릭 정렬 · 행 클릭 → 상세
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:F}}>
+                  <thead>
+                    <tr style={{background:"rgba(59,130,246,0.08)"}}>
+                      <th style={{padding:"8px 10px",textAlign:"left",color:"#3B82F6",fontWeight:700,minWidth:130}}>메뉴명</th>
+                      {macroFilter==="전체"&&<th style={{padding:"8px 8px",textAlign:"center",color:T.t3,fontWeight:700,minWidth:70}}>카테고리</th>}
+                      <SortTh k="totalQty"  label="총 판매" color="#3B82F6" minW={55}/>
+                      <SortTh k="avgQty"    label="일 평균" color="#3B82F6" minW={55}/>
+                      <SortTh k="wdAvg"     label="📅 평일" color={T.t2}   minW={50}/>
+                      <SortTh k="weAvg"     label="🌅 주말" color={T.amber} minW={50}/>
+                      <SortTh k="weDiff"    label="주말증감" color={T.amber} minW={55}/>
+                      <th style={{padding:"8px 8px",textAlign:"center",color:T.t3,fontWeight:700,minWidth:60}}>추이</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableData.map((s,i)=>{
+                      const weColor=s.weDiff===null?T.t4:s.weDiff>=30?T.amber:s.weDiff<=-30?T.blue:T.t2;
+                      return(
+                        <tr key={s.catName} onClick={()=>{setDrillKey({type:"menu",key:s.catName});setViewMode("drill");}}
+                          style={{borderTop:"1px solid "+T.b0,cursor:"pointer",
+                            background:i%2===0?T.card2:T.card,transition:"background .1s"}}
+                          onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.06)"}
+                          onMouseLeave={e=>e.currentTarget.style.background=i%2===0?T.card2:T.card}>
+                          <td style={{padding:"7px 10px",color:T.t1,fontWeight:500,maxWidth:160}}>
+                            <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.catName}</div>
+                          </td>
+                          {macroFilter==="전체"&&(
+                            <td style={{padding:"7px 6px",textAlign:"center"}}>
+                              <span style={{fontSize:9,color:T.t3,background:T.card3,
+                                borderRadius:4,padding:"1px 5px",whiteSpace:"nowrap"}}>{s.macro}</span>
+                            </td>
+                          )}
+                          <td style={{padding:"7px 8px",textAlign:"center",color:"#3B82F6",fontWeight:700}}>{s.totalQty>0?s.totalQty:"-"}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",color:T.t2,fontWeight:600}}>{s.avgQty>0?s.avgQty:"-"}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",color:T.t2}}>{s.wdAvg??"-"}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",color:T.amber,fontWeight:s.weAvg?600:400}}>{s.weAvg??"-"}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",color:weColor,fontWeight:700}}>
+                            {s.weDiff!==null?(s.weDiff>0?"▲":"▼")+Math.abs(s.weDiff)+"%":<span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{padding:"4px 8px",textAlign:"center"}}>
+                            <Spark data={s.spark.slice(-7)}/>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {tableData.length===0&&(
+                      <tr><td colSpan="8" style={{padding:24,textAlign:"center",color:T.t3,fontFamily:F}}>검색 결과 없음</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
+  const [statMode, setStatMode] = React.useState("inventory"); // "inventory" | "bev"
   const DOW = ["일","월","화","수","목","금","토"];
   const rnd = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
   const today = new Date().toISOString().slice(0,10);
@@ -1666,14 +2586,47 @@ function HistoryTab({ uploadHistory, skuAliases }) {
     );
   };
 
+  if(statMode==="bev") return (
+    <BevStatView bevHistory={bevHistory} onSwitchMode={setStatMode}/>
+  );
+
   if(!uploadHistory.length) return(
     <div style={{padding:"40px 20px",textAlign:"center"}}>
-      <EmptyState emoji="📊" text="실사 데이터가 없어요" sub="실사 탭에서 엑셀 파일을 업로드하면 통계를 볼 수 있어요"/>
+      <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
+        marginBottom:20,border:"1px solid "+T.b0}}>
+        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setStatMode(id)}
+            style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:F,fontSize:13,fontWeight:statMode===id?700:400,
+              background:statMode===id?T.card:"transparent",
+              color:statMode===id?T.t1:T.t3,
+              boxShadow:statMode===id?"0 1px 4px rgba(0,0,0,0.1)":"none",
+              transition:"all .15s"}}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <EmptyState emoji="📦" text="재고 실사 데이터가 없어요" sub="실사 탭에서 엑셀 파일을 업로드하면 통계를 볼 수 있어요"/>
     </div>
   );
 
   return(
     <div style={{padding:window.innerWidth>=768?"24px 28px":"12px"}}>
+      {/* ── 재고/음료 세그먼트 컨트롤 ── */}
+      <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
+        marginBottom:14,border:"1px solid "+T.b0}}>
+        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setStatMode(id)}
+            style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:F,fontSize:13,fontWeight:statMode===id?700:400,
+              background:statMode===id?T.card:"transparent",
+              color:statMode===id?T.t1:T.t3,
+              boxShadow:statMode===id?"0 1px 4px rgba(0,0,0,0.1)":"none",
+              transition:"all .15s"}}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* ── 컨트롤 바 sticky ── */}
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14,
