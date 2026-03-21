@@ -418,7 +418,8 @@ function App() {
   const [bevHistory,    setBevHistory]    = useState(() => LS.get("bevHistory", []));
   const [manualItems,   setManualItems]   = useState(() => LS.get("manualItems", ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"]));
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
-  // 수동 당일폐기 설정: { [sku]: true(강제 당일) | false(강제 해제) }
+  const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {}));
+  const [uploadSummary, setUploadSummary] = useState(null); // 업로드 직후 변화 요약 토스트
 
   // ── 초기 Firebase 데이터 로드 ──
   useEffect(() => {
@@ -434,6 +435,7 @@ function App() {
         ]);
         if (cfg) {
           if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
+          if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
 
         }
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
@@ -507,7 +509,13 @@ function App() {
   const saveManualItems = async (v) => {
     setManualItems(v); LS.set("manualItems", v);
     if (storeId && window.db) {
-      await DB.saveConfig(storeId, { manualItems: v });
+      await DB.saveConfig(storeId, { manualItems: v, skuAliases });
+    }
+  };
+  const saveSkuAliases = async (v) => {
+    setSkuAliases(v); LS.set("skuAliases", v);
+    if (storeId && window.db) {
+      await DB.saveConfig(storeId, { manualItems, skuAliases: v });
     }
   };
   const saveManualRecords = async (v) => {
@@ -910,8 +918,6 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   const needOrder = useMemo(() => {
     if (!latestUpload) return 0;
     let cnt = 0;
-    Object.entries(latestUpload.items||{}).forEach(([sku, item]) => {
-    });
     return cnt;
   }, [latestUpload, uploadHistory]);
 
@@ -972,8 +978,8 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
               const dday = item.dday;
               const color = dday === 0 ? T.red : dday <= 1 ? T.red : dday <= 3 ? T.amber : T.t3;
               const dim   = dday === 0 ? T.rDim : dday <= 1 ? T.rDim : T.aDim;
-              const dispNm = (skuAliases||{})[item.sku] || item.name;
-              const dispName = skuAliases[item.sku] || item.name;
+              const dispNm   = (skuAliases||{})[item.sku] || item.name;
+              const dispName = (skuAliases||{})[item.sku] || item.name;
               return (
                 <div key={item.sku+"_"+i} style={{
                   padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
@@ -1281,7 +1287,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
                     {Object.keys(h.items||{}).length}개 SKU · 판매합계 {Math.round(Object.values(h.items||{}).reduce((s,i)=>s+i.sold,0))}
                   </div>
                 </div>
-                <button onClick={() => deleteHistory(uploadHistory.length-1-i)} style={{
+                <button onClick={() => deleteHistoryEntry(uploadHistory[uploadHistory.length-1-i].date)} style={{
                   padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
                   background:T.rDim, color:T.red, cursor:"pointer",
                   fontSize:12, fontFamily:F }}>삭제</button>
