@@ -34,17 +34,29 @@
   </script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-    html,body{height:100%;background:#F2F2F7;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,sans-serif;}
+    html,body{height:100%;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;transition:background .35s ease;}
+    html.dark{background:#000000;color-scheme:dark;}
+    html:not(.dark){background:#F2F2F7;color-scheme:light;}
     #root{min-height:100vh;}
     ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}
     ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.15);border-radius:4px;}
     input:focus,textarea:focus{outline:none!important;}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:none}}
+    @keyframes slideDown{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:none}}
+    @keyframes scaleIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}
     @keyframes spin{to{transform:rotate(360deg)}}
     @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}
-    .fi{animation:fadeUp .25s cubic-bezier(.22,1,.36,1) both}
-    button:active{opacity:0.78;transition:opacity .1s}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    .fi{animation:fadeUp .3s cubic-bezier(.22,1,.36,1) both}
+    .fade-in{animation:fadeIn .25s ease both}
+    .scale-in{animation:scaleIn .25s cubic-bezier(.22,1,.36,1) both}
+    button{transition:transform .12s ease, opacity .12s ease;}
+    button:active{transform:scale(0.96);opacity:0.78;}
     input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.4);}
+    html.dark input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7);}
   </style>
 </head>
 <body>
@@ -52,19 +64,60 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* ─── Design Tokens ─────────────────────────────── */
-const F = "'Noto Sans KR', -apple-system, sans-serif";
-const T = {
+/* ─── Design Tokens (Light / Dark) ──────────────── */
+const F = "'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif";
+
+const T_LIGHT = {
   bg:"#F2F2F7", card:"#FFFFFF", card2:"#F2F2F7", card3:"#E5E5EA",
-  brand:"#00704A", brandDark:"#1E3932", brandLight:"#D4EDE3",
-  brandDim:"rgba(0,112,74,0.09)", brandBorder:"rgba(0,112,74,0.18)",
+  brand:"#00704A", brandDark:"#1E3932", brandMid:"#005538",
+  brandLight:"#D4EDE3", brandDim:"rgba(0,112,74,0.08)", brandBorder:"rgba(0,112,74,0.16)",
   t1:"#1C1C1E", t2:"#3C3C43", t3:"#8E8E93", t4:"rgba(60,60,67,0.18)",
-  red:"#FF3B30", rDim:"rgba(255,59,48,0.10)", rBdr:"rgba(255,59,48,0.22)",
-  amber:"#FF9500", aDim:"rgba(255,149,0,0.10)", aBdr:"rgba(255,149,0,0.22)",
-  blue:"#007AFF", bDim:"rgba(0,122,255,0.10)",
-  b0:"rgba(60,60,67,0.10)", b1:"rgba(60,60,67,0.16)",
-  sh1:"0 1px 3px rgba(0,0,0,0.06)", sh2:"0 2px 8px rgba(0,0,0,0.08)", sh3:"0 4px 20px rgba(0,0,0,0.10)",
+  red:"#FF3B30", rDim:"rgba(255,59,48,0.10)", rBdr:"rgba(255,59,48,0.20)",
+  amber:"#FF9500", aDim:"rgba(255,149,0,0.10)", aBdr:"rgba(255,149,0,0.20)",
+  blue:"#007AFF", bDim:"rgba(0,122,255,0.10)", bBdr:"rgba(0,122,255,0.20)",
+  violet:"#AF52DE", vDim:"rgba(175,82,222,0.10)", vBdr:"rgba(175,82,222,0.20)",
+  gold:"#C8982A", goDim:"rgba(200,152,42,0.10)", goBdr:"rgba(200,152,42,0.20)",
+  b0:"rgba(60,60,67,0.09)", b1:"rgba(60,60,67,0.14)",
+  sh1:"0 1px 4px rgba(0,0,0,0.05)", sh2:"0 2px 12px rgba(0,0,0,0.07)", sh3:"0 6px 24px rgba(0,0,0,0.10)",
+  glass:"rgba(255,255,255,0.78)", glassBorder:"rgba(255,255,255,0.45)",
+  navBg:"rgba(249,249,249,0.94)", headerBg:"rgba(249,249,249,0.88)",
+  isDark:false,
 };
+const T_DARK = {
+  bg:"#000000", card:"#1C1C1E", card2:"#2C2C2E", card3:"#3A3A3C",
+  brand:"#30D98A", brandDark:"#1E3932", brandMid:"#2AAE6E",
+  brandLight:"#0A3D24", brandDim:"rgba(48,217,138,0.12)", brandBorder:"rgba(48,217,138,0.20)",
+  t1:"#F5F5F7", t2:"#EBEBF5", t3:"#8E8E93", t4:"rgba(235,235,245,0.18)",
+  red:"#FF453A", rDim:"rgba(255,69,58,0.15)", rBdr:"rgba(255,69,58,0.25)",
+  amber:"#FF9F0A", aDim:"rgba(255,159,10,0.15)", aBdr:"rgba(255,159,10,0.25)",
+  blue:"#0A84FF", bDim:"rgba(10,132,255,0.15)", bBdr:"rgba(10,132,255,0.25)",
+  violet:"#BF5AF2", vDim:"rgba(191,90,242,0.15)", vBdr:"rgba(191,90,242,0.25)",
+  gold:"#FFD60A", goDim:"rgba(255,214,10,0.15)", goBdr:"rgba(255,214,10,0.25)",
+  b0:"rgba(255,255,255,0.08)", b1:"rgba(255,255,255,0.12)",
+  sh1:"0 1px 4px rgba(0,0,0,0.25)", sh2:"0 2px 12px rgba(0,0,0,0.35)", sh3:"0 6px 24px rgba(0,0,0,0.45)",
+  glass:"rgba(28,28,30,0.82)", glassBorder:"rgba(255,255,255,0.08)",
+  navBg:"rgba(28,28,30,0.92)", headerBg:"rgba(0,0,0,0.88)",
+  isDark:true,
+};
+
+/* ─── Theme Hook ────────────────────────────────── */
+function useTheme() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("sb_theme");
+    if (saved === "dark") return true;
+    if (saved === "light") return false;
+    return window.matchMedia("(prefers-color-scheme:dark)").matches;
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("sb_theme", dark ? "dark" : "light");
+  }, [dark]);
+  const toggle = useCallback(() => setDark(d => !d), []);
+  return { dark, toggle, T: dark ? T_DARK : T_LIGHT };
+}
+
+// 글로벌 fallback (컴포넌트 바깥에서 참조될 때)
+let T = T_LIGHT;
 
 /* ─── Storage (로컬 캐시) ───────────────────────── */
 const LS = {
@@ -179,6 +232,30 @@ const DB = {
 /* ─── Utils ─────────────────────────────────────── */
 const todayStr = () => new Date().toISOString().slice(0,10);
 
+/* ─── 디바운싱 훅 ─────────────────────────────── */
+function useDebounce(value, delay = 300) {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+/* ─── CSV/Excel 내보내기 유틸 ──────────────────── */
+function downloadCSV(filename, headers, rows) {
+  const BOM = "\uFEFF"; // Excel에서 한글 깨짐 방지
+  const csv = BOM + [headers.join(","), ...rows.map(r=>r.map(c=>{
+    const s = String(c==null?"":c);
+    return s.includes(",")||s.includes('"')||s.includes("\n") ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }).join(","))].join("\n");
+  const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 /* ─── 한국 공휴일 (반복 공휴일 + 2026년 이후 확장 가능) ─── */
 const KR_HOLIDAYS = new Set([
   // 2025
@@ -277,16 +354,22 @@ function parseInventoryExcel(arrayBuffer, dateOverride) {
     } else if (row[11] && typeof row[11] === "string") {
       expDate = row[11].slice(0,10);
     }
+    // D-day 파싱: "D-day"=0, "D-3"=3(3일 남음), "D+2"=-2(2일 지남), 숫자만=그대로
     const ddayRaw = String(row[10] || "").trim();
     if (ddayRaw) {
-      const m = ddayRaw.match(/-?(\d+)/);
-      dday = m ? parseInt(ddayRaw.replace("D-","").replace("D+","")) : null;
-      if (ddayRaw.startsWith("D-") || ddayRaw === "D-day") {
-        dday = ddayRaw === "D-day" ? 0 : -parseInt(m[1]);
-        // D-3 means expires in 3 days
-        dday = parseInt(m ? m[0] : "0") * -1;
-        const parts = ddayRaw.match(/D-(\d+)/);
-        dday = parts ? parseInt(parts[1]) : (ddayRaw === "D-day" ? 0 : null);
+      if (ddayRaw === "D-day" || ddayRaw === "D-0") {
+        dday = 0;
+      } else {
+        const mMinus = ddayRaw.match(/D-(\d+)/);
+        const mPlus  = ddayRaw.match(/D\+(\d+)/);
+        if (mMinus) {
+          dday = parseInt(mMinus[1]); // D-3 → 3 (3일 남음)
+        } else if (mPlus) {
+          dday = -parseInt(mPlus[1]); // D+2 → -2 (2일 지남, 이미 만료)
+        } else {
+          const num = ddayRaw.match(/(-?\d+)/);
+          dday = num ? parseInt(num[1]) : null;
+        }
       }
     }
 
@@ -404,6 +487,10 @@ function parseBeverageExcel(arrayBuffer, dateOverride) {
 
 /* ─── App Entry ──────────────────────────────────── */
 function App() {
+  const { dark, toggle: toggleTheme, T: themeT } = useTheme();
+  // 글로벌 T를 현재 테마로 갱신
+  T = themeT;
+
   const [tab, setTab] = useState("dashboard");
   const isPC = window.innerWidth >= 768;
 
@@ -552,40 +639,47 @@ function App() {
 
   return (
     <>
-    <div style={{ minHeight:"100vh", background:T.bg, fontFamily:F, overflowX:"hidden" }}>
+    <div style={{ minHeight:"100vh", background:T.bg, fontFamily:F, overflowX:"hidden",
+      transition:"background .35s ease, color .35s ease" }}>
       <style>{`
         *{box-sizing:border-box;}
         ::placeholder{color:${T.t3};font-family:${F};}
         ::-webkit-scrollbar{display:none;}
-        textarea,input{font-family:${F};}
+        textarea,input{font-family:${F};background:${T.card};color:${T.t1};border-color:${T.b1};}
         @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-        .fi{animation:fadeUp .25s cubic-bezier(.22,1,.36,1) both}
-        button:active{opacity:0.75;transition:opacity .1s}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+        @keyframes scaleIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}
+        .fi{animation:fadeUp .3s cubic-bezier(.22,1,.36,1) both}
+        .scale-in{animation:scaleIn .25s cubic-bezier(.22,1,.36,1) both}
+        button:active{opacity:0.75;}
       `}</style>
 
       {/* ── 모바일 상단 헤더 ── */}
       {!isPC && (
         <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:200,
-          background:"rgba(242,242,247,0.95)", backdropFilter:"blur(20px)",
-          WebkitBackdropFilter:"blur(20px)",
-          borderBottom:"1px solid "+T.b0,
-          display:"flex", alignItems:"center", padding:"0 16px", height:56 }}>
+          background:T.headerBg, backdropFilter:"blur(28px) saturate(180%)",
+          WebkitBackdropFilter:"blur(28px) saturate(180%)",
+          borderBottom:"0.5px solid "+T.b0,
+          display:"flex", alignItems:"center", padding:"0 16px", height:56,
+          transition:"background .35s ease" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ width:32, height:32, borderRadius:10,
+            <div style={{ width:34, height:34, borderRadius:11,
               background:"linear-gradient(135deg,#00704A,#1E3932)",
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}>☕</div>
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17,
+              boxShadow:"0 2px 8px rgba(0,112,74,0.30)" }}>☕</div>
             <div>
-              <div style={{ fontSize:11, fontWeight:700, color:T.t3, letterSpacing:1.5 }}>STARBUCKS</div>
-              <div style={{ fontSize:13, fontWeight:800, color:T.brand, lineHeight:1 }}>재고 통계</div>
+              <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:1.8, textTransform:"uppercase" }}>Starbucks</div>
+              <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1.1 }}>재고 통계</div>
             </div>
           </div>
-          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
             {storeId && (
               <div style={{
-                fontSize:10, fontWeight:700, letterSpacing:0.5,
+                fontSize:10, fontWeight:700, letterSpacing:0.3,
                 color: syncStatus==="ok"?T.brand : syncStatus==="error"?T.red : T.t3,
-                display:"flex", alignItems:"center", gap:4
+                display:"flex", alignItems:"center", gap:4,
+                background:syncStatus==="ok"?T.brandDim:syncStatus==="error"?T.rDim:"transparent",
+                padding:"4px 8px", borderRadius:8
               }}>
                 {syncStatus==="loading" && <span style={{ display:"inline-block", width:10, height:10, border:"1.5px solid currentColor", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>}
                 {syncStatus==="ok" && "🔗"}
@@ -593,10 +687,23 @@ function App() {
                 {storeId !== "local" && (syncStatus==="loading" ? "동기화 중" : syncStatus==="ok" ? storeId+"점" : syncStatus==="error" ? "오프라인" : "")}
               </div>
             )}
+            {/* 다크모드 토글 */}
+            <button onClick={toggleTheme} style={{
+              background:T.isDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.05)",
+              border:"none", borderRadius:10, width:34, height:34,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:16, cursor:"pointer" }}
+              title={T.isDark?"라이트 모드":"다크 모드"}>
+              {T.isDark ? "☀️" : "🌙"}
+            </button>
             <button onClick={()=>{
               const sid = prompt("매장번호를 입력하세요 (예: 3867)\n\n동기화 없이 사용하려면 'local' 입력");
               if(sid !== null && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
-            }} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", padding:"4px 2px" }}
+            }} style={{
+              background:T.isDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.05)",
+              border:"none", borderRadius:10, width:34, height:34,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:16, cursor:"pointer" }}
               title="매장 설정">⚙️</button>
           </div>
         </div>
@@ -604,56 +711,59 @@ function App() {
 
       {/* ── PC 사이드바 ── */}
       {isPC && (
-        <aside style={{ width:220, minHeight:"100vh", background:T.card,
-          borderRight:"1px solid "+T.b0,
+        <aside style={{ width:240, minHeight:"100vh", background:T.card,
+          borderRight:"0.5px solid "+T.b0,
           display:"flex", flexDirection:"column",
           position:"fixed", top:0, left:0, height:"100vh",
-          overflowY:"auto", zIndex:200 }}>
-          <div style={{ padding:"20px 20px 14px", borderBottom:"1px solid "+T.b0 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ width:36, height:36, borderRadius:10,
+          overflowY:"auto", zIndex:200,
+          transition:"background .35s ease, border-color .35s ease" }}>
+          <div style={{ padding:"22px 20px 16px", borderBottom:"0.5px solid "+T.b0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ width:38, height:38, borderRadius:12,
                 background:"linear-gradient(135deg,#00704A,#1E3932)",
-                display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>☕</div>
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:19,
+                boxShadow:"0 3px 10px rgba(0,112,74,0.30)" }}>☕</div>
               <div>
-                <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:2 }}>STARBUCKS</div>
-                <div style={{ fontSize:13, fontWeight:800, color:T.brand }}>재고 통계</div>
+                <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:2, textTransform:"uppercase" }}>Starbucks</div>
+                <div style={{ fontSize:14, fontWeight:800, color:T.brand }}>재고 통계</div>
               </div>
             </div>
           </div>
-          <nav style={{ padding:"8px 10px", flex:1 }}>
+          <nav style={{ padding:"10px 12px", flex:1 }}>
             {tabs.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
                 display:"flex", alignItems:"center", gap:10, width:"100%",
-                padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
+                padding:"10px 14px", borderRadius:12, border:"none", cursor:"pointer",
                 fontFamily:F, fontSize:14, fontWeight:tab===t.id?700:400,
                 background:tab===t.id?T.brandDim:"transparent",
-                color:tab===t.id?T.brand:T.t1, marginBottom:2, textAlign:"left",
-                transition:"background .12s" }}
+                color:tab===t.id?T.brand:T.t1, marginBottom:3, textAlign:"left",
+                transition:"all .18s ease" }}
               onMouseEnter={e=>{ if(tab!==t.id) e.currentTarget.style.background=T.b0; }}
               onMouseLeave={e=>{ if(tab!==t.id) e.currentTarget.style.background="transparent"; }}>
-                <span style={{ fontSize:16, width:22, textAlign:"center",
-                  filter:tab===t.id?"none":"grayscale(0.3) opacity(0.7)" }}>{t.icon}</span>
+                <span style={{ fontSize:17, width:24, textAlign:"center",
+                  filter:tab===t.id?"none":"grayscale(0.3) opacity(0.7)",
+                  transition:"filter .18s" }}>{t.icon}</span>
                 {t.label}
               </button>
             ))}
           </nav>
           {latestUpload && (
-            <div style={{ padding:"10px 14px", borderTop:"1px solid "+T.b0,
+            <div style={{ padding:"12px 16px", borderTop:"0.5px solid "+T.b0,
               fontSize:11, color:T.t3, fontFamily:F }}>
               최근 업로드: {fmtDate(latestUpload.date)}<br/>
               {Object.keys(latestUpload.items||{}).length}개 SKU
             </div>
           )}
-          {/* 동기화 상태 */}
-          <div style={{ padding:"10px 14px", borderTop:"1px solid "+T.b0 }}>
-            <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:4 }}>
+          {/* 동기화 & 테마 */}
+          <div style={{ padding:"12px 16px", borderTop:"0.5px solid "+T.b0 }}>
+            <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginBottom:6 }}>
               {storeId
                 ? <>🏪 매장 <b style={{color:T.brand}}>{storeId}</b></>
                 : <span style={{color:T.amber}}>매장번호 미설정</span>}
             </div>
             {storeId && (
               <div style={{
-                fontSize:11, fontWeight:700,
+                fontSize:11, fontWeight:700, marginBottom:6,
                 color: syncStatus==="ok"?T.brand : syncStatus==="error"?T.red : T.t3,
                 display:"flex", alignItems:"center", gap:5
               }}>
@@ -661,16 +771,25 @@ function App() {
                 {syncStatus==="ok" ? "🔗 Firebase 동기화 중" : syncStatus==="error" ? "⚠️ 오프라인 (로컬 저장)" : ""}
               </div>
             )}
-            <button onClick={()=>{
-              const sid = prompt("매장번호를 입력하세요 (예: 3867)");
-              if(sid && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
-            }} style={{
-              marginTop:6, width:"100%", padding:"5px 0", borderRadius:6,
-              border:"1px solid "+T.b1, background:"transparent",
-              fontSize:11, color:T.t2, fontFamily:F, cursor:"pointer"
-            }}>
-              {storeId ? "매장번호 변경" : "매장번호 설정"}
-            </button>
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={()=>{
+                const sid = prompt("매장번호를 입력하세요 (예: 3867)");
+                if(sid && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
+              }} style={{
+                flex:1, padding:"7px 0", borderRadius:8,
+                border:"1px solid "+T.b1, background:"transparent",
+                fontSize:11, color:T.t2, fontFamily:F, cursor:"pointer"
+              }}>
+                {storeId ? "매장변경" : "매장설정"}
+              </button>
+              <button onClick={toggleTheme} style={{
+                padding:"7px 12px", borderRadius:8,
+                border:"1px solid "+T.b1, background:"transparent",
+                fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center"
+              }} title={T.isDark?"라이트 모드":"다크 모드"}>
+                {T.isDark ? "☀️" : "🌙"}
+              </button>
+            </div>
           </div>
         </aside>
       )}
@@ -678,37 +797,45 @@ function App() {
       {/* ── 모바일 하단 탭바 ── */}
       {!isPC && (
         <nav style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200,
-          background:"rgba(255,255,255,0.96)", backdropFilter:"blur(24px)",
-          WebkitBackdropFilter:"blur(24px)",
-          borderTop:"1px solid "+T.b0,
-          display:"flex", height:"calc(52px + env(safe-area-inset-bottom))",
-          paddingBottom:"env(safe-area-inset-bottom)" }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-              justifyContent:"flex-start", paddingTop:7, gap:2, border:"none",
-              cursor:"pointer", background:"transparent", position:"relative" }}>
-              <div style={{ position:"relative" }}>
-                <span style={{ fontSize:tab===t.id?21:19,
-                  filter:tab===t.id?"none":"grayscale(0.4) opacity(0.6)" }}>{t.icon}</span>
-              </div>
-              <span style={{ fontSize:10, fontWeight:tab===t.id?700:500,
-                color:tab===t.id?T.brand:T.t3, fontFamily:F, lineHeight:1 }}>{t.label}</span>
-              {tab===t.id && (
-                <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)",
-                  width:28, height:2.5, borderRadius:"0 0 3px 3px", background:T.brand }}/>
-              )}
-            </button>
-          ))}
+          background:T.navBg, backdropFilter:"blur(32px) saturate(180%)",
+          WebkitBackdropFilter:"blur(32px) saturate(180%)",
+          borderTop:"0.5px solid "+T.b0,
+          display:"flex", height:"calc(56px + env(safe-area-inset-bottom))",
+          paddingBottom:"env(safe-area-inset-bottom)",
+          transition:"background .35s ease" }}>
+          {tabs.map(t => {
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                justifyContent:"flex-start", paddingTop:6, gap:3, border:"none",
+                cursor:"pointer", background:"transparent", position:"relative",
+                transition:"all .2s ease" }}>
+                <div style={{
+                  width:36, height:36, borderRadius:12,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  background:active?T.brandDim:"transparent",
+                  transition:"all .25s cubic-bezier(.22,1,.36,1)" }}>
+                  <span style={{ fontSize:active?20:18,
+                    transition:"font-size .2s ease",
+                    filter:active?"none":"grayscale(0.5) opacity(0.55)" }}>{t.icon}</span>
+                </div>
+                <span style={{ fontSize:10, fontWeight:active?700:500, letterSpacing:0.2,
+                  color:active?T.brand:T.t3, fontFamily:F, lineHeight:1,
+                  transition:"color .2s ease" }}>{t.label}</span>
+              </button>
+            );
+          })}
         </nav>
       )}
 
       {/* ── 콘텐츠 영역 ── */}
       <div style={{
-        marginLeft:isPC?220:0,
+        marginLeft:isPC?240:0,
         paddingTop:isPC?0:56,
-        paddingBottom:isPC?0:"calc(62px + env(safe-area-inset-bottom))",
-        minHeight:"100vh"
+        paddingBottom:isPC?0:"calc(68px + env(safe-area-inset-bottom))",
+        minHeight:"100vh",
+        transition:"margin-left .3s ease"
       }}>
 
         {/* 매장번호 미설정 온보딩 - 전용 풀스크린 */}
@@ -811,10 +938,11 @@ function App() {
     {/* 업로드 완료 토스트 */}
     {uploadSummary && ReactDOM.createPortal(
       <div style={{ position:"fixed", bottom:90, left:"50%", transform:"translateX(-50%)",
-        zIndex:9998, background:"#1C1C1E", borderRadius:14,
-        padding:"12px 18px", display:"flex", alignItems:"center", gap:12,
-        boxShadow:"0 8px 32px rgba(0,0,0,0.35)", maxWidth:360, width:"calc(100% - 32px)",
-        animation:"fadeUp .3s ease" }}>
+        zIndex:9998, background:T.isDark?"#2C2C2E":"#1C1C1E", borderRadius:16,
+        padding:"14px 18px", display:"flex", alignItems:"center", gap:12,
+        boxShadow:"0 8px 40px rgba(0,0,0,0.40)", maxWidth:360, width:"calc(100% - 32px)",
+        animation:"fadeUp .3s cubic-bezier(.22,1,.36,1)",
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none" }}>
         <span style={{ fontSize:22 }}>✅</span>
         <div style={{ flex:1, fontFamily:F }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#fff" }}>
@@ -846,19 +974,27 @@ function App() {
 }
 
 /* ─── Shared UI ──────────────────────────────────── */
-function Card({ children, style={} }) {
+function Card({ children, style={}, glass }) {
   return (
-    <div style={{ background:T.card, borderRadius:16, boxShadow:T.sh1, overflow:"hidden", ...style }}>
+    <div style={{
+      background: glass ? T.glass : T.card,
+      backdropFilter: glass ? "blur(20px) saturate(180%)" : undefined,
+      WebkitBackdropFilter: glass ? "blur(20px) saturate(180%)" : undefined,
+      borderRadius:18, boxShadow:T.sh1,
+      border:"0.5px solid "+T.b0,
+      overflow:"hidden",
+      transition:"background .3s ease, border-color .3s ease, box-shadow .3s ease",
+      ...style }}>
       {children}
     </div>
   );
 }
 function SH({ title, sub, action }) {
   return (
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-      <div>
-        <span style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F }}>{title}</span>
-        {sub && <span style={{ fontSize:12, color:T.t3, fontFamily:F, marginLeft:6 }}>{sub}</span>}
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+      <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+        <span style={{ fontSize:15, fontWeight:700, color:T.t1, fontFamily:F, letterSpacing:-0.2 }}>{title}</span>
+        {sub && <span style={{ fontSize:12, color:T.t3, fontFamily:F }}>{sub}</span>}
       </div>
       {action}
     </div>
@@ -867,17 +1003,19 @@ function SH({ title, sub, action }) {
 function GreenBtn({ onClick, children, full, disabled, small }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      background:disabled?"#E5E5EA":T.brand, color:disabled?"#AEAEB2":"#fff",
-      border:"none", borderRadius:12, padding:small?"8px 16px":"13px 20px",
+      background:disabled?(T.isDark?"#3A3A3C":"#E5E5EA"):T.brand,
+      color:disabled?(T.isDark?"#636366":"#AEAEB2"):"#fff",
+      border:"none", borderRadius:14, padding:small?"9px 18px":"14px 22px",
       fontSize:small?13:15, fontWeight:600, fontFamily:F,
       cursor:disabled?"not-allowed":"pointer", width:full?"100%":"auto",
-      boxShadow:disabled?"none":"0 3px 14px rgba(0,112,74,0.25)", transition:"opacity .15s"
+      boxShadow:disabled?"none":`0 4px 16px ${T.isDark?"rgba(48,217,138,0.20)":"rgba(0,112,74,0.22)"}`,
+      transition:"all .18s ease"
     }}>{children}</button>
   );
 }
 function Pill({ label, color, dim }) {
   return (
-    <span style={{ fontSize:11, fontWeight:700, padding:"2px 9px", borderRadius:20,
+    <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
       background:dim||color+"18", color, fontFamily:F, letterSpacing:0.2, whiteSpace:"nowrap" }}>
       {label}
     </span>
@@ -892,10 +1030,10 @@ function Spin({ size=20, color }) {
 }
 function EmptyState({ emoji, text, sub }) {
   return (
-    <div style={{ padding:"40px 20px", textAlign:"center" }}>
-      <div style={{ fontSize:38, marginBottom:10 }}>{emoji||"📭"}</div>
-      <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F }}>{text}</div>
-      {sub && <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>{sub}</div>}
+    <div style={{ padding:"48px 20px", textAlign:"center" }}>
+      <div style={{ fontSize:42, marginBottom:12, animation:"bounce 1.5s ease infinite" }}>{emoji||"📭"}</div>
+      <div style={{ fontSize:15, fontWeight:600, color:T.t2, fontFamily:F }}>{text}</div>
+      {sub && <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:6, lineHeight:1.5 }}>{sub}</div>}
     </div>
   );
 }
@@ -904,6 +1042,7 @@ function EmptyState({ emoji, text, sub }) {
 function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, setTab, skuAliases }) {
   const today = todayStr();
   const dow = getDow(today);
+  const [expandedAlert, setExpandedAlert] = useState(null); // "today" | "tmr" | "zero" | null
 
   // 유통기한 임박 항목 (D-3 이하)
   const expiring = useMemo(() => {
@@ -914,12 +1053,85 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       .sort((a,b) => (a.dday||99) - (b.dday||99));
   }, [latestUpload]);
 
-  // 재고 부족 (추천 발주량 > 0인 항목)
-  const needOrder = useMemo(() => {
-    if (!latestUpload) return 0;
-    let cnt = 0;
-    return cnt;
-  }, [latestUpload, uploadHistory]);
+  // ── 발주 추천 엔진 ──
+  // 폐기율 = (입고 - 판매) / 입고 → 버퍼 = 1 / (1 - 목표폐기율)
+  // 5.6% 목표 → 버퍼 ≈ 1.059
+  const TARGET_WASTE = 0.056; // 전사 적정 폐기율 5.6%
+  const [bufferMode, setBufferMode] = useState("waste"); // "waste" | "manual"
+  const [orderBuffer, setOrderBuffer] = useState(parseFloat((1 / (1 - TARGET_WASTE)).toFixed(3))); // ≈ 1.059
+  const [showAllOrders, setShowAllOrders] = useState(false);
+  const [orderDate, setOrderDate] = useState(todayStr()); // 발주일 선택
+
+  const orderRecommend = useMemo(() => {
+    if (!latestUpload || uploadHistory.length < 3) return [];
+    // 발주일 → +2일 도착: 발주일 다음날 + 도착일까지 2일치 판매량 커버
+    const baseDate = new Date(orderDate + "T00:00:00");
+    const baseDow = baseDate.getDay();
+    const day1Dow = (baseDow + 1) % 7; // 발주 다음날 (소모)
+    const day2Dow = (baseDow + 2) % 7; // 도착일 (도착 전까지 소모)
+
+    // 품목별 요일 평균 판매량 계산 (최근 28일)
+    const sorted = [...uploadHistory].sort((a,b)=>b.date.localeCompare(a.date));
+    const recent = sorted.slice(0, 28);
+
+    const skuDowMap = {};
+    recent.forEach(h => {
+      Object.entries(h.items || {}).forEach(([sku, item]) => {
+        if (!skuDowMap[sku]) skuDowMap[sku] = { name:item.name, cat:item.cat, dows:{} };
+        const dow = h.dow ?? new Date(h.date+"T00:00:00").getDay();
+        if (!skuDowMap[sku].dows[dow]) skuDowMap[sku].dows[dow] = [];
+        skuDowMap[sku].dows[dow].push(item.sold || 0);
+      });
+    });
+
+    // 특정 요일의 평균 판매량 (데이터 부족 시 전체 평균)
+    const getDowAvg = (stats, dow) => {
+      const dowData = stats.dows[dow] || [];
+      if (dowData.length >= 2) return dowData.reduce((a,b) => a+b, 0) / dowData.length;
+      const allSold = Object.values(stats.dows).flat();
+      return allSold.length ? allSold.reduce((a,b) => a+b, 0) / allSold.length : 0;
+    };
+
+    const results = [];
+    Object.entries(latestUpload.items || {}).forEach(([sku, item]) => {
+      const stats = skuDowMap[sku];
+      if (!stats) return;
+
+      const pred1 = getDowAvg(stats, day1Dow); // 내일 예상 판매
+      const pred2 = getDowAvg(stats, day2Dow); // 모레 예상 판매
+      const predicted2d = pred1 + pred2;        // 도착까지 2일 총 소모량
+
+      const buffered = Math.ceil(predicted2d * orderBuffer);
+      const current = item.actualSum || 0;
+      const recommend = Math.max(0, buffered - current);
+      const dispName = (skuAliases||{})[sku] || item.name;
+
+      if (predicted2d > 0) {
+        results.push({
+          sku, name:dispName, cat:item.cat,
+          current,
+          pred1:Math.round(pred1*10)/10,
+          pred2:Math.round(pred2*10)/10,
+          predicted2d:Math.round(predicted2d*10)/10,
+          buffered, recommend,
+          urgency: current === 0 ? 2 : (recommend > 0 ? 1 : 0)
+        });
+      }
+    });
+
+    return results
+      .sort((a,b) => b.urgency - a.urgency || b.recommend - a.recommend);
+  }, [latestUpload, uploadHistory, orderBuffer, skuAliases, orderDate]);
+
+  const needOrderCount = orderRecommend.filter(r => r.recommend > 0).length;
+
+  // 발주일 기준 동적 라벨
+  const orderBaseDate = new Date(orderDate + "T00:00:00");
+  const orderDay1Dow = (orderBaseDate.getDay() + 1) % 7;
+  const orderDay2Dow = (orderBaseDate.getDay() + 2) % 7;
+  const isOrderToday = orderDate === todayStr();
+  const day1Label = isOrderToday ? "내일" : DOW_KR[orderDay1Dow] + "요일";
+  const day2Label = isOrderToday ? "모레" : DOW_KR[orderDay2Dow] + "요일";
 
   // 총 SKU 수
   const totalSku = latestUpload ? Object.keys(latestUpload.items||{}).length : 0;
@@ -929,10 +1141,15 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   return (
     <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
       {/* 히어로 카드 */}
-      <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-        borderRadius:22, padding:"22px 20px", marginBottom:18, position:"relative", overflow:"hidden" }}>
-        <div style={{ position:"absolute", right:-30, top:-30, width:120, height:120,
-          borderRadius:"50%", background:"rgba(255,255,255,0.05)" }}/>
+      <div style={{ background: T.isDark
+          ? "linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)"
+          : "linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+        borderRadius:22, padding:"24px 22px", marginBottom:18, position:"relative", overflow:"hidden",
+        boxShadow:T.isDark?"0 4px 24px rgba(48,217,138,0.12)":"0 4px 24px rgba(0,112,74,0.20)" }}>
+        <div style={{ position:"absolute", right:-30, top:-30, width:140, height:140,
+          borderRadius:"50%", background:"rgba(255,255,255,0.04)" }}/>
+        <div style={{ position:"absolute", left:-20, bottom:-40, width:100, height:100,
+          borderRadius:"50%", background:"rgba(255,255,255,0.03)" }}/>
         <div style={{ position:"relative", zIndex:1 }}>
           <div style={{ fontSize:12, color:"rgba(255,255,255,0.6)", fontFamily:F, marginBottom:4 }}>
             {new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})}
@@ -940,22 +1157,92 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           <div style={{ fontSize:18, fontWeight:800, color:"#fff", fontFamily:F, marginBottom:16 }}>
             발주 관리 대시보드 ☕
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
             {[
-              { v:totalSku, l:"총 SKU", tab:"upload" },
-              { v:expiring.length, l:"유통임박", tab:"upload" },
-              { v: latestUpload ? Object.values(latestUpload.items||{}).filter(i=>i.actualSum===0).length : 0, l:"재고없음", tab:"upload" },
+              { v:totalSku, l:"총 SKU" },
+              { v:expiring.length, l:"유통임박" },
+              { v:zeroStock, l:"재고없음" },
+              { v:needOrderCount, l:"발주필요" },
             ].map(s => (
-              <button key={s.l} onClick={() => setTab(s.tab)} style={{
+              <div key={s.l} style={{
                 background:"rgba(255,255,255,0.14)", borderRadius:12,
-                padding:"10px 8px", border:"none", cursor:"pointer", textAlign:"center" }}>
-                <div style={{ fontSize:22, fontWeight:900, color:"#fff", fontFamily:F, lineHeight:1 }}>{s.v}</div>
+                padding:"10px 8px", textAlign:"center" }}>
+                <div style={{ fontSize:20, fontWeight:900, color:"#fff", fontFamily:F, lineHeight:1 }}>{s.v}</div>
                 <div style={{ fontSize:10, color:"rgba(255,255,255,0.70)", fontFamily:F, marginTop:3 }}>{s.l}</div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
       </div>
+
+      {/* ── 긴급 경고 배너 (클릭 시 상세 목록 펼침) ── */}
+      {latestUpload && (()=>{
+        const ddayToday = expiring.filter(e=>e.dday===0);
+        const ddayTmr   = expiring.filter(e=>e.dday===1);
+        const zeroItems = Object.values(latestUpload.items||{}).filter(i=>i.actualSum===0);
+        const alerts = [];
+        if (ddayToday.length > 0) alerts.push({ id:"today", icon:"🚨", msg:`오늘 만료 ${ddayToday.length}개 — 즉시 확인 필요`, color:T.red, dim:"rgba(255,59,48,0.08)", border:"rgba(255,59,48,0.20)", items:ddayToday });
+        if (ddayTmr.length > 0) alerts.push({ id:"tmr", icon:"⚠️", msg:`내일 만료 ${ddayTmr.length}개 — 금일 중 소진 권장`, color:T.amber, dim:"rgba(255,149,0,0.08)", border:"rgba(255,149,0,0.20)", items:ddayTmr });
+        if (zeroItems.length >= 3) alerts.push({ id:"zero", icon:"📦", msg:`재고 없음 ${zeroItems.length}개 — 발주 확인`, color:"#007AFF", dim:"rgba(0,122,255,0.08)", border:"rgba(0,122,255,0.20)", items:zeroItems.map(i=>({name:i.name,sku:i.sku,cat:i.cat,actual:0})) });
+        if (alerts.length === 0) return null;
+        return (
+          <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:6 }}>
+            {alerts.map((a)=>{
+              const isOpen = expandedAlert === a.id;
+              return (
+                <div key={a.id}>
+                  <div onClick={()=>setExpandedAlert(isOpen?null:a.id)} style={{
+                    background:a.dim, border:"1px solid "+a.border, borderRadius:isOpen?"12px 12px 0 0":12,
+                    padding:"10px 14px", display:"flex", alignItems:"center", gap:10,
+                    cursor:"pointer", transition:"all .15s" }}>
+                    <span style={{ fontSize:18, flexShrink:0 }}>{a.icon}</span>
+                    <span style={{ fontSize:13, fontWeight:600, color:a.color, fontFamily:F, flex:1 }}>{a.msg}</span>
+                    <span style={{ fontSize:14, color:a.color, transition:"transform .2s",
+                      transform:isOpen?"rotate(180deg)":"rotate(0deg)", flexShrink:0 }}>▼</span>
+                  </div>
+                  {isOpen && (
+                    <div style={{ background:T.card, border:"1px solid "+a.border, borderTop:"none",
+                      borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
+                      {a.items.slice(0,10).map((item,j,arr)=>{
+                        const dispName = (skuAliases||{})[item.sku] || item.name;
+                        return (
+                          <div key={item.sku+"_"+j} style={{
+                            padding:"10px 14px", display:"flex", alignItems:"center", gap:10,
+                            borderBottom:j<arr.length-1?"1px solid "+T.b0:"none" }}>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
+                                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                {dispName}
+                              </div>
+                              <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>
+                                {item.cat}{item.expDate ? " · "+fmtDate(item.expDate)+" 만료" : ""}
+                              </div>
+                            </div>
+                            <div style={{ textAlign:"right", flexShrink:0 }}>
+                              <div style={{ fontSize:13, fontWeight:700, color:a.color, fontFamily:F }}>
+                                {item.dday!=null ? (item.dday===0?"D-day":"D-"+item.dday) : "재고 0"}
+                              </div>
+                              <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>
+                                {item.actual!=null ? "재고 "+item.actual+"개" : ""}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {a.items.length > 10 && (
+                        <div style={{ padding:"8px 14px", textAlign:"center", fontSize:11,
+                          color:T.t3, fontFamily:F, background:T.card2 }}>
+                          외 {a.items.length-10}개 더...
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* 업로드 없음 안내 */}
       {!latestUpload && (
@@ -1013,6 +1300,145 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
             })}
           </Card>
         </div>
+      )}
+
+      {/* ── 발주 추천 ── */}
+      {latestUpload && orderRecommend.length > 0 && (
+        <div style={{ marginBottom:16 }}>
+          <SH title="📋 발주 추천"
+            sub={needOrderCount+"개 품목"}
+            action={
+              <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                <button onClick={()=>{
+                  const needs = orderRecommend.filter(r=>r.recommend>0);
+                  downloadCSV(
+                    `발주추천_${orderDate}.csv`,
+                    ["품목","카테고리","현재재고",day1Label+"예상",day2Label+"예상","2일합계","추천발주량"],
+                    needs.map(r=>[r.name,r.cat,r.current,r.pred1,r.pred2,r.predicted2d,r.recommend])
+                  );
+                }} style={{
+                  padding:"5px 10px", borderRadius:8, border:"1px solid "+T.b1,
+                  background:T.card, color:T.brand, fontSize:11, fontWeight:600,
+                  cursor:"pointer", fontFamily:F }}>📥 CSV</button>
+              </div>
+            }/>
+
+          {/* 발주 모드 선택 */}
+          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:10 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+              {[
+                { id:"waste", label:"적정 폐기율 5.6%", desc:"전사 기준", buffer:parseFloat((1/(1-TARGET_WASTE)).toFixed(3)) },
+                { id:"safe",  label:"여유 발주", desc:"폐기율 ~10%", buffer:parseFloat((1/(1-0.10)).toFixed(3)) },
+                { id:"tight", label:"타이트", desc:"폐기율 ~3%", buffer:parseFloat((1/(1-0.03)).toFixed(3)) },
+              ].map(opt => {
+                const active = Math.abs(orderBuffer - opt.buffer) < 0.005;
+                return (
+                  <button key={opt.id} onClick={()=>{setOrderBuffer(opt.buffer);setBufferMode("waste");}} style={{
+                    padding:"6px 12px", borderRadius:8, border:"1px solid "+(active?T.brand:T.b1),
+                    background:active?T.brandDim:T.card,
+                    color:active?T.brand:T.t2,
+                    fontSize:11, fontWeight:active?700:400,
+                    cursor:"pointer", fontFamily:F }}>
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:10, color:T.t4, fontFamily:F, lineHeight:1.4 }}>
+              버퍼 ×{orderBuffer.toFixed(2)} · 예상 폐기율 ≈ {Math.round((1 - 1/orderBuffer)*1000)/10}%
+            </div>
+          </div>
+
+          {/* 발주일 선택 */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:12, fontWeight:600, color:T.t2, fontFamily:F, flexShrink:0 }}>📅 발주일</span>
+            <input type="date" value={orderDate} onChange={e=>setOrderDate(e.target.value||todayStr())}
+              style={{
+                padding:"6px 10px", borderRadius:8, border:"1px solid "+T.b1,
+                background:T.card, color:T.t1, fontSize:12, fontFamily:F,
+                outline:"none", flex:1, maxWidth:160 }}/>
+            {!isOrderToday && (
+              <button onClick={()=>setOrderDate(todayStr())} style={{
+                padding:"5px 10px", borderRadius:8, border:"1px solid "+T.b1,
+                background:T.card, color:T.t3, fontSize:11, fontWeight:500,
+                cursor:"pointer", fontFamily:F }}>오늘</button>
+            )}
+            {!isOrderToday && (
+              <span style={{ fontSize:10, color:T.amber, fontWeight:600, fontFamily:F }}>
+                {DOW_KR[orderDay1Dow]}+{DOW_KR[orderDay2Dow]} 소모량 반영
+              </span>
+            )}
+          </div>
+
+          <Card>
+            {/* 헤더 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 46px 46px 46px 64px",
+              padding:"8px 14px", background:T.card2, gap:2 }}>
+              {["품목","재고",day1Label,day2Label,"추천량"].map(h=>(
+                <div key={h} style={{ fontSize:10, fontWeight:600, color:T.t3, fontFamily:F,
+                  textAlign:h==="품목"?"left":"center" }}>{h}</div>
+              ))}
+            </div>
+            {/* 목록 */}
+            {(showAllOrders ? orderRecommend.filter(r=>r.recommend>0) : orderRecommend.filter(r=>r.recommend>0).slice(0,8))
+              .map((r, i, arr) => {
+              const urgColor = r.current===0 ? T.red : r.recommend>=r.predicted2d ? T.amber : T.brand;
+              return (
+                <div key={r.sku} style={{
+                  display:"grid", gridTemplateColumns:"1fr 46px 46px 46px 64px",
+                  padding:"10px 14px", gap:2, alignItems:"center",
+                  borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.name}</div>
+                    <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{r.cat}</div>
+                  </div>
+                  <div style={{ textAlign:"center", fontSize:13, fontWeight:600, fontFamily:F,
+                    color:r.current===0?T.red:T.t2 }}>{r.current}</div>
+                  <div style={{ textAlign:"center", fontSize:11, color:T.t3, fontFamily:F }}>{r.pred1}</div>
+                  <div style={{ textAlign:"center", fontSize:11, color:T.t3, fontFamily:F }}>{r.pred2}</div>
+                  <div style={{ textAlign:"center" }}>
+                    <span style={{ fontSize:14, fontWeight:800, color:urgColor, fontFamily:F,
+                      background:urgColor+"15", padding:"3px 10px", borderRadius:8 }}>
+                      {r.recommend}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {orderRecommend.filter(r=>r.recommend>0).length === 0 && (
+              <div style={{ padding:20, textAlign:"center", fontSize:13, color:T.t3, fontFamily:F }}>
+                현재 재고로 충분해요 👍
+              </div>
+            )}
+            {/* 더보기 / 접기 */}
+            {orderRecommend.filter(r=>r.recommend>0).length > 8 && (
+              <button onClick={()=>setShowAllOrders(!showAllOrders)} style={{
+                width:"100%", padding:"10px", border:"none", borderTop:"1px solid "+T.b0,
+                background:T.card2, cursor:"pointer", fontSize:12, fontWeight:600,
+                color:T.brand, fontFamily:F }}>
+                {showAllOrders
+                  ? "접기 ▲"
+                  : `나머지 ${orderRecommend.filter(r=>r.recommend>0).length-8}개 더보기 ▼`}
+              </button>
+            )}
+          </Card>
+
+          {/* 안내 문구 */}
+          <div style={{ fontSize:10, color:T.t4, fontFamily:F, marginTop:6, lineHeight:1.5 }}>
+            * {isOrderToday?"오늘":orderDate.slice(5).replace("-","/")} 발주 → {isOrderToday?"모레":DOW_KR[orderDay2Dow]+"요일"} 도착 · {DOW_KR[orderDay1Dow]}+{DOW_KR[orderDay2Dow]} 2일 소모량 반영 · 전사 적정 폐기율 5.6% 기준 · 최근 4주 요일별 평균
+          </div>
+        </div>
+      )}
+
+      {/* 데이터 부족 시 안내 */}
+      {latestUpload && uploadHistory.length < 3 && uploadHistory.length > 0 && (
+        <Card style={{ marginBottom:16, padding:"14px 16px" }}>
+          <div style={{ fontSize:13, fontWeight:600, color:T.t2, fontFamily:F }}>📋 발주 추천</div>
+          <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>
+            실사 데이터가 3일 이상 쌓이면 발주 추천이 시작돼요 ({uploadHistory.length}/3)
+          </div>
+        </Card>
       )}
 
       {/* 최근 실사 요약 */}
@@ -1554,6 +1980,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
   const [sortKey,    setSortKey]    = React.useState("totalQty");
   const [sortAsc,    setSortAsc]    = React.useState(false);
   const [search,     setSearch]     = React.useState("");
+  const debouncedSearch = useDebounce(search, 300);
 
   const [rangeFrom, rangeTo] = React.useMemo(()=>{
     if(showCustom&&customFrom&&customTo) return [customFrom,customTo];
@@ -1599,9 +2026,9 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       const totalQty  = rnd(s.qtyArr.reduce((a,b)=>a+b,0),0);
       const totalSales= rnd(s.salesArr.reduce((a,b)=>a+b,0),0);
       const avgQty    = s.qtyArr.length?rnd(totalQty/s.qtyArr.length,1):0;
-      // 요일별 평균
+      // 요일별 평균 (판매 0인 날도 포함하여 정확한 평균 산출)
       const dowMap={};
-      s.days.forEach((d,i)=>{ if(!dowMap[d.dow]) dowMap[d.dow]=[]; if(s.qtyArr[i]>0) dowMap[d.dow].push(s.qtyArr[i]); });
+      s.days.forEach((d,i)=>{ if(!dowMap[d.dow]) dowMap[d.dow]=[]; dowMap[d.dow].push(s.qtyArr[i]||0); });
       const dowAvg={};
       [0,1,2,3,4,5,6].forEach(d=>{ const v=dowMap[d]; dowAvg[d]=v&&v.length?rnd(v.reduce((a,b)=>a+b,0)/v.length,1):null; });
       const wdAvg=rnd(([1,2,3,4,5].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>a.length?s+v/a.length:s,0),1)||null;
@@ -1650,7 +2077,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
   // 테이블 데이터
   const tableData = React.useMemo(()=>{
     let rows=[...menuStats];
-    if(search) rows=rows.filter(s=>(s.korName||s.catName||"").toLowerCase().includes(search.toLowerCase()));
+    if(debouncedSearch) rows=rows.filter(s=>(s.korName||s.catName||"").toLowerCase().includes(debouncedSearch.toLowerCase()));
     // 정렬: 헤더 클릭 정렬 중에는 해당 키로, 아니면 기본(macro 그룹 → totalQty 내림차순)
     if(sortKey==="totalQty"&&!sortAsc) {
       // 기본 정렬: macro 알파벳 → totalQty 내림차순 (같은 카테고리끼리 묶임)
@@ -2101,8 +2528,20 @@ function BevStatView({ bevHistory, onSwitchMode }) {
                     top:"50%",transform:"translateY(-50%)",fontSize:14,background:"none",
                     border:"none",cursor:"pointer",color:T.t3}}>✕</button>}
                 </div>
-                <div style={{fontSize:11,color:T.t4,fontFamily:F,marginTop:6}}>
-                  {tableData.length}개 메뉴 · 헤더 클릭 정렬 · 행 클릭 → 상세
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+                  <div style={{fontSize:11,color:T.t4,fontFamily:F}}>
+                    {tableData.length}개 메뉴 · 헤더 클릭 정렬 · 행 클릭 → 상세
+                  </div>
+                  <button onClick={()=>{
+                    downloadCSV(
+                      `음료통계_${rangeFrom}~${rangeTo}.csv`,
+                      ["메뉴","분류","총수량","총매출","일평균","주중평균","주말평균","주말효과(%)"],
+                      tableData.map(s=>[s.korName||s.catName,s.macro??"",s.totalQty,s.totalSales,s.avgQty,s.wdAvg??0,s.weAvg??0,s.weDiff??0])
+                    );
+                  }} style={{fontSize:11,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.b1,
+                    background:T.card,color:"#3B82F6",fontFamily:F,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    📥 CSV 내보내기
+                  </button>
                 </div>
               </div>
               <div style={{overflowX:"auto"}}>
@@ -2221,6 +2660,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
   const [sortKey,    setSortKey]    = React.useState("totalSold");
   const [sortAsc,    setSortAsc]    = React.useState(false);
   const [search,     setSearch]     = React.useState("");
+  const debouncedSearch = useDebounce(search, 300);
 
   // ── 기간 계산 ──
   const [rangeFrom, rangeTo] = React.useMemo(() => {
@@ -2279,11 +2719,11 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
       const zeroRate=s.zeroArr.length?rnd(s.zeroArr.reduce((a,b)=>a+b,0)/s.zeroArr.length*100,0):0;
       const totalIn=rnd(s.inArr.reduce((a,b)=>a+b,0),0);
       const wasteRate=totalIn>0?rnd(Math.max(0,totalIn-totalSold)/totalIn*100,1):null;
-      // 요일별 평균
+      // 요일별 평균 (판매 0인 날도 포함하여 정확한 평균 산출)
       const dowMap={};
       s.days.forEach((d,i)=>{
         if(!dowMap[d.dow]) dowMap[d.dow]=[];
-        if(s.soldArr[i]>0) dowMap[d.dow].push(s.soldArr[i]);
+        dowMap[d.dow].push(s.soldArr[i]||0);
       });
       const dowAvg={};
       [0,1,2,3,4,5,6].forEach(d=>{
@@ -2321,7 +2761,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
   // ── 필터/정렬 테이블 ──
   const tableData=React.useMemo(()=>{
     let rows=[...skuStats];
-    if(search) rows=rows.filter(s=>(s.name||"").toLowerCase().includes(search.toLowerCase()));
+    if(debouncedSearch) rows=rows.filter(s=>(s.name||"").toLowerCase().includes(debouncedSearch.toLowerCase()));
     // 기본 정렬: 카테고리 그룹(Bev→Food→원재료) → totalSold 내림차순
     if(sortKey==="totalSold"&&!sortAsc) {
       const catOrder=["[10] Bev","[20] Food","[50] 원재료"];
@@ -2807,7 +3247,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
 
           {/* ── 뷰 모드 탭 ── */}
           <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-            {[["overview","📋 품목 분석"],["heatmap","🟩 히트맵"],["matrix","🎯 소진-폐기 분류"]].map(([id,label])=>(
+            {[["overview","📋 품목 분석"],["heatmap","🟩 히트맵"],["matrix","🎯 소진-폐기 분류"],["monthCmp","📊 월별 비교"]].map(([id,label])=>(
               <button key={id} onClick={()=>setViewMode(id)} style={{
                 padding:"7px 14px",borderRadius:10,border:"none",cursor:"pointer",
                 fontFamily:F,fontSize:12,fontWeight:viewMode===id?700:400,
@@ -2841,6 +3281,123 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
             </div>
           )}
 
+          {/* ── 월별 비교 차트 ── */}
+          {viewMode==="monthCmp"&&(()=>{
+            const now=new Date();
+            const curM=now.toISOString().slice(0,7);
+            const prev=new Date(now.getFullYear(),now.getMonth()-1,1).toISOString().slice(0,7);
+            const curHist=uploadHistory.filter(h=>h.date.startsWith(curM));
+            const prevHist=uploadHistory.filter(h=>h.date.startsWith(prev));
+
+            // 품목별 이번달/지난달 합산
+            const merge=(hist)=>{
+              const m={};
+              hist.forEach(h=>Object.entries(h.items||{}).forEach(([sku,item])=>{
+                if(catFilter!=="전체"&&item.cat!==catFilter) return;
+                if(!m[sku]) m[sku]={name:skuAliases[sku]||item.name,cat:item.cat,sold:0,days:0};
+                m[sku].sold+=(item.sold||0); m[sku].days++;
+              }));
+              return m;
+            };
+            const curMap=merge(curHist), prevMap=merge(prevHist);
+            const allSkus=[...new Set([...Object.keys(curMap),...Object.keys(prevMap)])];
+
+            const rows=allSkus.map(sku=>{
+              const c=curMap[sku]||{name:(prevMap[sku]||{}).name||sku,cat:"",sold:0,days:0};
+              const p=prevMap[sku]||{sold:0,days:0};
+              const cAvg=c.days?rnd(c.sold/c.days,1):0;
+              const pAvg=p.days?rnd(p.sold/p.days,1):0;
+              const diff=pAvg>0?rnd((cAvg-pAvg)/pAvg*100,0):cAvg>0?100:0;
+              return {sku,name:c.name,cat:c.cat,curSold:c.sold,prevSold:p.sold,cAvg,pAvg,diff};
+            }).filter(r=>r.curSold>0||r.prevSold>0)
+              .sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
+
+            const curLabel=curM.slice(5)+"월";
+            const prevLabel=prev.slice(5)+"월";
+            const maxBar=Math.max(...rows.map(r=>Math.max(r.cAvg,r.pAvg)),1);
+
+            return (
+              <Card style={{overflow:"hidden"}}>
+                <div style={{padding:"14px 16px",borderBottom:"1px solid "+T.b0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.t1,fontFamily:F}}>
+                    📊 월별 판매 비교 — {prevLabel} vs {curLabel}
+                  </div>
+                  <div style={{fontSize:11,color:T.t3,fontFamily:F,marginTop:2}}>
+                    일평균 판매량 기준 · 변화율 상위 정렬
+                  </div>
+                </div>
+
+                {/* 요약 카드 */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"12px 16px"}}>
+                  {[
+                    {l:prevLabel+" 총합",v:rows.reduce((s,r)=>s+r.prevSold,0),c:T.t3},
+                    {l:curLabel+" 총합",v:rows.reduce((s,r)=>s+r.curSold,0),c:T.brand},
+                    {l:"증가 품목",v:rows.filter(r=>r.diff>0).length+"개",c:"#007AFF"},
+                  ].map(s=>(
+                    <div key={s.l} style={{background:T.card2,borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:16,fontWeight:800,color:s.c,fontFamily:F}}>{typeof s.v==="number"?s.v.toLocaleString():s.v}</div>
+                      <div style={{fontSize:10,color:T.t3,fontFamily:F,marginTop:2}}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 비교 바 차트 */}
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontFamily:F,fontSize:12}}>
+                    <thead>
+                      <tr style={{background:T.card2}}>
+                        <th style={{padding:"8px 12px",textAlign:"left",fontWeight:600,color:T.t2}}>품목</th>
+                        <th style={{padding:"8px 8px",textAlign:"center",fontWeight:600,color:T.t3,minWidth:120}}>{prevLabel} → {curLabel}</th>
+                        <th style={{padding:"8px 8px",textAlign:"right",fontWeight:600,color:T.t2,whiteSpace:"nowrap"}}>변화</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0,30).map((r,i)=>{
+                        const diffColor=r.diff>0?"#007AFF":r.diff<0?T.red:T.t3;
+                        const diffIcon=r.diff>0?"▲":r.diff<0?"▼":"—";
+                        return (
+                          <tr key={r.sku} style={{borderBottom:"1px solid "+T.b0,cursor:"pointer"}}
+                            onClick={()=>{setDrillSku(r.sku);setViewMode("drill");}}>
+                            <td style={{padding:"10px 12px"}}>
+                              <div style={{fontWeight:600,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{r.name}</div>
+                              <div style={{fontSize:10,color:T.t3}}>{r.cat}</div>
+                            </td>
+                            <td style={{padding:"8px 8px"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                <div style={{flex:1}}>
+                                  <div style={{height:6,borderRadius:3,background:"rgba(142,142,147,0.2)",position:"relative",marginBottom:3}}>
+                                    <div style={{height:6,borderRadius:3,background:T.t3,width:(r.pAvg/maxBar*100)+"%"}}/>
+                                  </div>
+                                  <div style={{height:6,borderRadius:3,background:"rgba(0,112,74,0.15)",position:"relative"}}>
+                                    <div style={{height:6,borderRadius:3,background:T.brand,width:(r.cAvg/maxBar*100)+"%"}}/>
+                                  </div>
+                                </div>
+                                <div style={{fontSize:10,color:T.t3,minWidth:40,textAlign:"right"}}>
+                                  <div>{r.pAvg}</div>
+                                  <div style={{color:T.brand,fontWeight:600}}>{r.cAvg}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{padding:"8px 8px",textAlign:"right"}}>
+                              <span style={{fontSize:13,fontWeight:700,color:diffColor}}>
+                                {diffIcon} {Math.abs(r.diff)}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {rows.length===0&&(
+                        <tr><td colSpan="3" style={{padding:24,textAlign:"center",color:T.t3,fontFamily:F}}>
+                          비교할 데이터가 부족해요 (최소 2개월 필요)
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })()}
+
           {/* ── 품목 분석 테이블 ── */}
           {viewMode==="overview"&&(
             <Card style={{overflow:"hidden"}}>
@@ -2858,8 +3415,22 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
                     style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",
                       fontSize:14,background:"none",border:"none",cursor:"pointer",color:T.t3}}>✕</button>}
                 </div>
-                <div style={{fontSize:11,color:T.t4,fontFamily:F,marginTop:6}}>
-                  {tableData.length}개 품목 · 헤더 클릭으로 정렬 · 행 클릭 → 상세 추이
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+                  <div style={{fontSize:11,color:T.t4,fontFamily:F}}>
+                    {tableData.length}개 품목 · 헤더 클릭으로 정렬 · 행 클릭 → 상세 추이
+                  </div>
+                  <button onClick={()=>{
+                    const DOW_NAMES=["일","월","화","수","목","금","토"];
+                    downloadCSV(
+                      `재고통계_${rangeFrom}~${rangeTo}.csv`,
+                      ["품목","카테고리","총판매","일평균","결품률(%)","폐기율(%)","월평균","화평균","수평균","목평균","금평균","토평균","일평균"],
+                      tableData.map(s=>[s.name,s.cat,s.totalSold,s.avgSold,s.zeroRate,s.wasteRate??0,
+                        ...[1,2,3,4,5,6,0].map(d=>s.dowAvg[d]??0)])
+                    );
+                  }} style={{fontSize:11,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.b1,
+                    background:T.card,color:T.brand,fontFamily:F,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    📥 CSV 내보내기
+                  </button>
                 </div>
               </div>
               <div style={{overflowX:"auto"}}>
