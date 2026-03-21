@@ -669,7 +669,7 @@ function App() {
   /* 데이터 - Firebase Firestore */
   const storeId = currentUser?.storeId || null;
   const empId   = currentUser?.empId   || null;
-  const DEFAULT_ORDER_ITEMS = ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"];
+  
 
   const [notices,      saveNotices,      nL] = useStoreData(storeId, "notices",      SEED_NOTICES);
   const [categories,   saveCategories       ] = useStoreData(storeId, "categories",   DEFAULT_CATS);
@@ -677,9 +677,6 @@ function App() {
   const [memoNotes,    saveMemoNotes        ] = useStoreData(storeId, "memos",        []);
   const [events,       saveEvents,       eL ] = useStoreData(storeId, "events",       SEED_EVENTS);
   const [roleTasks,    saveRoleTasks,    rL ] = useStoreData(storeId, "teamTasks",    []);
-  const [orderRecords, saveOrderRecords     ] = useStoreData(storeId, "orderRecords", []);
-  const [orderItems,   saveOrderItems       ] = useStoreData(storeId, "orderItems",   DEFAULT_ORDER_ITEMS);
-  const [orderBuffers, saveOrderBuffers     ] = useStoreData(storeId, "orderBuffers", {});
   const [tasks,        saveTasks            ] = useUserData(empId, "tasks", []);
   const [tab, setTab] = useState("home");
   const [taskMode,    setTaskMode]    = useState("personal"); // "personal" | "role"
@@ -904,7 +901,6 @@ function App() {
               { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
               { id:"calendar", icon:"📅", label:"캘린더", badge:0 },
               { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
-              { id:"order",    icon:"📦", label:"발주",   badge:0 },
               { id:"memo",     icon:"📝", label:"메모",   badge:0 },
             ].map(t=>(
               <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1059,7 +1055,6 @@ function App() {
             { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
             { id:"calendar", icon:"📅", label:"캘린더" },
             { id:"tasks",    icon:"✅", label:"할일",   badge:pending },
-            { id:"order",    icon:"📦", label:"발주" },
             { id:"memo",     icon:"📝", label:"메모" },
           ].map(t=>(
             <button key={t.id} onClick={()=>{setTab(t.id);setViewNotice(null);}} style={{
@@ -1146,33 +1141,44 @@ function App() {
               </div>
             </div>
 
+            {/* 발주 앱 바로가기 배너 */}
+            <a href="./order.html"
+              style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                padding:"12px 18px", borderRadius:14, marginBottom:16, textDecoration:"none",
+                background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+                boxShadow:"0 4px 16px rgba(0,112,74,0.3)" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:22 }}>📦</span>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:800, color:"#fff", fontFamily:"inherit" }}>
+                    발주 관리 앱
+                  </div>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", fontFamily:"inherit" }}>
+                    실사 업로드 · 재고 통계 · 발주 분석
+                  </div>
+                </div>
+              </div>
+              <span style={{ fontSize:20, color:"rgba(255,255,255,0.8)" }}>›</span>
+            </a>
+
             {/* 오늘 할 일 */}
             {(todayEvents.length > 0 || (tasks||[]).filter(t=>!t.done).length > 0) && (
               <div style={{ marginBottom:18 }}>
                 <SH title="오늘 할 일" count={todayEvents.length+(tasks||[]).filter(t=>!t.done).length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-                  {todayEvents.map((e,i)=>{
-                    const linked = e.noticeId ? (notices||[]).find(n=>n.id===e.noticeId) : null;
-                    return (
-                    <div key={e.id}
-                      onClick={linked ? ()=>{ readNotice(linked.id); setViewNotice(linked); } : undefined}
-                      style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                        borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none",
-                        cursor:linked?"pointer":"default", transition:"background .12s" }}
-                      onMouseEnter={linked?e2=>e2.currentTarget.style.background=T.glass2:undefined}
-                      onMouseLeave={linked?e2=>e2.currentTarget.style.background="":undefined}>
+                  {todayEvents.map((e,i)=>(
+                    <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
+                      borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none" }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.title}</div>
-                      {linked && <span style={{ fontSize:11, color:T.l4, fontFamily:F, flexShrink:0 }}>공지 ›</span>}
                       <span style={{ fontSize:11, color:(CAT[e.category]||CAT["기타"]).color,
                         background:(CAT[e.category]||CAT["기타"]).dim, borderRadius:8, padding:"2px 8px",
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
-                    );
-                  })}
+                  ))}
                   {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
@@ -1488,19 +1494,7 @@ function App() {
           </div>
         )}
 
-        {/* -- ORDER CALCULATOR -- */}
-        {tab==="order"&&(
-          <div style={{ padding:isPC?"20px 28px":"16px" }} className="fi">
-            <OrderTab
-              records={orderRecords||[]}
-              items={orderItems||DEFAULT_ORDER_ITEMS}
-              buffers={orderBuffers||{}}
-              onSaveRecords={saveOrderRecords}
-              onSaveItems={saveOrderItems}
-              onSaveBuffers={saveOrderBuffers}
-            />
-          </div>
-        )}
+
       </div>
 
       {/* == MODALS == */}
@@ -2030,600 +2024,6 @@ function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, 
   );
 }
 
-
-function OrderTab({ records, items, buffers, onSaveRecords, onSaveItems, onSaveBuffers }) {
-  const [mode, setMode] = useState("input"); // "input"|"recommend"|"stats"|"settings"
-  const [inputDate, setInputDate] = useState(() => {
-    const d = new Date(); return d.toISOString().slice(0,10);
-  });
-  useEffect(() => {
-    setInputDate(new Date().toISOString().slice(0,10));
-  }, []);
-  const [form, setForm] = useState({});
-  const [newItem, setNewItem] = useState("");
-  const [bufEdit, setBufEdit] = useState({});
-  const [bufMode, setBufMode] = useState(false);
-  const [dragIdx, setDragIdx] = useState(null);
-  const [dragOverIdx, setDragOverIdx] = useState(null);
-  const [statsItem, setStatsItem] = useState(() => items && items[0] ? items[0] : "우유");
-  const [skippedItems, setSkippedItems] = useState({}); // { [item]: true } 항목별 누락 처리
-
-  const DOW_KR = ["일","월","화","수","목","금","토"];
-
-  // 날짜 바뀌면 form 초기화: 저장된 데이터 우선 로드, 없으면 전날 마감재고로 초기화
-  const recordsRef = useRef(records);
-  recordsRef.current = records;
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
-
-  useEffect(() => {
-    const recs = recordsRef.current;
-    const itms = itemsRef.current;
-    const existRec = recs.find(r => r.date === inputDate);
-    const init = {};
-    const initSkipped = {};
-
-    if (existRec) {
-      // 저장된 기록 — 항목별로 skipped 여부 + 값 복원
-      itms.forEach(item => {
-        const d = existRec.items[item] || {};
-        if (d.skipped) {
-          initSkipped[item] = true;
-          init[item] = { prev: "", received: "", closing: "" };
-        } else {
-          init[item] = {
-            prev:     String(d.prev     ?? ""),
-            received: String(d.received ?? ""),
-            closing:  String(d.closing  ?? ""),
-          };
-        }
-      });
-    } else {
-      // 기록 없음 — 항목별로 마지막 정상(non-skipped) 마감재고를 prev에
-      itms.forEach(item => {
-        const prevRec = recs
-          .filter(r => r.date < inputDate && !r.items?.[item]?.skipped && r.items?.[item]?.closing != null)
-          .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
-        const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
-        init[item] = { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" };
-      });
-    }
-    setForm(init);
-    setSkippedItems(initSkipped);
-  }, [inputDate]);
-
-  function getPrevDate(dateStr) {
-    const d = new Date(dateStr + "T00:00:00");
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0,10);
-  }
-
-  function calcUsed(prev, received, closing) {
-    const p = parseFloat(prev)||0, r = parseFloat(received)||0, c = parseFloat(closing)||0;
-    if (prev===""&&received===""&&closing==="") return null;
-    return Math.max(0, p + r - c);
-  }
-
-  function handleFieldChange(item, field, val) {
-    setForm(f => ({ ...f, [item]: { ...(f[item]||{}), [field]: val } }));
-  }
-
-  function handleSaveRecord() {
-    const dow = new Date(inputDate + "T00:00:00").getDay();
-    const itemData = {};
-    items.forEach(item => {
-      if (skippedItems[item]) {
-        // 누락 항목: skipped 마킹, 나머지 값은 0
-        itemData[item] = { skipped: true, prev: 0, received: 0, closing: 0, used: 0 };
-      } else {
-        const f = form[item] || {};
-        const used = calcUsed(f.prev, f.received, f.closing);
-        itemData[item] = {
-          prev:     parseFloat(f.prev)    || 0,
-          received: parseFloat(f.received)|| 0,
-          closing:  parseFloat(f.closing) || 0,
-          used:     used !== null ? used : 0,
-        };
-      }
-    });
-    const newRec = { date: inputDate, dow, items: itemData };
-    const exists = records.findIndex(r => r.date === inputDate);
-    let updated;
-    if (exists >= 0) {
-      updated = records.map((r,i) => i===exists ? newRec : r);
-    } else {
-      updated = [...records, newRec].sort((a,b) => a.date.localeCompare(b.date));
-    }
-    onSaveRecords(updated);
-    alert("저장되었습니다 ✓");
-  }
-
-  // 항목별 누락 토글
-  function toggleItemSkip(item) {
-    setSkippedItems(prev => {
-      const next = { ...prev };
-      if (next[item]) {
-        delete next[item];
-        // 누락 해제 시 전일재고 다시 채우기
-        const prevRec = records
-          .filter(r => r.date < inputDate && !r.items?.[item]?.skipped && r.items?.[item]?.closing != null)
-          .sort((a,b) => b.date.localeCompare(a.date))[0] || null;
-        const prevClosing = prevRec ? (prevRec.items[item]?.closing ?? "") : "";
-        setForm(f => ({ ...f, [item]: { prev: String(prevClosing !== "" ? prevClosing : ""), received: "", closing: "" } }));
-      } else {
-        next[item] = true;
-        // 누락 처리 시 해당 항목 폼 비우기
-        setForm(f => ({ ...f, [item]: { prev: "", received: "", closing: "" } }));
-      }
-      return next;
-    });
-  }
-
-  // 요일별 평균 사용량 계산 (항목별 누락 제외)
-  function getAvgByDow(item, dow) {
-    const vals = records
-      .filter(r => r.dow === dow && !r.items?.[item]?.skipped && r.items?.[item]?.used > 0)
-      .map(r => r.items[item].used);
-    if (!vals.length) return null;
-    return (vals.reduce((a,b)=>a+b,0) / vals.length).toFixed(1);
-  }
-
-  // 전주 같은 요일 사용량
-  function getLastWeekSame(item, dateStr) {
-    const d = new Date(dateStr + "T00:00:00");
-    d.setDate(d.getDate() - 7);
-    const lastWeekDate = d.toISOString().slice(0,10);
-    const rec = records.find(r => r.date === lastWeekDate);
-    return rec ? rec.items[item]?.used ?? null : null;
-  }
-
-  // 발주 추천량 — 발주일 이후 입고일까지 구간 전체 사용량 커버
-  function getRecommend(item) {
-    // 발주 → 이틀 후 입고 (ex. 월요일 발주 → 수요일 입고)
-    // 커버해야 할 기간: 발주일+1일(화), 발주일+2일(수=입고일) 총 2일
-    const today = inputDate;
-    const todayRec = records.find(r => r.date === today);
-    // 현재고: 오늘 마감재고 (없으면 0)
-    const currentStock = todayRec ? (todayRec.items[item]?.closing ?? 0) : 0;
-    const baseDow = new Date(today + "T00:00:00").getDay();
-    // +1일 (내일) 요일 평균 사용량
-    const dow1 = (baseDow + 1) % 7;
-    const avg1 = parseFloat(getAvgByDow(item, dow1)) || 0;
-    // +2일 (입고 당일) 요일 평균 사용량
-    const dow2 = (baseDow + 2) % 7;
-    const avg2 = parseFloat(getAvgByDow(item, dow2)) || 0;
-    const totalAvgUsage = avg1 + avg2; // 발주~입고 사이 총 예상 사용량
-    const buf = parseFloat(buffers[item]) || 2;
-    const rec = Math.max(0, Math.ceil(totalAvgUsage + buf - currentStock));
-    return { rec, avg1, avg2, totalAvgUsage, buf, currentStock, dow1, dow2 };
-  }
-
-  // 주차별 요일 통계 (최근 8주)
-  function getWeeklyStats(item) {
-    const sorted = [...records].sort((a,b)=>b.date.localeCompare(a.date));
-    // 주 그룹화
-    const weeks = [];
-    sorted.forEach(r => {
-      const d = new Date(r.date + "T00:00:00");
-      const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
-      const wk = mon.toISOString().slice(0,10);
-      let w = weeks.find(x=>x.week===wk);
-      if (!w) { w = { week:wk, days:{} }; weeks.push(w); }
-      w.days[r.dow] = r.items?.[item]?.skipped ? "누락" : (r.items?.[item]?.used ?? null);
-    });
-    return weeks.slice(0,8).reverse();
-  }
-
-  const btnStyle = (active) => ({
-    padding:"8px 16px", borderRadius:10, border:"none", cursor:"pointer",
-    fontFamily:F, fontSize:13, fontWeight:active?700:500,
-    background: active ? T.green : T.glass1,
-    color: active ? "#fff" : T.l2,
-    transition:"all .15s"
-  });
-
-  const inputStyle = {
-    width:"100%", padding:"8px 10px", borderRadius:8,
-    border:"1px solid "+T.border1, background:T.card,
-    fontSize:14, fontFamily:F, color:T.l1,
-    textAlign:"center", outline:"none"
-  };
-
-  return (
-    <div>
-      {/* 모드 탭 */}
-      <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
-        {[["input","📝 재고 입력"],["recommend","📦 발주 추천"],["stats","📊 통계"],["settings","⚙️ 설정"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setMode(id)} style={btnStyle(mode===id)}>{label}</button>
-        ))}
-      </div>
-
-      {/* ── 재고 입력 ── */}
-      {mode==="input"&&(
-        <div>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, flexWrap:"wrap" }}>
-            <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)}
-              style={{ ...inputStyle, width:"auto", textAlign:"left", padding:"8px 12px" }}/>
-            <span style={{ fontSize:13, color:T.l3, fontFamily:F }}>
-              ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일)
-            </span>
-            {/* 저장 상태 뱃지 */}
-            {records.find(r=>r.date===inputDate) && (
-              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
-                background:"rgba(0,112,74,0.09)", color:T.green, border:"1px solid rgba(0,112,74,0.2)" }}>
-                ✓ 저장됨
-              </span>
-            )}
-            {Object.keys(skippedItems).length > 0 && (
-              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700,
-                background:"rgba(255,149,0,0.12)", color:T.amber, border:"1px solid rgba(255,149,0,0.25)" }}>
-                ⚠ 누락 {Object.keys(skippedItems).length}개
-              </span>
-            )}
-          </div>
-
-          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
-            {/* 헤더 */}
-            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
-              padding:"10px 14px", background:T.greenDim, gap:6 }}>
-              {["품목","전일재고","당일입고","마감재고","사용량","누락"].map(h=>(
-                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
-              ))}
-            </div>
-            {/* 행 */}
-            {items.map((item, idx) => {
-              const skipped = !!skippedItems[item];
-              const f = form[item] || { prev:"", received:"", closing:"" };
-              const used = skipped ? null : calcUsed(f.prev, f.received, f.closing);
-              return (
-                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1fr 0.7fr 0.5fr",
-                  padding:"10px 14px", gap:6, alignItems:"center",
-                  background: skipped ? "rgba(255,149,0,0.06)" : idx%2===0 ? T.glass2 : T.card,
-                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none",
-                  transition:"background .15s" }}>
-                  <div style={{ fontSize:13, fontWeight:600,
-                    color: skipped ? T.amber : T.l1, fontFamily:F }}>
-                    {item}
-                    {skipped && <div style={{ fontSize:10, color:T.amber, fontWeight:500, marginTop:1 }}>누락</div>}
-                  </div>
-                  {["prev","received","closing"].map(field=>(
-                    <input key={field} type="number" min="0" step="0.5"
-                      value={skipped ? "" : (f[field]||"")}
-                      disabled={skipped}
-                      onChange={e=>handleFieldChange(item, field, e.target.value)}
-                      placeholder={skipped ? "-" : "0"}
-                      style={{ ...inputStyle, fontSize:14,
-                        background: skipped ? "rgba(255,149,0,0.06)" : field==="prev" ? T.glass3 : T.card,
-                        color: skipped ? T.l4 : T.l1,
-                        borderColor: skipped ? "rgba(255,149,0,0.2)" : T.border1,
-                        cursor: skipped ? "not-allowed" : "auto" }}/>
-                  ))}
-                  <div style={{ textAlign:"center", fontSize:14, fontWeight:700,
-                    color: skipped ? T.amber : used!==null ? T.green : T.l4, fontFamily:F }}>
-                    {skipped ? "누락" : used!==null ? used : "-"}
-                  </div>
-                  {/* 누락 토글 버튼 */}
-                  <button
-                    onClick={()=>toggleItemSkip(item)}
-                    title={skipped ? "누락 해제" : "누락 처리"}
-                    style={{ width:"100%", height:32, borderRadius:8, border:"none",
-                      background: skipped ? "rgba(255,149,0,0.18)" : T.glass3,
-                      color: skipped ? T.amber : T.l3,
-                      fontSize:14, cursor:"pointer", fontWeight:skipped?700:400,
-                      transition:"all .15s" }}>
-                    {skipped ? "✕" : "⚠"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:12 }}>
-            💡 전일재고는 자동 입력돼요 &nbsp;·&nbsp; ⚠ 버튼으로 항목별 누락 처리 가능
-          </div>
-          <button onMouseDown={e=>{e.preventDefault();handleSaveRecord();}}
-            style={{ width:"100%", padding:"14px", borderRadius:14, border:"none",
-              background:"linear-gradient(135deg,#00704A,#1E3932)",
-              color:"#fff", fontSize:15, fontWeight:700, fontFamily:F,
-              cursor:"pointer", boxShadow:"0 4px 20px rgba(0,112,74,0.30)" }}>
-            저장하기
-          </button>
-        </div>
-      )}
-
-      {/* ── 발주 추천 ── */}
-      {mode==="recommend"&&(
-        <div>
-          <div style={{ background:T.greenDim, border:"1px solid "+T.greenBorder,
-            borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:13, color:T.green, fontFamily:F }}>
-            📅 발주일: {inputDate} ({DOW_KR[new Date(inputDate+"T00:00:00").getDay()]}요일) &nbsp;→&nbsp; 📦 입고 예정: {DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+2)%7]}요일<br/>
-            <span style={{ fontSize:11, color:T.l2 }}>내일({DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+1)%7]}) + 입고일({DOW_KR[(new Date(inputDate+"T00:00:00").getDay()+2)%7]}) 평균사용량 합산 → 현재고 차감하여 발주량 계산</span>
-          </div>
-          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr 0.7fr 0.7fr 0.8fr 0.6fr 1fr",
-              padding:"10px 14px", background:T.greenDim, gap:4 }}>
-              {["품목","현재고","내일","입고일","합계사용","버퍼","권장발주"].map(h=>(
-                <div key={h} style={{ fontSize:11, fontWeight:700, color:T.green, fontFamily:F, textAlign:"center" }}>{h}</div>
-              ))}
-            </div>
-            {items.map((item, idx) => {
-              const { rec, avg1, avg2, totalAvgUsage, buf, currentStock, dow1, dow2 } = getRecommend(item);
-              return (
-                <div key={item} style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr 0.7fr 0.7fr 0.8fr 0.6fr 1fr",
-                  padding:"10px 14px", gap:4, alignItems:"center",
-                  background: idx%2===0 ? T.glass2 : T.card,
-                  borderBottom: idx<items.length-1 ? "1px solid "+T.border0 : "none" }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:T.l1, fontFamily:F }}>{item}</div>
-                  <div style={{ textAlign:"center", fontSize:13, color:T.l2, fontFamily:F }}>{currentStock}</div>
-                  <div style={{ textAlign:"center", fontSize:12, color:T.l3, fontFamily:F }} title={DOW_KR[dow1]+"요일 평균"}>{avg1||"-"}</div>
-                  <div style={{ textAlign:"center", fontSize:12, color:T.l3, fontFamily:F }} title={DOW_KR[dow2]+"요일 평균"}>{avg2||"-"}</div>
-                  <div style={{ textAlign:"center", fontSize:13, fontWeight:600, color:T.amber, fontFamily:F }}>
-                    {totalAvgUsage>0 ? totalAvgUsage.toFixed(1) : "-"}
-                  </div>
-                  <div style={{ textAlign:"center", fontSize:13, color:T.l3, fontFamily:F }}>{buf}</div>
-                  <div style={{ textAlign:"center", fontSize:15, fontWeight:800,
-                    color: rec>0 ? T.green : T.l4, fontFamily:F }}>
-                    {rec>0 ? "▶ "+rec : "충분"}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginTop:10 }}>
-            * 버퍼 재고는 설정 탭에서 품목별로 조정할 수 있어요
-          </div>
-        </div>
-      )}
-
-      {/* ── 통계 ── */}
-      {mode==="stats"&&(
-        <div>
-          <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-            {items.map(item=>(
-              <button key={item} onClick={()=>setStatsItem(item)}
-                style={{ padding:"6px 12px", borderRadius:20, border:"1px solid "+(statsItem===item?T.green:T.border1),
-                  background: statsItem===item ? T.greenDim : T.glass1,
-                  color: statsItem===item ? T.green : T.l2,
-                  fontSize:12, fontWeight:statsItem===item?700:400, cursor:"pointer", fontFamily:F }}>
-                {item}
-              </button>
-            ))}
-          </div>
-
-          {/* 평일/주말 요약 */}
-          {(()=>{
-            const wdAvgs = [1,2,3,4,5].map(d=>parseFloat(getAvgByDow(statsItem,d))||0).filter(v=>v>0);
-            const weAvgs = [0,6].map(d=>parseFloat(getAvgByDow(statsItem,d))||0).filter(v=>v>0);
-            const wdMean = wdAvgs.length ? (wdAvgs.reduce((a,b)=>a+b,0)/wdAvgs.length).toFixed(1) : null;
-            const weMean = weAvgs.length ? (weAvgs.reduce((a,b)=>a+b,0)/weAvgs.length).toFixed(1) : null;
-            return (
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
-                <div style={{ background:"rgba(0,122,255,0.07)", borderRadius:14, padding:"14px",
-                  border:"1px solid rgba(0,122,255,0.15)", textAlign:"center" }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:T.blue, fontFamily:F, marginBottom:6 }}>🗓 평일 평균</div>
-                  <div style={{ fontSize:26, fontWeight:900, color:T.blue, fontFamily:F, letterSpacing:-1 }}>
-                    {wdMean||"-"}
-                  </div>
-                  <div style={{ fontSize:11, color:T.l3, fontFamily:F, marginTop:3 }}>월~금 평균 사용량</div>
-                </div>
-                <div style={{ background:"rgba(255,59,48,0.07)", borderRadius:14, padding:"14px",
-                  border:"1px solid rgba(255,59,48,0.15)", textAlign:"center" }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:T.red, fontFamily:F, marginBottom:6 }}>🌅 주말 평균</div>
-                  <div style={{ fontSize:26, fontWeight:900, color:T.red, fontFamily:F, letterSpacing:-1 }}>
-                    {weMean||"-"}
-                  </div>
-                  <div style={{ fontSize:11, color:T.l3, fontFamily:F, marginTop:3 }}>토·일 평균 사용량</div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 요일별 평균 막대 */}
-          <div style={{ background:T.card, borderRadius:16, padding:"14px",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
-            <div style={{ fontSize:13, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:10 }}>
-              📊 요일별 평균 사용량 — {statsItem}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6 }}>
-              {[0,1,2,3,4,5,6].map(dow=>{
-                const avg = getAvgByDow(statsItem, dow);
-                const maxAvg = Math.max(...[0,1,2,3,4,5,6].map(d=>parseFloat(getAvgByDow(statsItem,d))||0));
-                const ratio = maxAvg>0 ? (parseFloat(avg)||0)/maxAvg : 0;
-                const isWeekend = dow===0||dow===6;
-                const barColor = isWeekend
-                  ? (dow===0 ? "linear-gradient(to top,#FF3B30,#FF6B6B88)" : "linear-gradient(to top,#007AFF,#5BA8FF88)")
-                  : "linear-gradient(to top,"+T.green+","+T.green+"88)";
-                const labelColor = dow===0 ? T.red : dow===6 ? T.blue : T.l3;
-                return (
-                  <div key={dow} style={{ textAlign:"center" }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:labelColor,
-                      fontFamily:F, marginBottom:4,
-                      background: isWeekend ? (dow===0?"rgba(255,59,48,0.08)":"rgba(0,122,255,0.08)") : "transparent",
-                      borderRadius:6, padding:"2px 0" }}>{DOW_KR[dow]}</div>
-                    <div style={{ height:60, background:T.glass3, borderRadius:6, position:"relative",
-                      overflow:"hidden", marginBottom:4,
-                      border: isWeekend ? "1px solid "+(dow===0?"rgba(255,59,48,0.2)":"rgba(0,122,255,0.2)") : "none" }}>
-                      <div style={{ position:"absolute", bottom:0, left:0, right:0,
-                        height:(ratio*100)+"%",
-                        background: barColor,
-                        borderRadius:6, transition:"height .3s" }}/>
-                    </div>
-                    <div style={{ fontSize:12, fontWeight:700, color:isWeekend?labelColor:T.l1, fontFamily:F }}>
-                      {avg||"-"}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {/* 범례 */}
-            <div style={{ display:"flex", gap:14, marginTop:10, justifyContent:"center" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:T.l3, fontFamily:F }}>
-                <div style={{ width:10, height:10, borderRadius:3, background:T.green }}/> 평일
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:T.red, fontFamily:F }}>
-                <div style={{ width:10, height:10, borderRadius:3, background:T.red }}/> 일요일
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:T.blue, fontFamily:F }}>
-                <div style={{ width:10, height:10, borderRadius:3, background:T.blue }}/> 토요일
-              </div>
-            </div>
-          </div>
-
-          {/* 주차별 테이블 */}
-          <div style={{ background:T.card, borderRadius:16, overflow:"hidden",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
-            <div style={{ padding:"12px 14px 8px", fontSize:13, fontWeight:700, color:T.l1, fontFamily:F }}>
-              주차별 기록 — {statsItem}
-            </div>
-            <div style={{ overflowX:"auto" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, fontFamily:F }}>
-                <thead>
-                  <tr style={{ background:T.greenDim }}>
-                    <th style={{ padding:"8px 10px", textAlign:"left", color:T.green, fontWeight:700 }}>주차</th>
-                    {[0,1,2,3,4,5,6].map(d=>(
-                      <th key={d} style={{ padding:"8px 6px", textAlign:"center",
-                        color:d===0?T.red:d===6?T.blue:T.green, fontWeight:700 }}>{DOW_KR[d]}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {getWeeklyStats(statsItem).map((wk, wi)=>(
-                    <tr key={wk.week} style={{ background:wi%2===0?T.glass2:T.card }}>
-                      <td style={{ padding:"8px 10px", color:T.l2, fontWeight:500 }}>
-                        {wk.week.slice(5)}
-                      </td>
-                      {[0,1,2,3,4,5,6].map(d=>{
-                        const isWe = d===0||d===6;
-                        const weColor = d===0?T.red:T.blue;
-                        const val = wk.days[d];
-                        const isSkip = val === "누락";
-                        return (
-                          <td key={d} style={{ padding:"8px 6px", textAlign:"center",
-                            background: isSkip ? "rgba(255,149,0,0.08)"
-                              : isWe ? (d===0?"rgba(255,59,48,0.05)":"rgba(0,122,255,0.05)") : "transparent",
-                            color: isSkip ? T.amber : val!=null ? (isWe?weColor:T.l1) : T.l4,
-                            fontWeight: val!=null ? 600 : 400,
-                            fontSize: isSkip ? 10 : 12 }}>
-                            {isSkip ? "누락" : val!=null ? val : "·"}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                  {getWeeklyStats(statsItem).length===0&&(
-                    <tr><td colSpan={8} style={{ padding:"20px", textAlign:"center", color:T.l3 }}>
-                      아직 기록이 없어요
-                    </td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 설정 ── */}
-      {mode==="settings"&&(
-        <div>
-          {/* 품목 관리 */}
-          <div style={{ background:T.card, borderRadius:16, padding:"16px",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)", marginBottom:16 }}>
-            <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:12 }}>
-              📋 품목 관리
-            </div>
-            {items.map((item, idx)=>(
-              <div key={item}
-                draggable
-                onDragStart={()=>setDragIdx(idx)}
-                onDragOver={e=>{e.preventDefault();setDragOverIdx(idx);}}
-                onDrop={()=>{
-                  if(dragIdx===null||dragIdx===idx) return;
-                  const arr = [...items];
-                  const [moved] = arr.splice(dragIdx,1);
-                  arr.splice(idx,0,moved);
-                  onSaveItems(arr);
-                  setDragIdx(null); setDragOverIdx(null);
-                }}
-                onDragEnd={()=>{setDragIdx(null);setDragOverIdx(null);}}
-                style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8,
-                  opacity: dragIdx===idx ? 0.4 : 1,
-                  border: dragOverIdx===idx&&dragIdx!==idx ? "2px solid "+T.green : "2px solid transparent",
-                  borderRadius:12, transition:"border .1s" }}>
-                {/* 순서 이동 버튼 (모바일/PC 모두 작동) */}
-                <div style={{ display:"flex", flexDirection:"column", gap:1, flexShrink:0 }}>
-                  <button onClick={()=>{
-                    if(idx===0) return;
-                    const arr=[...items]; [arr[idx-1],arr[idx]]=[arr[idx],arr[idx-1]]; onSaveItems(arr);
-                  }} disabled={idx===0} style={{ width:24, height:22, border:"none", borderRadius:"4px 4px 0 0",
-                    background:idx===0?"transparent":T.glass2, color:idx===0?T.l4:T.l2,
-                    cursor:idx===0?"default":"pointer", fontSize:12, display:"flex",
-                    alignItems:"center", justifyContent:"center" }}>▲</button>
-                  <button onClick={()=>{
-                    if(idx===items.length-1) return;
-                    const arr=[...items]; [arr[idx],arr[idx+1]]=[arr[idx+1],arr[idx]]; onSaveItems(arr);
-                  }} disabled={idx===items.length-1} style={{ width:24, height:22, border:"none", borderRadius:"0 0 4px 4px",
-                    background:idx===items.length-1?"transparent":T.glass2, color:idx===items.length-1?T.l4:T.l2,
-                    cursor:idx===items.length-1?"default":"pointer", fontSize:12, display:"flex",
-                    alignItems:"center", justifyContent:"center" }}>▼</button>
-                </div>
-                <div style={{ flex:1, padding:"10px 14px", borderRadius:10, background:T.glass2,
-                  border:"1px solid "+T.border0, fontSize:14, color:T.l1, fontFamily:F }}>
-                  {item}
-                </div>
-                <button onClick={()=>{
-                  if(!window.confirm(`"${item}" 품목을 삭제할까요?`)) return;
-                  onSaveItems(items.filter((_,i)=>i!==idx));
-                }} style={{ padding:"8px 10px", borderRadius:8, border:"1px solid #ff6b6b44",
-                  background:"#ff6b6b11", color:"#e05252", cursor:"pointer", fontFamily:F, fontSize:12,
-                  flexShrink:0 }}>삭제</button>
-              </div>
-            ))}
-            <div style={{ display:"flex", gap:8, marginTop:10, alignItems:"center", width:"100%" }}>
-              <input value={newItem} onChange={e=>setNewItem(e.target.value)}
-                placeholder="새 품목명 입력"
-                onKeyDown={e=>{ if(e.key==="Enter"&&newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
-                style={{ flex:1, padding:"10px 14px", borderRadius:10, border:"1px solid "+T.border1,
-                  background:T.card, fontSize:14, fontFamily:F, color:T.l1, outline:"none",
-                  height:44 }}/>
-              <button onClick={()=>{ if(newItem.trim()){ onSaveItems([...items, newItem.trim()]); setNewItem(""); }}}
-                style={{ padding:"0 18px", borderRadius:10, border:"none", height:44, flexShrink:0,
-                  background:T.green, color:"#fff", cursor:"pointer", fontFamily:F, fontSize:14, fontWeight:600,
-                  whiteSpace:"nowrap" }}>추가</button>
-            </div>
-          </div>
-
-          {/* 버퍼 재고 설정 */}
-          <div style={{ background:T.card, borderRadius:16, padding:"16px",
-            boxShadow:"0 2px 16px rgba(30,57,50,0.07)" }}>
-            <div style={{ fontSize:14, fontWeight:700, color:T.l1, fontFamily:F, marginBottom:6 }}>
-              🛡 품목별 버퍼 재고
-            </div>
-            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:12 }}>
-              발주 추천 시 추가하는 안전 재고량이에요
-            </div>
-            {items.map(item=>(
-              <div key={item} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-                <div style={{ flex:1, fontSize:14, color:T.l1, fontFamily:F }}>{item}</div>
-                <input type="number" min="0" step="0.5"
-                  value={bufEdit[item]!==undefined ? bufEdit[item] : (buffers[item]??2)}
-                  onChange={e=>setBufEdit(b=>({...b,[item]:e.target.value}))}
-                  onBlur={()=>{
-                    if(bufEdit[item]!==undefined){
-                      onSaveBuffers({...buffers,[item]:parseFloat(bufEdit[item])||0});
-                    }
-                  }}
-                  style={{ width:70, padding:"8px 10px", borderRadius:8, border:"1px solid "+T.border1,
-                    background:T.glass2, fontSize:14, fontFamily:F, color:T.l1, textAlign:"center", outline:"none" }}/>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function MemoTab({ memos, onSave }) {
   const [input, setInput] = useState("");
