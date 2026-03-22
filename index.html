@@ -17,8 +17,10 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;background:#EEF7F1;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,sans-serif}
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    html,body{height:100%;overflow-x:hidden;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;transition:background .35s ease;}
+    html.dark{background:#000000;color-scheme:dark;}
+    html:not(.dark){background:#F2F2F7;color-scheme:light;}
     #root{min-height:100vh}
     [contenteditable]:empty:before{content:attr(data-placeholder);color:#9FB8A8;pointer-events:none;position:absolute}
     .rich-editor{outline:none;position:relative}
@@ -29,18 +31,27 @@
     @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
     @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(16px)}}
     @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:none}}
+    @keyframes scaleIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
     .fi{animation:fadeUp .28s cubic-bezier(.22,1,.36,1) both}
-    button:active{transform:scale(0.96);transition:transform .1s}
+    button{transition:transform .12s ease, opacity .12s ease;}
+    button:active{transform:scale(0.96);opacity:0.78;}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:rgba(0,112,74,0.15);border-radius:4px}
     input:focus,textarea:focus,[contenteditable]:focus{border-color:rgba(0,112,74,0.45)!important;box-shadow:0 0 0 3px rgba(0,112,74,0.08)!important;outline:none!important}
-    @media(min-width:768px){html,body{background:#E4F0E8}}
+    html.dark input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7);}
+    @media(min-width:768px){html:not(.dark){background:#F2F2F7;} html.dark{background:#000000;}}
     /* 공지 에디터 ↔ 뷰어 줄간격 통일 */
     .rich-editor div,.notice-body div{margin:0;padding:0;min-height:1em}
     .rich-editor p,.notice-body p{margin:0}
     .rich-editor br,.notice-body br{line-height:1.8}
     .notice-body{word-break:break-word}
   </style>
+  <!-- DOMPurify — XSS 방지 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
@@ -69,33 +80,37 @@
     window.db = firebase.firestore();
   </script>
   <script type="text/babel" data-presets="react">
-    const{useState,useEffect,useCallback,useRef}=React;
+    const{useState,useEffect,useCallback,useRef,useMemo}=React;
+
+/* ─── 디바운싱 훅 ─────────────────────────────── */
+function useDebounce(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 
-const F = "'Noto Sans KR', -apple-system, sans-serif";
+const F = "'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif";
 
-/* ─── Design Tokens — Apple Style ───────────────── */
-const T = {
-  // 배경 — Apple systemBackground / systemGroupedBackground
-  bg:    "#F2F2F7", card:  "#FFFFFF", card2: "#F2F2F7", card3: "#E5E5EA",
-  // 브랜드 — 포인트로만 사용
-  brand: "#00704A", brandDark: "#1E3932", brandMid: "#005538",
-  brandLight: "#D4EDE3", brandDim: "rgba(0,112,74,0.09)", brandBorder: "rgba(0,112,74,0.16)",
-  // 텍스트 — Apple label system
-  t1: "#1C1C1E", t2: "#3C3C43", t3: "#8E8E93", t4: "rgba(60,60,67,0.18)",
-  // 시맨틱 컬러
-  red:    "#FF3B30", rDim: "rgba(255,59,48,0.10)",    rBdr: "rgba(255,59,48,0.20)",
-  amber:  "#FF9500", aDim: "rgba(255,149,0,0.10)",    aBdr: "rgba(255,149,0,0.20)",
-  blue:   "#007AFF", bDim: "rgba(0,122,255,0.10)",    bBdr: "rgba(0,122,255,0.20)",
-  violet: "#AF52DE", vDim: "rgba(175,82,222,0.10)",   vBdr: "rgba(175,82,222,0.20)",
-  gold:   "#C8982A", goDim:"rgba(200,152,42,0.10)",   goBdr:"rgba(200,152,42,0.20)",
-  // 구분선 — Apple separator
-  b0: "rgba(60,60,67,0.10)", b1: "rgba(60,60,67,0.16)",
-  // 그림자 — Apple: 거의 없고 아주 미세하게
-  sh1: "0 1px 3px rgba(0,0,0,0.06)",
-  sh2: "0 2px 8px rgba(0,0,0,0.08)",
-  sh3: "0 4px 20px rgba(0,0,0,0.10)",
-  // backward compat aliases
+const T_LIGHT = {
+  bg:"#F2F2F7", card:"#FFFFFF", card2:"#F2F2F7", card3:"#E5E5EA",
+  brand:"#00704A", brandDark:"#1E3932", brandMid:"#005538",
+  brandLight:"#D4EDE3", brandDim:"rgba(0,112,74,0.08)", brandBorder:"rgba(0,112,74,0.16)",
+  t1:"#1C1C1E", t2:"#3C3C43", t3:"#8E8E93", t4:"rgba(60,60,67,0.18)",
+  red:"#FF3B30", rDim:"rgba(255,59,48,0.10)", rBdr:"rgba(255,59,48,0.20)",
+  amber:"#FF9500", aDim:"rgba(255,149,0,0.10)", aBdr:"rgba(255,149,0,0.20)",
+  blue:"#007AFF", bDim:"rgba(0,122,255,0.10)", bBdr:"rgba(0,122,255,0.20)",
+  violet:"#AF52DE", vDim:"rgba(175,82,222,0.10)", vBdr:"rgba(175,82,222,0.20)",
+  gold:"#C8982A", goDim:"rgba(200,152,42,0.10)", goBdr:"rgba(200,152,42,0.20)",
+  b0:"rgba(60,60,67,0.09)", b1:"rgba(60,60,67,0.14)",
+  sh1:"0 1px 4px rgba(0,0,0,0.05)", sh2:"0 2px 12px rgba(0,0,0,0.07)", sh3:"0 6px 24px rgba(0,0,0,0.10)",
+  glass:"rgba(255,255,255,0.78)", glassBorder:"rgba(255,255,255,0.45)",
+  navBg:"rgba(249,249,249,0.94)", headerBg:"rgba(249,249,249,0.88)",
+  isDark:false,
+  // Backward compatibility
   get green(){ return this.brand; },
   get greenDim(){ return this.brandDim; },
   get greenBorder(){ return this.brandBorder; },
@@ -103,13 +118,63 @@ const T = {
   get greenDeep(){ return this.brandDark; },
   get l1(){ return this.t1; }, get l2(){ return this.t2; }, get l3(){ return this.t3; }, get l4(){ return this.t4; },
   get border0(){ return this.b0; }, get border1(){ return this.b1; }, get border2(){ return this.brandBorder; },
-  get glass0(){ return "rgba(255,255,255,0.72)"; }, get glass1(){ return "#FFFFFF"; },
+  get glass0(){ return this.glass; }, get glass1(){ return this.card; },
   get glass2(){ return this.card2; }, get glass3(){ return this.card3; },
   get orange(){ return this.amber; }, get orangeDim(){ return this.aDim; },
   get purple(){ return this.violet; }, get purpleDim(){ return this.vDim; },
   get goldDim(){ return this.goDim; }, get redDim(){ return this.rDim; },
   get glassHover(){ return "rgba(0,112,74,0.05)"; },
 };
+
+const T_DARK = {
+  bg:"#000000", card:"#1C1C1E", card2:"#2C2C2E", card3:"#3A3A3C",
+  brand:"#30D98A", brandDark:"#1E3932", brandMid:"#2AAE6E",
+  brandLight:"#0A3D24", brandDim:"rgba(48,217,138,0.12)", brandBorder:"rgba(48,217,138,0.20)",
+  t1:"#F5F5F7", t2:"#EBEBF5", t3:"#8E8E93", t4:"rgba(235,235,245,0.18)",
+  red:"#FF453A", rDim:"rgba(255,69,58,0.15)", rBdr:"rgba(255,69,58,0.25)",
+  amber:"#FF9F0A", aDim:"rgba(255,159,10,0.15)", aBdr:"rgba(255,159,10,0.25)",
+  blue:"#0A84FF", bDim:"rgba(10,132,255,0.15)", bBdr:"rgba(10,132,255,0.25)",
+  violet:"#BF5AF2", vDim:"rgba(191,90,242,0.15)", vBdr:"rgba(191,90,242,0.25)",
+  gold:"#FFD60A", goDim:"rgba(255,214,10,0.15)", goBdr:"rgba(255,214,10,0.25)",
+  b0:"rgba(255,255,255,0.08)", b1:"rgba(255,255,255,0.12)",
+  sh1:"0 1px 4px rgba(0,0,0,0.25)", sh2:"0 2px 12px rgba(0,0,0,0.35)", sh3:"0 6px 24px rgba(0,0,0,0.45)",
+  glass:"rgba(28,28,30,0.82)", glassBorder:"rgba(255,255,255,0.08)",
+  navBg:"rgba(28,28,30,0.92)", headerBg:"rgba(0,0,0,0.88)",
+  isDark:true,
+  // Backward compatibility
+  get green(){ return this.brand; },
+  get greenDim(){ return this.brandDim; },
+  get greenBorder(){ return this.brandBorder; },
+  get greenLight(){ return this.brandLight; },
+  get greenDeep(){ return this.brandDark; },
+  get l1(){ return this.t1; }, get l2(){ return this.t2; }, get l3(){ return this.t3; }, get l4(){ return this.t4; },
+  get border0(){ return this.b0; }, get border1(){ return this.b1; }, get border2(){ return this.brandBorder; },
+  get glass0(){ return this.glass; }, get glass1(){ return this.card; },
+  get glass2(){ return this.card2; }, get glass3(){ return this.card3; },
+  get orange(){ return this.amber; }, get orangeDim(){ return this.aDim; },
+  get purple(){ return this.violet; }, get purpleDim(){ return this.vDim; },
+  get goldDim(){ return this.goDim; }, get redDim(){ return this.rDim; },
+  get glassHover(){ return "rgba(48,217,138,0.06)"; },
+};
+
+/* ─── Theme Hook ────────────────────────────────── */
+function useTheme() {
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("sb_theme");
+    if (saved === "dark") return true;
+    if (saved === "light") return false;
+    return window.matchMedia("(prefers-color-scheme:dark)").matches;
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("sb_theme", dark ? "dark" : "light");
+  }, [dark]);
+  const toggle = useCallback(() => setDark(d => !d), []);
+  return { dark, toggle, T: dark ? T_DARK : T_LIGHT };
+}
+
+let T = T_LIGHT;
+
 
 /* ─── Category System ────────────────────────────── */
 const CAT_COLORS = [
@@ -216,12 +281,57 @@ function useUserData(empId, key, seed) {
   return [data, save];
 }
 
+/* ─── 활동 로그 ─────────────────────────────────── */
+// action: "create"|"update"|"delete"|"complete"|"upload"|"read"
+// target: "notice"|"event"|"task"|"memo"|"roleTask"|"profile"
+// detail: 자유 문자열 (예: "공지 '3월 이벤트' 작성")
+function logActivity(storeId, { action, target, detail, user, empId }) {
+  if (!storeId || !db) return;
+  try {
+    db.collection("stores").doc(storeId).collection("activityLog").add({
+      action, target, detail: detail || "",
+      user: user || "알 수 없음",
+      empId: empId || "",
+      ts: firebase.firestore.FieldValue.serverTimestamp(),
+      clientTs: new Date().toISOString(),
+    });
+  } catch(e) { console.warn("logActivity error:", e); }
+}
+
+function useActivityLog(storeId, limitCount = 50) {
+  const [logs, setLogs] = useState([]);
+  useEffect(() => {
+    if (!storeId || !db) return;
+    const ref = db.collection("stores").doc(storeId)
+      .collection("activityLog")
+      .orderBy("ts", "desc")
+      .limit(limitCount);
+    const unsub = ref.onSnapshot(
+      snap => {
+        const items = [];
+        snap.forEach(doc => {
+          const d = doc.data();
+          items.push({ id: doc.id, ...d, ts: d.ts?.toDate?.() || new Date(d.clientTs) });
+        });
+        setLogs(items);
+      },
+      () => {}
+    );
+    return unsub;
+  }, [storeId, limitCount]);
+  return logs;
+}
+
+const ACTION_ICON = { create:"✏️", update:"📝", delete:"🗑️", complete:"✅", upload:"📁", read:"👁️" };
+const TARGET_LABEL = { notice:"공지", event:"일정", task:"할일", memo:"메모", roleTask:"팀업무", profile:"프로필" };
+
 /* --- Utils --- */
 const fmtShort = d => new Date(d).toLocaleDateString("ko-KR",{month:"short",day:"numeric"});
 const WDAYS = ["일","월","화","수","목","금","토"];
 const glassBox = (extra={}) => ({
-  background:T.card, borderRadius:16,
-  boxShadow:T.sh1,
+  background:T.card, borderRadius:18,
+  boxShadow:T.sh1, border:"0.5px solid "+T.b0,
+  transition:"background .3s ease, border-color .3s ease",
   ...extra,
 });
 
@@ -254,13 +364,14 @@ function Sheet({ onClose, title, children, noOutsideClose, noPadding }) {
         justifyContent:"center" }}
       onClick={e=>e.target===e.currentTarget&&!noOutsideClose&&onClose()}>
       <div style={{
-        background:"rgba(255,255,255,0.98)",
-        backdropFilter:"blur(40px)", WebkitBackdropFilter:"blur(40px)",
+        background:T.isDark?"rgba(28,28,30,0.97)":"rgba(255,255,255,0.98)",
+        backdropFilter:"blur(40px) saturate(180%)", WebkitBackdropFilter:"blur(40px) saturate(180%)",
         borderRadius: isPC ? 20 : "20px 20px 0 0",
         width:"100%", maxWidth: isPC ? 640 : 430,
         maxHeight: isPC ? "88vh" : "92vh",
         display:"flex", flexDirection:"column",
-        boxShadow: isPC ? "0 8px 40px rgba(0,0,0,0.18)" : "0 -4px 30px rgba(0,0,0,0.12)" }}>
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none",
+        boxShadow: isPC ? "0 8px 40px rgba(0,0,0,0.25)" : "0 -4px 30px rgba(0,0,0,0.18)" }}>
         {/* 드래그 핸들 — 모바일만 */}
         {!isPC && <div style={{ display:"flex", justifyContent:"center", paddingTop:10, paddingBottom:2, flexShrink:0 }}>
           <div style={{ width:36, height:4, borderRadius:2, background:T.b1 }}/>
@@ -315,11 +426,13 @@ function Seg({ value, onChange, options }) {
 function GreenBtn({ onClick, children, full, disabled }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      background:disabled?"#E5E5EA":T.brand,
-      color:disabled?"#AEAEB2":"#FFFFFF", border:"none", borderRadius:14,
+      background:disabled?(T.isDark?"#3A3A3C":"#E5E5EA"):T.brand,
+      color:disabled?(T.isDark?"#636366":"#AEAEB2"):"#FFFFFF", border:"none", borderRadius:14,
       padding:"15px 24px", fontSize:15, fontWeight:600, fontFamily:F,
       cursor:disabled?"not-allowed":"pointer", width:full?"100%":"auto",
-      letterSpacing:"0.1px", transition:"opacity .15s",
+      letterSpacing:"0.1px",
+      boxShadow:disabled?"none":`0 4px 16px ${T.isDark?"rgba(48,217,138,0.20)":"rgba(0,112,74,0.22)"}`,
+      transition:"all .18s ease",
     }}>{children}</button>
   );
 }
@@ -332,8 +445,8 @@ function ActionBtn({ onClick, children }) {
       whiteSpace:"nowrap", flexShrink:0,
       boxShadow:"0 2px 10px rgba(0,112,74,0.22)", transition:"all .15s",
     }}
-    onMouseEnter={e=>{e.currentTarget.style.background="#1E3932";}}
-    onMouseLeave={e=>{e.currentTarget.style.background=T.green;}}
+    onMouseEnter={e=>{e.currentTarget.style.background=T.brandDark;}}
+    onMouseLeave={e=>{e.currentTarget.style.background=T.brand;}}
     >{children}</button>
   );
 }
@@ -547,7 +660,7 @@ function LoginScreen({ onLogin }) {
     setLoading(false);
   };
 
-  const fBase = { fontFamily:F, fontSize:15, color:T.t1, background:"#fff",
+  const fBase = { fontFamily:F, fontSize:15, color:T.t1, background:T.card,
     border:"1.5px solid "+T.b1, borderRadius:12, padding:"13px 16px",
     width:"100%", outline:"none", boxSizing:"border-box" };
 
@@ -635,6 +748,9 @@ function LoginScreen({ onLogin }) {
 
 /* ═══════════════════ APP ══════════════════════════ */
 function App() {
+  const { dark, toggle: toggleTheme, T: themeT } = useTheme();
+  T = themeT;
+
   /* ─── 로그인 유저 ─── */
   const [currentUser, setCurrentUser] = useState(() => {
     try { const u = localStorage.getItem("sbx_current_user"); return u ? JSON.parse(u) : null; } catch { return null; }
@@ -678,6 +794,13 @@ function App() {
   const [events,       saveEvents,       eL ] = useStoreData(storeId, "events",       SEED_EVENTS);
   const [roleTasks,    saveRoleTasks,    rL ] = useStoreData(storeId, "teamTasks",    []);
   const [tasks,        saveTasks            ] = useUserData(empId, "tasks", []);
+  // ── 활동 로그 ──
+  const activityLogs = useActivityLog(storeId, 80);
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  const log = useCallback((action, target, detail) => {
+    logActivity(storeId, { action, target, detail, user: currentUser?.name, empId });
+  }, [storeId, currentUser?.name, empId]);
+
   const [tab, setTab] = useState("home");
   const [taskMode,    setTaskMode]    = useState("personal"); // "personal" | "role"
   const [viewNotice,  setViewNotice]  = useState(null);
@@ -759,30 +882,47 @@ function App() {
     saveNotices(p=>p.map(n=>n.id===id?{...n,pinned:!n.pinned}:n));
     setViewNotice(prev=>prev&&prev.id===id?{...prev,pinned:!prev.pinned}:prev);
   };
-  const toggleTask     = id => saveTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
-  const deleteTask     = id => saveTasks(p=>p.filter(t=>t.id!==id));
-  const toggleRoleTask = id => saveRoleTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
-  const deleteRoleTask = id => saveRoleTasks(p=>p.filter(t=>t.id!==id));
+  const toggleTask = id => {
+    const t = (tasks||[]).find(x=>x.id===id);
+    saveTasks(p=>p.map(x=>x.id===id?{...x,done:!x.done}:x));
+    if(t) log(t.done?"update":"complete", "task", t.done?`'${t.text}' 미완료로 변경`:`'${t.text}' 완료`);
+  };
+  const deleteTask = id => {
+    const t = (tasks||[]).find(x=>x.id===id);
+    saveTasks(p=>p.filter(x=>x.id!==id));
+    if(t) log("delete", "task", `'${t.text}' 삭제`);
+  };
+  const toggleRoleTask = id => {
+    const t = (roleTasks||[]).find(x=>x.id===id);
+    saveRoleTasks(p=>p.map(x=>x.id===id?{...x,done:!x.done}:x));
+    if(t) log(t.done?"update":"complete", "roleTask", t.done?`'${t.text}' 미완료로 변경`:`'${t.text}' 완료`);
+  };
+  const deleteRoleTask = id => {
+    const t = (roleTasks||[]).find(x=>x.id===id);
+    saveRoleTasks(p=>p.filter(x=>x.id!==id));
+    if(t) log("delete", "roleTask", `'${t.text}' 삭제`);
+  };
 
   const submitNotice = () => {
     if (!nf.title.trim()) return;
     saveNotices(p=>[{ id:"n"+Date.now(), ...nf, date:todayStr(), _read:false, author:profile?.name||nf.author },...p]);
+    log("create", "notice", `'${nf.title}' 작성`);
     setNf({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
     setAddNotice(false);
   };
   const deleteNoticeWithEvents = (nid) => {
+    const n = (notices||[]).find(x=>x.id===nid);
     saveNotices(p=>(p||[]).filter(x=>x.id!==nid));
     saveEvents(p=>(p||[]).filter(e=>e.noticeId!==nid));
+    if(n) log("delete", "notice", `'${n.title}' 삭제`);
   };
 
   const submitNoticeRich = (data) => {
     if (!data.title.trim()) return;
     const now_id = Date.now();
-    // 현재 notices에 신규 공지 추가
     const newNotice = { id:"n"+now_id, ...data, date:todayStr(), _read:false, author:profile?.name||"" };
     saveNotices([newNotice, ...(notices||[])]);
-    // 날짜 입력 시 캘린더에 자동 추가
-    // 함수형 업데이트 대신 현재 events 직접 참조 (stale closure 방지)
+    log("create", "notice", `'${data.title}' 작성`);
     if (data.noticeDate) {
       const newEv = {
         id:"ev"+now_id, title:data.title, date:data.noticeDate,
@@ -791,15 +931,18 @@ function App() {
       };
       const updatedEvents = [...(events||[]), newEv].sort((a,b)=>a.date.localeCompare(b.date));
       saveEvents(updatedEvents);
+      log("create", "event", `'${data.title}' 일정 자동 등록`);
     }
   };
   const submitEvent = () => {
     if (!ef.title.trim()) return;
     if (editingEventId) {
       saveEvents(p=>(p||[]).map(e=>e.id===editingEventId?{...e,...ef,endDate:ef.endDate||ef.date}:e));
+      log("update", "event", `'${ef.title}' 수정`);
       setEditingEventId(null);
     } else {
       saveEvents(p=>[...(p||[]),{id:"e"+Date.now(),...ef,endDate:ef.endDate||ef.date}].sort((a,b)=>a.date.localeCompare(b.date)));
+      log("create", "event", `'${ef.title}' 등록 (${ef.date})`);
     }
     setEf({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
     setAddEvent(false);
@@ -807,8 +950,8 @@ function App() {
   const submitTask = () => {
     if (!tf.text.trim()) return;
     const newTask = { id:"t"+Date.now(), ...tf, done:false, author:profile?.name||"나" };
-    if (taskMode === "role") saveRoleTasks(p=>[...p, newTask]);
-    else                     saveTasks(p=>[...p, newTask]);
+    if (taskMode === "role") { saveRoleTasks(p=>[...p, newTask]); log("create", "roleTask", `'${tf.text}' 추가`); }
+    else                     { saveTasks(p=>[...p, newTask]); log("create", "task", `'${tf.text}' 추가`); }
     setTf({ text:"", priority:"보통", dueDate:todayStr() });
     setAddTask(false);
   };
@@ -826,13 +969,14 @@ function App() {
   return (
     <div style={{ minHeight:"100vh", background:T.bg,
       fontFamily:F, position:"relative", overflowX:"hidden",
-      display:isPC?"flex":"block", justifyContent:isPC?"center":"flex-start" }}>
+      display:isPC?"flex":"block", justifyContent:isPC?"center":"flex-start",
+      transition:"background .35s ease, color .35s ease" }}>
       <style>{`
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
         ::placeholder{color:${T.t3};font-family:${F};}
         ::-webkit-scrollbar{display:none;}
         input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.4);}
-        textarea,input{font-family:${F};}
+        textarea,input{font-family:${F};background:${T.card};color:${T.t1};border-color:${T.b1};}
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
         @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
@@ -848,8 +992,8 @@ function App() {
 
       {/* ════ PC 사이드바 ════ */}
       {isPC && (
-        <aside style={{ width:248, minHeight:"100vh", background:"#FFFFFF",
-          borderRight:"1px solid "+T.b0,
+        <aside style={{ width:248, minHeight:"100vh", background:T.card,
+          borderRight:"0.5px solid "+T.b0, transition:"background .35s ease",
           display:"flex", flexDirection:"column",
           position:"sticky", top:0, height:"100vh", flexShrink:0,
           overflowY:"auto", overflowX:"hidden" }}>
@@ -871,7 +1015,7 @@ function App() {
           <div onClick={()=>setShowProfileSetup(true)}
             style={{ padding:"10px 18px", borderBottom:"1px solid "+T.b0,
               cursor:"pointer", display:"flex", alignItems:"center", gap:10, transition:"background .15s" }}
-            onMouseEnter={e=>e.currentTarget.style.background="rgba(0,0,0,0.03)"}
+            onMouseEnter={e=>e.currentTarget.style.background=T.b0}
             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <div style={{ width:38, height:38, borderRadius:11, background:rc.bg,
               border:"1.5px solid "+rc.color+"44", flexShrink:0,
@@ -951,22 +1095,39 @@ function App() {
               <div style={{ fontSize:12, fontWeight:700, color:T.t1, fontFamily:F }}>{currentUser?.name}</div>
               <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>사번 {currentUser?.empId} · 매장 {currentUser?.storeId}</div>
             </div>
-            <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }}
-              style={{ width:"100%", padding:"7px 0", borderRadius:8, border:"1px solid "+T.b1,
-                background:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:F }}>
-              로그아웃
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }}
+                style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid "+T.b1,
+                  background:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:F }}>
+                로그아웃
+              </button>
+              <button onClick={toggleTheme} style={{
+                padding:"7px 12px", borderRadius:8, border:"1px solid "+T.b1,
+                background:"none", fontSize:14, cursor:"pointer",
+                display:"flex", alignItems:"center", justifyContent:"center" }}
+                title={T.isDark?"라이트 모드":"다크 모드"}>
+                {T.isDark ? "☀️" : "🌙"}
+              </button>
+            </div>
+            <button onClick={()=>setShowActivityLog(true)} style={{
+              width:"100%", marginTop:8, padding:"8px 0", borderRadius:8,
+              border:"1px solid "+T.b1, background:"transparent",
+              fontSize:12, color:T.t2, fontFamily:F, cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:5,
+              fontWeight:500 }}>
+              📋 활동 로그
             </button>
           </div>
-        
+
           </aside>
         )}
 
       {/* ════ 모바일 상단 헤더 ════ */}
       {!isPC && (
         <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:200,
-          background:"rgba(242,242,247,0.94)", backdropFilter:"blur(20px)",
-          WebkitBackdropFilter:"blur(20px)",
-          borderBottom:"1px solid "+T.b0,
+          background:T.headerBg, backdropFilter:"blur(32px) saturate(180%)",
+          WebkitBackdropFilter:"blur(32px)",
+          borderBottom:"0.5px solid "+T.b1,
           display:"flex", alignItems:"center", justifyContent:"space-between",
           padding:"0 14px", height:60 }}>
 
@@ -1002,6 +1163,14 @@ function App() {
               </span>
             </div>
 
+            {/* Theme Toggle */}
+            <button onClick={toggleTheme} style={{
+              background:T.isDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.05)", border:"none", borderRadius:10, 
+              width:34, height:34, display:"flex", alignItems:"center", justifyContent:"center",
+              cursor:"pointer", fontSize:16, transition:"background .2s ease" }}>
+              {T.isDark?"☀️":"🌙"}
+            </button>
+
             {/* ☰ 메뉴 */}
             <div style={{ position:"relative" }}>
               <button onClick={e=>{e.stopPropagation();setShowMoreMenu(v=>!v);}} style={{
@@ -1011,7 +1180,7 @@ function App() {
                 fontSize:18, color:T.t2 }}>☰</button>
               {showMoreMenu && (
                 <div style={{ position:"absolute", top:42, right:0, zIndex:300,
-                  background:"#fff", borderRadius:14, boxShadow:"0 8px 32px rgba(0,0,0,0.15)",
+                  background:T.card, borderRadius:14, boxShadow:T.sh3,
                   border:"1px solid "+T.b1, minWidth:170, overflow:"hidden" }}
                   onClick={e=>e.stopPropagation()}>
                   <button onClick={()=>{setShowSearch(true);setShowMoreMenu(false);}} style={{
@@ -1034,6 +1203,13 @@ function App() {
                     fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
                     👤 <span>계정 정보</span>
                   </button>
+                  <div style={{ height:1, background:T.b0, margin:"0 12px" }}/>
+                  <button onClick={()=>{setShowActivityLog(true);setShowMoreMenu(false);}} style={{
+                    width:"100%", padding:"13px 16px", border:"none", background:"none",
+                    display:"flex", alignItems:"center", gap:10, cursor:"pointer",
+                    fontSize:14, fontFamily:F, color:T.t1, fontWeight:500 }}>
+                    📋 <span>활동 로그</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -1045,11 +1221,12 @@ function App() {
       {/* ════ 모바일 하단 탭바 ════ */}
       {!isPC && (
         <nav style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200,
-          background:"rgba(255,255,255,0.95)", backdropFilter:"blur(24px)",
-          WebkitBackdropFilter:"blur(24px)",
-          borderTop:"1px solid "+T.b0,
+          background:T.navBg, backdropFilter:"blur(32px) saturate(180%)",
+          WebkitBackdropFilter:"blur(32px)",
+          borderTop:"0.5px solid "+T.b1,
           display:"flex", height:"calc(56px + env(safe-area-inset-bottom))",
-          paddingBottom:"env(safe-area-inset-bottom)" }}>
+          paddingBottom:"env(safe-area-inset-bottom)",
+          transition:"background .35s ease" }}>
           {[
             { id:"home",     icon:"🏠", label:"홈" },
             { id:"notices",  icon:"📢", label:"공지",   badge:unreadCount },
@@ -1062,7 +1239,9 @@ function App() {
               justifyContent:"flex-start", paddingTop:8, gap:2, border:"none", cursor:"pointer",
               background:"transparent", position:"relative",
               transition:"all .18s" }}>
-              <div style={{ position:"relative" }}>
+              <div style={{ position:"relative", width:32, height:32, borderRadius:10,
+                background:tab===t.id?T.brandDim:"transparent", display:"flex", alignItems:"center",
+                justifyContent:"center", transition:"background .18s ease" }}>
                 <span style={{ fontSize:tab===t.id?22:20, transition:"font-size .15s",
                   filter:tab===t.id?"none":"grayscale(0.4) opacity(0.65)" }}>{t.icon}</span>
                 {t.badge>0 && (
@@ -1074,10 +1253,6 @@ function App() {
               </div>
               <span style={{ fontSize:10, fontWeight:tab===t.id?700:500,
                 color:tab===t.id?T.brand:T.t3, fontFamily:F, lineHeight:1 }}>{t.label}</span>
-              {tab===t.id && (
-                <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)",
-                  width:32, height:2.5, borderRadius:"0 0 3px 3px", background:T.brand }}/>
-              )}
             </button>
           ))}
         </nav>
@@ -1095,8 +1270,11 @@ function App() {
           <div style={{ padding:isPC?"24px 28px":"16px" }} className="fi">
 
             {/* 히어로 카드 */}
-            <div style={{ background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-              borderRadius:22, padding:"22px 20px", marginBottom:18, position:"relative", overflow:"hidden" }}>
+            <div style={{ background:T.isDark
+                ? "linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)"
+                : "linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+              borderRadius:22, padding:"22px 20px", marginBottom:18, position:"relative", overflow:"hidden",
+              boxShadow:T.isDark?"0 4px 24px rgba(48,217,138,0.12)":"0 4px 24px rgba(0,112,74,0.20)" }}>
               <div style={{ position:"absolute", right:-40, top:-40, width:150, height:150,
                 borderRadius:"50%", background:"rgba(255,255,255,0.05)" }}/>
               <div style={{ position:"absolute", right:20, bottom:-50, width:100, height:100,
@@ -1145,8 +1323,8 @@ function App() {
             <a href="./order.html"
               style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
                 padding:"12px 18px", borderRadius:14, marginBottom:16, textDecoration:"none",
-                background:"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-                boxShadow:"0 4px 16px rgba(0,112,74,0.3)" }}>
+                background:T.isDark?"linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
+                boxShadow:T.isDark?"0 4px 16px rgba(48,217,138,0.15)":"0 4px 16px rgba(0,112,74,0.3)" }}>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <span style={{ fontSize:22 }}>📦</span>
                 <div>
@@ -1515,7 +1693,7 @@ function App() {
           </div>
           <div style={{ height:1, background:T.border0, marginBottom:20 }}/>
           <div className="notice-body" style={{ fontSize:15, color:T.l2, lineHeight:1.8, fontFamily:F, marginBottom:24 }}
-            dangerouslySetInnerHTML={{ __html: viewNotice.content || "" }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewNotice.content || "", { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] }) }}
           />
           <div style={{ display:"flex", gap:10, marginBottom:8 }}>
             <button onClick={()=>togglePin(viewNotice.id)} style={{
@@ -1656,6 +1834,51 @@ function App() {
           </div>
         </Sheet>
       )}
+      {showActivityLog && (
+        <Sheet title="📋 활동 로그" onClose={()=>setShowActivityLog(false)} noPadding>
+          <div style={{ padding:"12px 0" }}>
+            {activityLogs.length === 0 ? (
+              <div style={{ padding:"40px 20px", textAlign:"center" }}>
+                <div style={{ fontSize:36, marginBottom:8 }}>📭</div>
+                <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F }}>아직 활동 기록이 없어요</div>
+                <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>공지 작성, 할일 완료 등의 활동이 여기 기록돼요</div>
+              </div>
+            ) : activityLogs.map((lg, i, arr) => {
+              const icon = ACTION_ICON[lg.action] || "📝";
+              const targetLabel = TARGET_LABEL[lg.target] || lg.target;
+              const timeStr = lg.ts instanceof Date
+                ? lg.ts.toLocaleString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" })
+                : "";
+              return (
+                <div key={lg.id} style={{
+                  padding:"12px 20px", display:"flex", gap:12, alignItems:"flex-start",
+                  borderBottom: i < arr.length - 1 ? "1px solid "+T.b0 : "none" }}>
+                  <div style={{ width:36, height:36, borderRadius:10, flexShrink:0,
+                    background: lg.action==="delete"?T.rDim : lg.action==="complete"?T.brandDim : T.bDim,
+                    display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>
+                    {icon}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F, lineHeight:1.4 }}>
+                      {lg.detail || `${targetLabel} ${lg.action}`}
+                    </div>
+                    <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:2, display:"flex", gap:8 }}>
+                      <span>{lg.user || "알 수 없음"}</span>
+                      <span>·</span>
+                      <span>{timeStr}</span>
+                    </div>
+                  </div>
+                  <div style={{ flexShrink:0, padding:"2px 8px", borderRadius:6,
+                    background:T.card2, fontSize:10, fontWeight:600,
+                    color:T.t3, fontFamily:F }}>
+                    {targetLabel}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Sheet>
+      )}
       {/* showQuiz - already closed above */}
       {false}
       {showCatMgr&&<CatManagerSheet onClose={()=>setShowCatMgr(false)} categories={categories} onSave={saveCategories} catColors={catColors||{}} onSaveColors={saveCatColors}/>}
@@ -1723,7 +1946,7 @@ function NRow({ n, onClick, onDelete }) {
           </div>
           <div style={{ fontSize:13, color:T.l3, fontFamily:F, lineHeight:1.5, overflow:"hidden",
             display:"-webkit-box", WebkitLineClamp:1, WebkitBoxOrient:"vertical", marginBottom:6 }}
-            dangerouslySetInnerHTML={{ __html: (n.content||"").replace(/<[^>]+>/g,"").slice(0,80) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((n.content||"").replace(/<[^>]+>/g,"").slice(0,80), { ALLOWED_TAGS: [] }) }}
           />
           <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
             <Pill label={n.category} color={meta.color} dim={meta.dim}/>
@@ -2556,7 +2779,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                       const d = await res.json();
                       const edited = (d.content||[]).map(b=>b.text||"").join("");
                       if (edited && editorRef.current) {
-                        editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
+                        editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
                       }
                     } catch(e) { alert("AI API 키를 확인해주세요"); }
                     setAiDrafting(false);
@@ -2580,14 +2803,14 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                   disabled={!title.trim()}
                   style={{
                     background: !title.trim()
-                      ? "#E8F0EB"
-                      : "linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-                    color: !title.trim() ? "#7A9E7E" : "#FFFFFF",
+                      ? (T.isDark?"#2C2C2E":"#E8F0EB")
+                      : (T.isDark?"linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)"),
+                    color: !title.trim() ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
                     border:"none", borderRadius:14, padding:"15px 24px",
                     fontSize:15, fontWeight:700, fontFamily:F,
                     cursor: !title.trim() ? "not-allowed" : "pointer",
                     width:"100%",
-                    boxShadow: !title.trim() ? "none" : "0 4px 20px rgba(0,112,74,0.30)",
+                    boxShadow: !title.trim() ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
                     letterSpacing:"0.3px"
                   }}>
                   {initial ? "수정 완료" : "등록하기"}
@@ -2720,7 +2943,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                     const d = await res.json();
                     const edited = (d.content||[]).map(b=>b.text||"").join("");
                     if (edited && editorRef.current) {
-                      editorRef.current.innerHTML = edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim();
+                      editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
                     }
                   } catch(e) { alert("AI API 키를 확인해주세요"); }
                   setAiDrafting(false);
@@ -2813,14 +3036,14 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                 disabled={!title.trim()}
                 style={{
                   background: !title.trim()
-                    ? "#E8F0EB"
-                    : "linear-gradient(135deg,#00704A 0%,#1E3932 100%)",
-                  color: !title.trim() ? "#7A9E7E" : "#FFFFFF",
+                    ? (T.isDark?"#2C2C2E":"#E8F0EB")
+                    : (T.isDark?"linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)"),
+                  color: !title.trim() ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
                   border:"none", borderRadius:14, padding:"15px 24px",
                   fontSize:15, fontWeight:700, fontFamily:F,
                   cursor: !title.trim() ? "not-allowed" : "pointer",
                   width:"100%",
-                  boxShadow: !title.trim() ? "none" : "0 4px 20px rgba(0,112,74,0.30)",
+                  boxShadow: !title.trim() ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
                   letterSpacing:"0.3px"
                 }}>
                 {initial ? "수정 완료" : "등록하기"}
@@ -2856,7 +3079,7 @@ function ApiKeyField() {
           onChange={e=>setKey(e.target.value)}
           placeholder="sk-ant-..."
           style={{ flex:1, padding:"10px 12px", borderRadius:10, border:"1px solid "+T.b1,
-            background:"#fff", fontSize:13, fontFamily:F, outline:"none", color:T.t1 }}
+            background:T.card, fontSize:13, fontFamily:F, outline:"none", color:T.t1 }}
         />
         <button onClick={save} style={{
           padding:"10px 16px", borderRadius:10, border:"none",
@@ -3241,12 +3464,13 @@ ${roleTk||"(없음)"}
 /* ════════════════ GLOBAL SEARCH ════════════════════ */
 function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewNotice, setTab }) {
   const [q, setQ] = useState("");
+  const debouncedQ = useDebounce(q, 300);
   const inputRef = useRef();
 
   useEffect(()=>{ setTimeout(()=>inputRef.current?.focus(),100); },[]);
 
-  const results = q.trim().length < 1 ? [] : (() => {
-    const kw = q.toLowerCase();
+  const results = debouncedQ.trim().length < 1 ? [] : (() => {
+    const kw = debouncedQ.toLowerCase();
     const res = [];
 
     (notices||[]).forEach(n=>{
@@ -3280,7 +3504,7 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
         flexShrink:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8,
           border:"1.5px solid "+T.brandBorder, borderRadius:14, padding:"0 14px",
-          background:"#fff", boxShadow:"0 1px 6px rgba(0,112,74,0.07)" }}>
+          background:T.card, boxShadow:T.sh1 }}>
           <span style={{ fontSize:16 }}>🔍</span>
           <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)}
             placeholder="공지, 일정, 할일 검색..."
