@@ -548,6 +548,65 @@ function BottomSheet({ title, onClose, children, noPadding }) {
   );
 }
 
+/* ─── Confirm / Prompt 모달 ──────────────────────── */
+function ConfirmModal({ message, subMessage, confirmText="확인", cancelText="취소", onConfirm, onCancel, danger }) {
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.4)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+      animation:"fadeIn .15s ease" }}
+      onClick={e=>{ if(e.target===e.currentTarget) onCancel(); }}>
+      <div style={{ background:T.isDark?"#2C2C2E":T.card, borderRadius:16, padding:"24px 22px 18px",
+        width:"90%", maxWidth:320, boxShadow:T.sh3, animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)",
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none" }}>
+        <div style={{ fontSize:16, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:6, lineHeight:1.4, textAlign:"center" }}>
+          {message}
+        </div>
+        {subMessage && <div style={{ fontSize:13, color:T.t3, fontFamily:F, lineHeight:1.5, textAlign:"center", marginBottom:16 }}>{subMessage}</div>}
+        {!subMessage && <div style={{ height:12 }}/>}
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onCancel} style={{ flex:1, padding:"12px 0", borderRadius:12, border:"1px solid "+T.b1,
+            background:"transparent", color:T.t2, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:F }}>{cancelText}</button>
+          <button onClick={onConfirm} style={{ flex:1, padding:"12px 0", borderRadius:12, border:"none",
+            background:danger ? T.red : T.brand, color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:F,
+            boxShadow:danger?"0 2px 12px rgba(255,59,48,0.25)":"0 2px 12px rgba(0,112,74,0.25)" }}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromptModal({ message, placeholder, defaultValue="", onConfirm, onCancel, subMessage }) {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.4)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+      animation:"fadeIn .15s ease" }}
+      onClick={e=>{ if(e.target===e.currentTarget) onCancel(); }}>
+      <div style={{ background:T.isDark?"#2C2C2E":T.card, borderRadius:16, padding:"24px 22px 18px",
+        width:"90%", maxWidth:340, boxShadow:T.sh3, animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)",
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none" }}>
+        <div style={{ fontSize:16, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:4, lineHeight:1.4, textAlign:"center" }}>{message}</div>
+        {subMessage && <div style={{ fontSize:12, color:T.t3, fontFamily:F, lineHeight:1.4, textAlign:"center", marginBottom:10 }}>{subMessage}</div>}
+        {!subMessage && <div style={{ height:8 }}/>}
+        <input value={value} onChange={e=>setValue(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter" && value.trim()) onConfirm(value.trim()); }}
+          placeholder={placeholder} autoFocus
+          style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:"1.5px solid "+T.b1,
+            background:T.card2, fontSize:15, fontFamily:F, color:T.t1, outline:"none",
+            boxSizing:"border-box", caretColor:T.brand, marginBottom:14 }}/>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onCancel} style={{ flex:1, padding:"12px 0", borderRadius:12, border:"1px solid "+T.b1,
+            background:"transparent", color:T.t2, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:F }}>취소</button>
+          <button onClick={()=>{ if(value.trim()) onConfirm(value.trim()); }} disabled={!value.trim()}
+            style={{ flex:1, padding:"12px 0", borderRadius:12, border:"none",
+              background:value.trim()?T.brand:T.card3, color:value.trim()?"#fff":T.t3,
+              fontSize:14, fontWeight:700, cursor:value.trim()?"pointer":"not-allowed", fontFamily:F }}>확인</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── App Entry ──────────────────────────────────── */
 function App() {
   const { dark, toggle: toggleTheme, T: themeT } = useTheme();
@@ -557,6 +616,8 @@ function App() {
   const [tab, setTab] = useState("dashboard");
   const isPC = window.innerWidth >= 768;
   const [showActivityLog, setShowActivityLog] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [promptDialog, setPromptDialog] = useState(null);
 
   // ── Firebase 동기화 상태 ──
   const [storeId, setStoreId] = useState(() => LS.get("storeId", ""));
@@ -627,13 +688,13 @@ function App() {
     if (newEntry && uploadHistory.length > 0) {
       const prev = [...uploadHistory].sort((a,b)=>b.date.localeCompare(a.date))[0];
       if (prev) {
-        const newZero  = Object.entries(newEntry.items||{})
-          .filter(([,i]) => i.actualSum===0).length;
-        const prevZero = Object.entries(prev.items||{})
-          .filter(([,i]) => i.actualSum===0).length;
-        const newExpiry = Object.entries(newEntry.items||{})
-          .filter(([,i]) => (i.batches||[]).some(b=>b.dday!==null&&b.dday<=3&&b.actual>0)).length;
-        const newSold  = Object.values(newEntry.items||{}).reduce((s,i)=>s+(i.sold||0),0);
+        let newZero = 0, newExpiry = 0, newSold = 0;
+        Object.entries(newEntry.items||{}).forEach(([,i]) => {
+          if (i.actualSum === 0) newZero++;
+          if ((i.batches||[]).some(b => b.dday !== null && b.dday <= 3 && b.actual > 0)) newExpiry++;
+          newSold += (i.sold || 0);
+        });
+        const prevZero = Object.entries(prev.items||{}).filter(([,i]) => i.actualSum === 0).length;
         setUploadSummary({
           date: newEntry.date,
           zeroCount: newZero,
@@ -771,10 +832,10 @@ function App() {
               title={T.isDark?"라이트 모드":"다크 모드"}>
               {T.isDark ? "☀️" : "🌙"}
             </button>
-            <button onClick={()=>{
-              const sid = prompt("매장번호를 입력하세요 (예: 3867)\n\n동기화 없이 사용하려면 'local' 입력");
-              if(sid !== null && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
-            }} style={{
+            <button onClick={()=>setPromptDialog({
+              message:"매장번호 입력", subMessage:"동기화 없이 사용하려면 'local' 입력", placeholder:"예: 3867",
+              onConfirm:(sid)=>{ LS.set("storeId", sid); window.location.reload(); }
+            })} style={{
               background:T.isDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.05)",
               border:"none", borderRadius:10, width:34, height:34,
               display:"flex", alignItems:"center", justifyContent:"center",
@@ -853,10 +914,10 @@ function App() {
               </div>
             )}
             <div style={{ display:"flex", gap:6 }}>
-              <button onClick={()=>{
-                const sid = prompt("매장번호를 입력하세요 (예: 3867)");
-                if(sid && sid.trim()) { LS.set("storeId", sid.trim()); window.location.reload(); }
-              }} style={{
+              <button onClick={()=>setPromptDialog({
+                message:"매장번호 입력", placeholder:"예: 3867",
+                onConfirm:(sid)=>{ LS.set("storeId", sid); window.location.reload(); }
+              })} style={{
                 flex:1, padding:"7px 0", borderRadius:8,
                 border:"1px solid "+T.b1, background:"transparent",
                 fontSize:11, color:T.t2, fontFamily:F, cursor:"pointer"
@@ -1103,6 +1164,16 @@ function App() {
         </div>
       </BottomSheet>
     )}
+    {confirmDialog && (
+      <ConfirmModal {...confirmDialog}
+        onConfirm={()=>{ confirmDialog.onConfirm(); setConfirmDialog(null); }}
+        onCancel={()=>setConfirmDialog(null)} />
+    )}
+    {promptDialog && (
+      <PromptModal {...promptDialog}
+        onConfirm={(val)=>{ promptDialog.onConfirm(val); setPromptDialog(null); }}
+        onCancel={()=>setPromptDialog(null)} />
+    )}
     </>
   );
 }
@@ -1147,6 +1218,12 @@ function GreenBtn({ onClick, children, full, disabled, small }) {
     }}>{children}</button>
   );
 }
+function Skeleton({ width="100%", height=16, radius=8, style={} }) {
+  return (
+    <div style={{ width, height, borderRadius:radius, background:T.isDark?"#2C2C2E":"#E5E5EA",
+      animation:"pulse 1.2s ease-in-out infinite", ...style }}/>
+  );
+}
 function Pill({ label, color, dim }) {
   return (
     <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
@@ -1173,7 +1250,7 @@ function EmptyState({ emoji, text, sub }) {
 }
 
 /* ─── 대시보드 ───────────────────────────────────── */
-function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, setTab, skuAliases }) {
+const DashboardTab = React.memo(function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, setTab, skuAliases }) {
   const today = todayStr();
   const dow = getDow(today);
   const [expandedAlert, setExpandedAlert] = useState(null); // "today" | "tmr" | "zero" | null
@@ -1308,6 +1385,27 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           </div>
         </div>
       </div>
+
+      {/* 스켈레톤 로더 - 데이터 로딩 중 */}
+      {!latestUpload && (
+        <div style={{ marginBottom:16 }}>
+          <Skeleton height={40} style={{ marginBottom:8 }}/>
+          <Skeleton height={20} width="60%" style={{ marginBottom:16 }}/>
+          <div style={{ background:T.card, borderRadius:12, padding:"16px", marginBottom:16 }}>
+            {[1,2,3].map(i => (
+              <div key={i} style={{ marginBottom:i<3?12:0 }}>
+                <Skeleton height={16} width="80%"/>
+              </div>
+            ))}
+          </div>
+          <div style={{ background:T.card, borderRadius:12, padding:"16px" }}>
+            <Skeleton height={14} width="50%" style={{ marginBottom:8 }}/>
+            {[1,2].map(i => (
+              <Skeleton key={i} height={12} width="90%" style={{ marginBottom:i<2?6:0 }}/>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── 긴급 경고 배너 (클릭 시 상세 목록 펼침) ── */}
       {latestUpload && (()=>{
@@ -1629,15 +1727,16 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       </div>
     </div>
   );
-}
+});
 
 /* ─── 실사 업로드 탭 ─────────────────────────────── */
-function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
+const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
   const [uploadMode, setUploadMode] = useState("inventory"); // "inventory" | "bev"
   const [dragging, setDragging] = useState(false);
   const [pending,  setPending]  = useState([]);
   const [bevPending, setBevPending] = useState([]);
   const [error,    setError]    = useState("");
+  const [localConfirm, setLocalConfirm] = useState(null);
   const fileRef = useRef();
   const bevFileRef = useRef();
 
@@ -1670,19 +1769,25 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
 
   const removePending = (id) => setPending(prev => prev.filter(p => p.id !== id));
 
-  const saveOne = (item) => {
+  const doSaveOne = (item) => {
     const exists = uploadHistory.findIndex(h => h.date === item.data.date);
     let updated;
     if (exists >= 0) {
-      if (!window.confirm(item.data.date+" 날짜의 기존 데이터가 있어요. 덮어쓸까요?")) return;
       updated = uploadHistory.map((h,i) => i===exists ? item.data : h);
     } else {
       updated = [...uploadHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
     }
-    // 새 항목이면 newEntry로 Firebase 개별 저장, 덮어쓰기면 배열 전체 저장
     const isNew = exists < 0;
     onSave(updated, isNew ? item.data : null);
     removePending(item.id);
+  };
+  const saveOne = (item) => {
+    const exists = uploadHistory.findIndex(h => h.date === item.data.date);
+    if (exists >= 0) {
+      setLocalConfirm({ message: item.data.date+" 날짜의 기존 데이터가 있어요", subMessage:"덮어쓸까요?", confirmText:"덮어쓰기", danger:true, onConfirm:()=>doSaveOne(item) });
+    } else {
+      doSaveOne(item);
+    }
   };
 
   const saveAll = () => {
@@ -1702,12 +1807,12 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
   };
 
   const deleteHistory = (idx) => {
-    if (!window.confirm("이 기록을 삭제할까요?")) return;
-    const toDelete = uploadHistory[idx];
-    onSave(uploadHistory.filter((_,i) => i!==idx), null);
-    // Firebase에서도 삭제
-    const delKey = toDelete?.date || toDelete?._id;
-    if (delKey) window._deleteHistoryEntry && window._deleteHistoryEntry(delKey);
+    setLocalConfirm({ message:"이 기록을 삭제할까요?", confirmText:"삭제", danger:true, onConfirm:()=>{
+      const toDelete = uploadHistory[idx];
+      onSave(uploadHistory.filter((_,i) => i!==idx), null);
+      const delKey = toDelete?.date || toDelete?._id;
+      if (delKey) window._deleteHistoryEntry && window._deleteHistoryEntry(delKey);
+    }});
   };
 
   const toggleExpand = (id) => setPending(prev => prev.map(p => p.id===id ? {...p,expanded:!p.expanded} : p));
@@ -1729,11 +1834,10 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
     if (newItems.length) setBevPending(prev => [...prev, ...newItems]);
   };
 
-  const saveBevOne = (item) => {
+  const doSaveBevOne = (item) => {
     const exists = bevHistory.findIndex(h => h.date === item.data.date);
     let updated;
     if (exists >= 0) {
-      if (!window.confirm(item.data.date+" 날짜의 기존 음료 데이터가 있어요. 덮어쓸까요?")) return;
       updated = bevHistory.map((h,i) => i===exists ? item.data : h);
     } else {
       updated = [...bevHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
@@ -1741,8 +1845,17 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
     onSaveBev(updated, item.data);
     setBevPending(prev => prev.filter(p => p.id !== item.id));
   };
+  const saveBevOne = (item) => {
+    const exists = bevHistory.findIndex(h => h.date === item.data.date);
+    if (exists >= 0) {
+      setLocalConfirm({ message: item.data.date+" 날짜의 기존 음료 데이터가 있어요", subMessage:"덮어쓸까요?", confirmText:"덮어쓰기", danger:true, onConfirm:()=>doSaveBevOne(item) });
+    } else {
+      doSaveBevOne(item);
+    }
+  };
 
   return (
+    <>
     <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
 
       {/* ── 업로드 모드 세그먼트 컨트롤 ── */}
@@ -1965,11 +2078,10 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
                         {Object.keys(h.items||{}).length}개 SKU · {Math.round(h.totalQty||0)}잔
                       </div>
                     </div>
-                    <button onClick={()=>{
-                      if(!window.confirm("이 날짜 음료 데이터를 삭제할까요?")) return;
+                    <button onClick={()=>setLocalConfirm({ message:"이 날짜 음료 데이터를 삭제할까요?", confirmText:"삭제", danger:true, onConfirm:()=>{
                       const updated = bevHistory.filter(b=>b.date!==h.date);
                       onSaveBev(updated, null);
-                    }} style={{ padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
+                    }})} style={{ padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
                       background:T.rDim, color:T.red, cursor:"pointer",
                       fontSize:12, fontFamily:F }}>삭제</button>
                   </div>
@@ -1981,11 +2093,17 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
       )}
 
     </div>
+    {localConfirm && (
+      <ConfirmModal {...localConfirm}
+        onConfirm={()=>{ localConfirm.onConfirm(); setLocalConfirm(null); }}
+        onCancel={()=>setLocalConfirm(null)} />
+    )}
+    </>
   );
-}
+});
 
 /* ─── 파일 카드 (업로드 대기) ─────────────────────── */
-function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle }) {
+const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle }) {
   const [catFilter, setCatFilter] = useState("전체");
   const cats = ["전체", ...new Set(Object.values(item.data.items).map(i=>i.cat))];
   const filteredItems = Object.values(item.data.items).filter(i =>
@@ -2083,7 +2201,7 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
       </div>
     </div>
   );
-}
+});
 
 /* ─── 발주 추천 탭 ───────────────────────────────── */
 /* ─── 버퍼 입력 셀: 독립 로컬 state로 stale closure 완전 제거 ─── */
@@ -2091,7 +2209,7 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
 
 
 /* ─── 음료 통계 뷰 ────────────────────────────────── */
-function BevStatView({ bevHistory, onSwitchMode }) {
+const BevStatView = React.memo(function BevStatView({ bevHistory, onSwitchMode }) {
   const DOW   = ["일","월","화","수","목","금","토"];
   const rnd   = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
   const today = new Date().toISOString().slice(0,10);
@@ -2293,6 +2411,11 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       if(t<0.75) return "#3B82F6";
       return "#1D4ED8";
     };
+    const colorMap = {};
+    rows.forEach(r => dates.forEach(d => {
+      const v = qtyMap[`${r.catName}__${d}`] || 0;
+      colorMap[`${r.catName}__${d}`] = { bg: getColor(v, maxQ), fg: v > maxQ * 0.5 ? "#fff" : T.t1 };
+    }));
     return(
       <div style={{overflowX:"auto"}}>
         <table style={{borderCollapse:"collapse",fontSize:10,fontFamily:F,minWidth:"100%"}}>
@@ -2323,9 +2446,10 @@ function BevStatView({ bevHistory, onSwitchMode }) {
                 </td>
                 {dates.map(d=>{
                   const v=qtyMap[`${row.catName}__${d}`]||0;
+                  const key=`${row.catName}__${d}`;
                   return(
                     <td key={d} style={{padding:"2px 3px",textAlign:"center",
-                      background:getColor(v,maxQ),color:v>maxQ*0.5?"#fff":T.t1,
+                      background:colorMap[key].bg,color:colorMap[key].fg,
                       borderRadius:3,fontSize:9}}>
                       {v>0?v:""}
                     </td>
@@ -2755,10 +2879,10 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       )}
     </div>
   );
-}
+});
 
 
-function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
+const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
   const [statMode, setStatMode] = React.useState("inventory"); // "inventory" | "bev"
   const DOW = ["일","월","화","수","목","금","토"];
   const rnd = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
@@ -3001,6 +3125,11 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
       if(t<0.75) return "#3DAB72";
       return "#00704A";
     };
+    const colorMap = {};
+    rows.forEach(r => dates.forEach(d => {
+      const v = soldMap[`${r.sku}__${d}`] || 0;
+      colorMap[`${r.sku}__${d}`] = { bg: getColor(v, maxSold), fg: v > maxSold * 0.5 ? "#fff" : T.t1 };
+    }));
     return(
       <div style={{overflowX:"auto"}}>
         <table style={{borderCollapse:"collapse",fontSize:10,fontFamily:F,minWidth:"100%"}}>
@@ -3029,9 +3158,10 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
                 </td>
                 {dates.map(d=>{
                   const v=soldMap[`${row.sku}__${d}`]||0;
+                  const key=`${row.sku}__${d}`;
                   return(
                     <td key={d} style={{padding:"2px 3px",textAlign:"center",
-                      background:getColor(v,maxSold),color:v>maxSold*0.5?"#fff":T.t1,
+                      background:colorMap[key].bg,color:colorMap[key].fg,
                       borderRadius:3,fontSize:9}}>
                       {v>0?v:""}
                     </td>
@@ -3675,7 +3805,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
       )}
     </div>
   );
-}
+});
 
 
 
