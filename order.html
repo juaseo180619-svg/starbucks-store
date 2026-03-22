@@ -485,6 +485,69 @@ function parseBeverageExcel(arrayBuffer, dateOverride) {
   return { date: dateStr, dow: getDow(dateStr), categories, items, totalQty, totalSales };
 }
 
+/* ─── Activity Log ────────────────────────────────── */
+function logActivity(storeId, { action, target, detail, user, empId }) {
+  if (!storeId || !window.db) return;
+  try {
+    window.db.collection("stores").doc(storeId).collection("activityLog").add({
+      action, target, detail: detail || "",
+      user: user || "알 수 없음",
+      empId: empId || "",
+      ts: firebase.firestore.FieldValue.serverTimestamp(),
+      clientTs: new Date().toISOString(),
+    });
+  } catch(e) { console.warn("logActivity error:", e); }
+}
+
+function useActivityLog(storeId, limitCount = 50) {
+  const [logs, setLogs] = useState([]);
+  useEffect(() => {
+    if (!storeId || !window.db) return;
+    const ref = window.db.collection("stores").doc(storeId)
+      .collection("activityLog").orderBy("ts", "desc").limit(limitCount);
+    const unsub = ref.onSnapshot(snap => {
+      const items = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        items.push({ id: doc.id, ...d, ts: d.ts?.toDate?.() || new Date(d.clientTs) });
+      });
+      setLogs(items);
+    }, () => {});
+    return unsub;
+  }, [storeId, limitCount]);
+  return logs;
+}
+
+const ACTION_ICON = { create:"✏️", update:"📝", delete:"🗑️", complete:"✅", upload:"📁", read:"👁️" };
+const TARGET_LABEL = { notice:"공지", event:"일정", task:"할일", memo:"메모", roleTask:"팀업무", profile:"프로필", inventory:"실사", beverage:"음료", config:"설정" };
+
+function BottomSheet({ title, onClose, children, noPadding }) {
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:9999, animation:"fadeIn .2s ease" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.4)", backdropFilter:"blur(4px)", WebkitBackdropFilter:"blur(4px)" }}/>
+      <div style={{ position:"absolute", bottom:0, left:0, right:0, maxHeight:"85vh",
+        background:T.card, borderRadius:"20px 20px 0 0",
+        boxShadow:T.sh3, animation:"slideUp .3s cubic-bezier(.22,1,.36,1) both",
+        display:"flex", flexDirection:"column", overflow:"hidden",
+        border:T.isDark ? "0.5px solid "+T.glassBorder : "none" }}>
+        <div style={{ padding:"16px 20px 12px", borderBottom:"0.5px solid "+T.b0,
+          display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:T.t1, fontFamily:F }}>{title}</div>
+          <button onClick={onClose} style={{ width:30, height:30, borderRadius:15,
+            border:"none", background:T.b0, fontSize:16, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center", color:T.t2 }}>✕</button>
+        </div>
+        <div style={{ flex:1, overflowY:"auto", padding: noPadding ? 0 : "16px 20px",
+          WebkitOverflowScrolling:"touch" }}>
+          {children}
+        </div>
+        <div style={{ height:"env(safe-area-inset-bottom)", flexShrink:0 }}/>
+      </div>
+    </div>
+  );
+}
+
 /* ─── App Entry ──────────────────────────────────── */
 function App() {
   const { dark, toggle: toggleTheme, T: themeT } = useTheme();
@@ -493,6 +556,7 @@ function App() {
 
   const [tab, setTab] = useState("dashboard");
   const isPC = window.innerWidth >= 768;
+  const [showActivityLog, setShowActivityLog] = useState(false);
 
   // ── Firebase 동기화 상태 ──
   const [storeId, setStoreId] = useState(() => LS.get("storeId", ""));
@@ -554,6 +618,7 @@ function App() {
     setBevHistory(v); LS.set("bevHistory", v);
     if (storeId && window.db && newEntry) {
       await DB.saveBevEntry(storeId, newEntry);
+      log("upload", "beverage", `${newEntry.date} 음료 판매 데이터 업로드`);
     }
   };
 
@@ -584,6 +649,7 @@ function App() {
       setSyncStatus("loading");
       const ok = await DB.saveHistoryEntry(storeId, newEntry);
       setSyncStatus(ok ? "ok" : "error");
+      log("upload", "inventory", `${newEntry.date} 실사 데이터 업로드 (${Object.keys(newEntry.items||{}).length}개 SKU)`);
     }
   };
   const deleteHistoryEntry = async (id) => {
@@ -591,18 +657,21 @@ function App() {
       setSyncStatus("loading");
       await DB.deleteHistoryEntry(storeId, id);
       setSyncStatus("ok");
+      log("delete", "inventory", `${id} 실사 데이터 삭제`);
     }
   };
   const saveManualItems = async (v) => {
     setManualItems(v); LS.set("manualItems", v);
     if (storeId && window.db) {
       await DB.saveConfig(storeId, { manualItems: v, skuAliases });
+      log("update", "config", `수동 품목 목록 변경 (${v.length}개)`);
     }
   };
   const saveSkuAliases = async (v) => {
     setSkuAliases(v); LS.set("skuAliases", v);
     if (storeId && window.db) {
       await DB.saveConfig(storeId, { manualItems, skuAliases: v });
+      log("update", "config", `SKU 별칭 설정 변경`);
     }
   };
   const saveManualRecords = async (v) => {
@@ -621,6 +690,12 @@ function App() {
     setStoreId(sid);
     setDataLoaded(false);
   };
+
+  // ── 활동 로그 ──
+  const activityLogs = useActivityLog(storeId, 80);
+  const log = useCallback((action, target, detail) => {
+    logActivity(storeId, { action, target, detail });
+  }, [storeId]);
 
   // UploadTab에서 삭제 접근 가능하게 window에 노출
   useEffect(() => {
@@ -705,6 +780,12 @@ function App() {
               display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:16, cursor:"pointer" }}
               title="매장 설정">⚙️</button>
+            <button onClick={()=>setShowActivityLog(true)} style={{
+              background:T.isDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.05)",
+              border:"none", borderRadius:10, width:34, height:34,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:16, cursor:"pointer" }}
+              title="활동 로그">📋</button>
           </div>
         </div>
       )}
@@ -790,6 +871,14 @@ function App() {
                 {T.isDark ? "☀️" : "🌙"}
               </button>
             </div>
+            <button onClick={()=>setShowActivityLog(true)} style={{
+              width:"100%", marginTop:8, padding:"7px 0", borderRadius:8,
+              border:"1px solid "+T.b1, background:"transparent",
+              fontSize:11, color:T.t2, fontFamily:F, cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:4
+            }}>
+              📋 활동 로그
+            </button>
           </div>
         </aside>
       )}
@@ -968,6 +1057,51 @@ function App() {
           cursor:"pointer", color:"rgba(255,255,255,0.5)" }}>✕</button>
       </div>,
       document.body
+    )}
+    {showActivityLog && (
+      <BottomSheet title="📋 활동 로그" onClose={()=>setShowActivityLog(false)} noPadding>
+        <div style={{ padding:"12px 0" }}>
+          {activityLogs.length === 0 ? (
+            <div style={{ padding:"40px 20px", textAlign:"center" }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>📭</div>
+              <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F }}>아직 활동 기록이 없어요</div>
+              <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>실사 업로드, 데이터 삭제 등의 활동이 여기 기록돼요</div>
+            </div>
+          ) : activityLogs.map((lg, i, arr) => {
+            const icon = ACTION_ICON[lg.action] || "📝";
+            const targetLabel = TARGET_LABEL[lg.target] || lg.target;
+            const timeStr = lg.ts instanceof Date
+              ? lg.ts.toLocaleString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" })
+              : "";
+            return (
+              <div key={lg.id} style={{
+                padding:"12px 20px", display:"flex", gap:12, alignItems:"flex-start",
+                borderBottom: i < arr.length - 1 ? "1px solid "+T.b0 : "none" }}>
+                <div style={{ width:36, height:36, borderRadius:10, flexShrink:0,
+                  background: lg.action==="delete"?T.rDim : lg.action==="complete"?T.brandDim : T.bDim,
+                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>
+                  {icon}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.t1, fontFamily:F, lineHeight:1.4 }}>
+                    {lg.detail || `${targetLabel} ${lg.action}`}
+                  </div>
+                  <div style={{ fontSize:11, color:T.t3, fontFamily:F, marginTop:2, display:"flex", gap:8 }}>
+                    <span>{lg.user || "알 수 없음"}</span>
+                    <span>·</span>
+                    <span>{timeStr}</span>
+                  </div>
+                </div>
+                <div style={{ flexShrink:0, padding:"2px 8px", borderRadius:6,
+                  background:T.card2, fontSize:10, fontWeight:600,
+                  color:T.t3, fontFamily:F }}>
+                  {targetLabel}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </BottomSheet>
     )}
     </>
   );
@@ -2146,8 +2280,14 @@ function BevStatView({ bevHistory, onSwitchMode }) {
     }));
     const maxQ=Math.max(...rows.flatMap(r=>dates.map(d=>qtyMap[`${r.catName}__${d}`]||0)),1);
     const getColor=(v,max)=>{
-      if(v===0) return "#F2F2F7";
+      if(v===0) return T.isDark?"#1C1C1E":"#F2F2F7";
       const t=v/max;
+      if(T.isDark){
+        if(t<0.25) return "rgba(10,132,255,0.18)";
+        if(t<0.5)  return "rgba(10,132,255,0.35)";
+        if(t<0.75) return "rgba(10,132,255,0.55)";
+        return "rgba(10,132,255,0.80)";
+      }
       if(t<0.25) return "#C6D9F7";
       if(t<0.5)  return "#7DAAEF";
       if(t<0.75) return "#3B82F6";
@@ -2185,7 +2325,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
                   const v=qtyMap[`${row.catName}__${d}`]||0;
                   return(
                     <td key={d} style={{padding:"2px 3px",textAlign:"center",
-                      background:getColor(v,maxQ),color:v>maxQ*0.5?"#fff":"#333",
+                      background:getColor(v,maxQ),color:v>maxQ*0.5?"#fff":T.t1,
                       borderRadius:3,fontSize:9}}>
                       {v>0?v:""}
                     </td>
@@ -2848,8 +2988,14 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
     }));
     const maxSold=Math.max(...rows.flatMap(r=>dates.map(d=>soldMap[`${r.sku}__${d}`]||0)),1);
     const getColor=(v,max)=>{
-      if(v===0) return "#F2F2F7";
+      if(v===0) return T.isDark?"#1C1C1E":"#F2F2F7";
       const t=v/max;
+      if(T.isDark){
+        if(t<0.25) return "rgba(48,217,138,0.15)";
+        if(t<0.5)  return "rgba(48,217,138,0.30)";
+        if(t<0.75) return "rgba(48,217,138,0.50)";
+        return "rgba(48,217,138,0.75)";
+      }
       if(t<0.25) return "#C6E6D4";
       if(t<0.5)  return "#7EC8A3";
       if(t<0.75) return "#3DAB72";
@@ -2885,7 +3031,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
                   const v=soldMap[`${row.sku}__${d}`]||0;
                   return(
                     <td key={d} style={{padding:"2px 3px",textAlign:"center",
-                      background:getColor(v,maxSold),color:v>maxSold*0.5?"#fff":"#333",
+                      background:getColor(v,maxSold),color:v>maxSold*0.5?"#fff":T.t1,
                       borderRadius:3,fontSize:9}}>
                       {v>0?v:""}
                     </td>
