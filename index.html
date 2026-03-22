@@ -24,6 +24,9 @@
     #root{min-height:100vh}
     [contenteditable]:empty:before{content:attr(data-placeholder);color:#9FB8A8;pointer-events:none;position:absolute}
     .rich-editor{outline:none;position:relative}
+    .rich-editor:empty::before{content:attr(data-placeholder);color:#8E8E93;pointer-events:none;display:block}
+    html.dark .rich-editor{color:#F5F5F7;caret-color:#30D98A}
+    html:not(.dark) .rich-editor{color:#1C1C1E;caret-color:#00704A}
     .rich-editor img{max-width:100%;border-radius:10px;margin:4px 0;display:block}
     .rich-editor mark{padding:1px 3px;border-radius:3px}
     @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
@@ -342,6 +345,13 @@ const Pill = ({label,color,dim}) => (
 );
 const Sep = () => <div style={{ height:1, background:"rgba(0,0,0,0.06)", margin:"0 16px" }}/>;
 
+function Skeleton({ width="100%", height=16, radius=8, style={} }) {
+  return (
+    <div style={{ width, height, borderRadius:radius, background:T.isDark?"#2C2C2E":"#E5E5EA",
+      animation:"pulse 1.2s ease-in-out infinite", ...style }}/>
+  );
+}
+
 /* ─── Sheet + UI Primitives ─────────────────────── */
 function Sheet({ onClose, title, children, noOutsideClose, noPadding }) {
   const overlayRef = useRef();
@@ -391,20 +401,100 @@ function Sheet({ onClose, title, children, noOutsideClose, noPadding }) {
   );
 }
 
+/* ─── Confirm / Prompt 모달 ──────────────────────── */
+function ConfirmModal({ message, subMessage, confirmText="확인", cancelText="취소", onConfirm, onCancel, danger }) {
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.4)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+      animation:"fadeIn .15s ease" }}
+      onClick={e=>{ if(e.target===e.currentTarget) onCancel(); }}>
+      <div style={{ background:T.isDark?"#2C2C2E":T.card, borderRadius:16, padding:"24px 22px 18px",
+        width:"90%", maxWidth:320, boxShadow:T.sh3, animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)",
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none" }}>
+        <div style={{ fontSize:16, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:6, lineHeight:1.4, textAlign:"center" }}>
+          {message}
+        </div>
+        {subMessage && (
+          <div style={{ fontSize:13, color:T.t3, fontFamily:F, lineHeight:1.5, textAlign:"center", marginBottom:16 }}>
+            {subMessage}
+          </div>
+        )}
+        {!subMessage && <div style={{ height:12 }}/>}
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onCancel} style={{
+            flex:1, padding:"12px 0", borderRadius:12, border:"1px solid "+T.b1,
+            background:"transparent", color:T.t2, fontSize:14, fontWeight:600,
+            cursor:"pointer", fontFamily:F }}>
+            {cancelText}
+          </button>
+          <button onClick={onConfirm} style={{
+            flex:1, padding:"12px 0", borderRadius:12, border:"none",
+            background:danger ? T.red : T.brand, color:"#fff", fontSize:14, fontWeight:700,
+            cursor:"pointer", fontFamily:F,
+            boxShadow:danger ? "0 2px 12px rgba(255,59,48,0.25)" : "0 2px 12px rgba(0,112,74,0.25)" }}>
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
+function PromptModal({ message, placeholder, defaultValue="", onConfirm, onCancel, subMessage }) {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.4)", backdropFilter:"blur(8px)", WebkitBackdropFilter:"blur(8px)",
+      animation:"fadeIn .15s ease" }}
+      onClick={e=>{ if(e.target===e.currentTarget) onCancel(); }}>
+      <div style={{ background:T.isDark?"#2C2C2E":T.card, borderRadius:16, padding:"24px 22px 18px",
+        width:"90%", maxWidth:340, boxShadow:T.sh3, animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)",
+        border:T.isDark?"0.5px solid rgba(255,255,255,0.08)":"none" }}>
+        <div style={{ fontSize:16, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:4, lineHeight:1.4, textAlign:"center" }}>
+          {message}
+        </div>
+        {subMessage && (
+          <div style={{ fontSize:12, color:T.t3, fontFamily:F, lineHeight:1.4, textAlign:"center", marginBottom:10 }}>
+            {subMessage}
+          </div>
+        )}
+        {!subMessage && <div style={{ height:8 }}/>}
+        <input value={value} onChange={e=>setValue(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter" && value.trim()) onConfirm(value.trim()); }}
+          placeholder={placeholder} autoFocus
+          style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:"1.5px solid "+T.b1,
+            background:T.card2, fontSize:15, fontFamily:F, color:T.t1, outline:"none",
+            boxSizing:"border-box", caretColor:T.brand, marginBottom:14 }}/>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onCancel} style={{
+            flex:1, padding:"12px 0", borderRadius:12, border:"1px solid "+T.b1,
+            background:"transparent", color:T.t2, fontSize:14, fontWeight:600,
+            cursor:"pointer", fontFamily:F }}>취소</button>
+          <button onClick={()=>{ if(value.trim()) onConfirm(value.trim()); }}
+            disabled={!value.trim()}
+            style={{ flex:1, padding:"12px 0", borderRadius:12, border:"none",
+              background:value.trim() ? T.brand : T.card3, color:value.trim() ? "#fff" : T.t3,
+              fontSize:14, fontWeight:700, cursor:value.trim()?"pointer":"not-allowed", fontFamily:F }}>확인</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-const fBase = {
-  width:"100%", padding:"13px 15px", borderRadius:12, border:"1px solid "+T.b1,
-  background:T.card2, fontSize:15, fontFamily:F, color:T.t1, outline:"none",
-  boxSizing:"border-box", caretColor:T.brand, transition:"border-color .15s",
-  marginBottom:12,
-};function Field({ label, value, onChange, placeholder, type="text", multiline }) {
+function fBase() {
+  return {
+    width:"100%", padding:"13px 15px", borderRadius:12, border:"1px solid "+T.b1,
+    background:T.card2, fontSize:15, fontFamily:F, color:T.t1, outline:"none",
+    boxSizing:"border-box", caretColor:T.brand, transition:"border-color .15s",
+    marginBottom:12,
+  };
+}function Field({ label, value, onChange, placeholder, type="text", multiline }) {
   return (
     <div style={{ marginBottom:12 }}>
       {label && <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5, paddingLeft:2 }}>{label}</div>}
       {multiline
-        ? <textarea rows={4} style={{...fBase,resize:"vertical"}} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
-        : <input type={type} style={fBase} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>}
+        ? <textarea rows={4} style={{...fBase(),resize:"vertical"}} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
+        : <input type={type} style={fBase()} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>}
     </div>
   );
 }
@@ -797,6 +887,8 @@ function App() {
   // ── 활동 로그 ──
   const activityLogs = useActivityLog(storeId, 80);
   const [showActivityLog, setShowActivityLog] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { message, subMessage, confirmText, cancelText, onConfirm, danger }
+  const [promptDialog, setPromptDialog] = useState(null); // { message, placeholder, subMessage, onConfirm }
   const log = useCallback((action, target, detail) => {
     logActivity(storeId, { action, target, detail, user: currentUser?.name, empId });
   }, [storeId, currentUser?.name, empId]);
@@ -854,14 +946,45 @@ function App() {
 
   const loading = nL || eL || rL;
 
-  const pendingPersonal = (tasks||[]).filter(t=>!t.done).length;
-  const pendingRole     = (roleTasks||[]).filter(t=>!t.done).length;
+  // ── 메모이즈된 파생 데이터 ──
+  const incompleteTasks = useMemo(() => (tasks||[]).filter(t=>!t.done), [tasks]);
+  const completedTasks = useMemo(() => (tasks||[]).filter(t=>t.done), [tasks]);
+  const incompleteRoleTasks = useMemo(() => (roleTasks||[]).filter(t=>!t.done), [roleTasks]);
+  const completedRoleTasks = useMemo(() => (roleTasks||[]).filter(t=>t.done), [roleTasks]);
+
+  const pendingPersonal = incompleteTasks.length;
+  const pendingRole     = incompleteRoleTasks.length;
   const pending         = pendingPersonal + pendingRole;
+  const sortedNotices = useMemo(() => [...(notices||[])].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||"")), [notices]);
   const upcoming = (events||[]).filter(e=>e.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4);
   const pinnedN  = (notices||[]).filter(n=>n.pinned);
   // 홈 브리핑용 계산
   const todayEvents = (events||[]).filter(e=>todayStr()>=e.date&&todayStr()<=(e.endDate||e.date));
   const unreadCount = (notices||[]).filter(n=>!n._read).length;
+
+  // ── KPI 대시보드 데이터 ──
+  const kpiData = useMemo(() => {
+    const allTasks = [...(tasks||[]), ...(roleTasks||[])];
+    const totalTasks = allTasks.length;
+    const doneTasks = allTasks.filter(t=>t.done).length;
+    const taskRate = totalTasks > 0 ? Math.round((doneTasks/totalTasks)*100) : 0;
+
+    const totalNotices = (notices||[]).length;
+    const readNotices = (notices||[]).filter(n=>n._read).length;
+    const readRate = totalNotices > 0 ? Math.round((readNotices/totalNotices)*100) : 0;
+
+    const now = new Date();
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    const ws = weekStart.toISOString().slice(0,10), we = weekEnd.toISOString().slice(0,10);
+    const weekEvents = (events||[]).filter(e => e.date >= ws && e.date <= we).length;
+
+    // 이번주 완료 할일 (done이면서 최근 7일)
+    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate()-7);
+    const recentDone = allTasks.filter(t=>t.done).length;
+
+    return { taskRate, readRate, weekEvents, doneTasks, totalTasks, readNotices, totalNotices, recentDone };
+  }, [tasks, roleTasks, notices, events]);
   // 홈 미니캘린더용
   const cY2=calDate.getFullYear(), cM2=calDate.getMonth();
   const fd2=new Date(cY2,cM2,1).getDay(), dm2=new Date(cY2,cM2+1,0).getDate();
@@ -1096,7 +1219,7 @@ function App() {
               <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>사번 {currentUser?.empId} · 매장 {currentUser?.storeId}</div>
             </div>
             <div style={{ display:"flex", gap:6 }}>
-              <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }}
+              <button onClick={()=>setConfirmDialog({ message:"로그아웃 할까요?", subMessage:"다시 사번으로 로그인할 수 있어요", confirmText:"로그아웃", danger:true, onConfirm:()=>{ localStorage.removeItem("sbx_current_user"); window.location.reload(); } })}
                 style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid "+T.b1,
                   background:"none", color:T.t3, fontSize:11, cursor:"pointer", fontFamily:F }}>
                 로그아웃
@@ -1339,15 +1462,43 @@ function App() {
               <span style={{ fontSize:20, color:"rgba(255,255,255,0.8)" }}>›</span>
             </a>
 
+            {/* ── KPI 대시보드 카드 ── */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:18 }}>
+              {[
+                { label:"업무 완료율", value:kpiData.taskRate+"%",
+                  sub:`${kpiData.doneTasks}/${kpiData.totalTasks}건`,
+                  color:kpiData.taskRate>=80?T.brand:kpiData.taskRate>=50?T.amber:T.red,
+                  bg:kpiData.taskRate>=80?T.brandDim:kpiData.taskRate>=50?T.aDim:"rgba(255,59,48,0.10)",
+                  icon:"📊" },
+                { label:"이번주 일정", value:kpiData.weekEvents+"건",
+                  sub:todayEvents.length>0?`오늘 ${todayEvents.length}건`:"오늘 없음",
+                  color:T.blue, bg:T.bDim, icon:"📅" },
+                { label:"공지 읽음률", value:kpiData.readRate+"%",
+                  sub:`${kpiData.readNotices}/${kpiData.totalNotices}건`,
+                  color:kpiData.readRate>=80?T.brand:kpiData.readRate>=50?T.amber:T.red,
+                  bg:kpiData.readRate>=80?T.brandDim:kpiData.readRate>=50?T.aDim:"rgba(255,59,48,0.10)",
+                  icon:"📢" },
+              ].map((k,i)=>(
+                <div key={i} style={{ ...glassBox({ padding:"14px 12px", textAlign:"center" }),
+                  borderLeft:`3px solid ${k.color}` }}>
+                  <div style={{ fontSize:20, marginBottom:4 }}>{k.icon}</div>
+                  <div style={{ fontSize:22, fontWeight:900, color:k.color, fontFamily:F, lineHeight:1 }}>{k.value}</div>
+                  <div style={{ fontSize:11, fontWeight:600, color:T.t2, fontFamily:F, marginTop:4 }}>{k.label}</div>
+                  <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginTop:2,
+                    background:k.bg, borderRadius:6, padding:"2px 6px", display:"inline-block" }}>{k.sub}</div>
+                </div>
+              ))}
+            </div>
+
             {/* 오늘 할 일 */}
-            {(todayEvents.length > 0 || (tasks||[]).filter(t=>!t.done).length > 0) && (
+            {(todayEvents.length > 0 || incompleteTasks.length > 0) && (
               <div style={{ marginBottom:18 }}>
-                <SH title="오늘 할 일" count={todayEvents.length+(tasks||[]).filter(t=>!t.done).length}
+                <SH title="오늘 할 일" count={todayEvents.length+incompleteTasks.length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
                   {todayEvents.map((e,i)=>(
                     <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                      borderBottom:i<todayEvents.length-1||(tasks||[]).filter(t=>!t.done).length>0?"1px solid "+T.b0:"none" }}>
+                      borderBottom:i<todayEvents.length-1||incompleteTasks.length>0?"1px solid "+T.b0:"none" }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
@@ -1357,7 +1508,7 @@ function App() {
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
                   ))}
-                  {(tasks||[]).filter(t=>!t.done).slice(0,3).map((t,i,arr)=>(
+                  {incompleteTasks.slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
                       borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
@@ -1538,7 +1689,7 @@ function App() {
             todayStr={todayStr}
             CAT={CAT}
             onAddEvent={()=>setAddEvent(true)}
-            onDeleteEvent={(id)=>saveEvents(p=>(p||[]).filter(e=>e.id!==id))}
+            onDeleteEvent={(id)=>setConfirmDialog({ message:"일정을 삭제할까요?", confirmText:"삭제", danger:true, onConfirm:()=>saveEvents(p=>(p||[]).filter(e=>e.id!==id)) })}
             onEditEvent={(ev)=>{ setEf({title:ev.title,date:ev.date,endDate:ev.endDate||"",category:ev.category||"이벤트",memo:ev.memo||""}); setEditingEventId(ev.id); setAddEvent(true); }}
             onViewNotice={(n)=>setViewNotice(n)}
           />
@@ -1586,29 +1737,29 @@ function App() {
 
             {/* 개인 할일 */}
             {taskMode==="personal"&&(<>
-              {(tasks||[]).filter(t=>!t.done).length>0&&(
+              {incompleteTasks.length>0&&(
                 <>
                   <div style={{ fontSize:11, fontWeight:600, color:T.l3, letterSpacing:1.5,
                     textTransform:"uppercase", marginBottom:8, paddingLeft:2, fontFamily:F }}>
-                    미완료 · {(tasks||[]).filter(t=>!t.done).length}
+                    미완료 · {incompleteTasks.length}
                   </div>
                   <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16,
                     boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-                    {(tasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
+                    {incompleteTasks.map((t,i,arr)=>(
                       <div key={t.id}><TRow t={t} onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
                     ))}
                   </div>
                 </>
               )}
-              {(tasks||[]).filter(t=>t.done).length>0&&(
+              {completedTasks.length>0&&(
                 <>
                   <div style={{ fontSize:11, fontWeight:600, color:T.l3, letterSpacing:1.5,
                     textTransform:"uppercase", marginBottom:8, paddingLeft:2, fontFamily:F }}>
-                    완료 · {(tasks||[]).filter(t=>t.done).length}
+                    완료 · {completedTasks.length}
                   </div>
                   <div style={{ ...glassBox({ overflow:"hidden",
                     boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-                    {(tasks||[]).filter(t=>t.done).map((t,i,arr)=>(
+                    {completedTasks.map((t,i,arr)=>(
                       <div key={t.id}><TRow t={t} done onToggle={()=>toggleTask(t.id)} onDelete={()=>deleteTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
                     ))}
                   </div>
@@ -1629,29 +1780,29 @@ function App() {
                   매장 전체와 공유되는 할일이에요
                 </span>
               </div>
-              {(roleTasks||[]).filter(t=>!t.done).length>0&&(
+              {incompleteRoleTasks.length>0&&(
                 <>
                   <div style={{ fontSize:11, fontWeight:600, color:T.l3, letterSpacing:1.5,
                     textTransform:"uppercase", marginBottom:8, paddingLeft:2, fontFamily:F }}>
-                    미완료 · {(roleTasks||[]).filter(t=>!t.done).length}
+                    미완료 · {incompleteRoleTasks.length}
                   </div>
                   <div style={{ ...glassBox({ overflow:"hidden", marginBottom:16,
                     boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-                    {(roleTasks||[]).filter(t=>!t.done).map((t,i,arr)=>(
+                    {incompleteRoleTasks.map((t,i,arr)=>(
                       <div key={t.id}><TRow t={t} showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
                     ))}
                   </div>
                 </>
               )}
-              {(roleTasks||[]).filter(t=>t.done).length>0&&(
+              {completedRoleTasks.length>0&&(
                 <>
                   <div style={{ fontSize:11, fontWeight:600, color:T.l3, letterSpacing:1.5,
                     textTransform:"uppercase", marginBottom:8, paddingLeft:2, fontFamily:F }}>
-                    완료 · {(roleTasks||[]).filter(t=>t.done).length}
+                    완료 · {completedRoleTasks.length}
                   </div>
                   <div style={{ ...glassBox({ overflow:"hidden",
                     boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-                    {(roleTasks||[]).filter(t=>t.done).map((t,i,arr)=>(
+                    {completedRoleTasks.map((t,i,arr)=>(
                       <div key={t.id}><TRow t={t} done showAuthor onToggle={()=>toggleRoleTask(t.id)} onDelete={()=>deleteRoleTask(t.id)}/>{i<arr.length-1&&<Sep/>}</div>
                     ))}
                   </div>
@@ -1736,12 +1887,12 @@ function App() {
             <div style={{ flex:1 }}>
               <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>시작일</div>
               <input type="date" value={ef.date} onChange={e=>setEf({...ef,date:e.target.value})}
-                style={{ ...fBase, marginBottom:0 }}/>
+                style={{ ...fBase(), marginBottom:0 }}/>
             </div>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>종료일 <span style={{color:T.l4}}>(선택)</span></div>
               <input type="date" value={ef.endDate||""} onChange={e=>setEf({...ef,endDate:e.target.value})}
-                min={ef.date} style={{ ...fBase, marginBottom:0 }}/>
+                min={ef.date} style={{ ...fBase(), marginBottom:0 }}/>
             </div>
           </div>
           <div style={{ marginBottom:12 }}>
@@ -1825,7 +1976,7 @@ function App() {
               fontFamily:F, fontWeight:700 }}>
               ✏️ 프로필 수정
             </button>
-            <button onClick={()=>{ if(window.confirm("로그아웃 할까요?")){ localStorage.removeItem("sbx_current_user"); window.location.reload(); } }} style={{
+            <button onClick={()=>setConfirmDialog({ message:"로그아웃 할까요?", subMessage:"다시 사번으로 로그인할 수 있어요", confirmText:"로그아웃", danger:true, onConfirm:()=>{ localStorage.removeItem("sbx_current_user"); window.location.reload(); } })} style={{
               width:"100%", padding:"12px", borderRadius:12, border:"1px solid "+T.rBdr,
               background:"none", color:T.red, fontSize:14, cursor:"pointer",
               fontFamily:F, fontWeight:600 }}>
@@ -1914,6 +2065,16 @@ function App() {
           }}
         />
       )}
+      {confirmDialog && (
+        <ConfirmModal {...confirmDialog}
+          onConfirm={()=>{ confirmDialog.onConfirm(); setConfirmDialog(null); }}
+          onCancel={()=>setConfirmDialog(null)} />
+      )}
+      {promptDialog && (
+        <PromptModal {...promptDialog}
+          onConfirm={(val)=>{ promptDialog.onConfirm(val); setPromptDialog(null); }}
+          onCancel={()=>setPromptDialog(null)} />
+      )}
     </div>
   );
 }
@@ -1921,7 +2082,7 @@ function App() {
 
 /* ================== 리치텍스트 공지 작성 ================== */
 
-function NRow({ n, onClick, onDelete }) {
+const NRow = React.memo(function NRow({ n, onClick, onDelete }) {
   const meta=CAT[n.category]||CAT["기타"];
   return (
     <div style={{ position:"relative" }}>
@@ -1958,9 +2119,9 @@ function NRow({ n, onClick, onDelete }) {
       </div>
     </div>
   );
-}
+});
 
-function ERow({ e }) {
+const ERow = React.memo(function ERow({ e }) {
   const meta=CAT[e.category]||CAT["기타"];
   const d=new Date(e.date+"T00:00:00");
   const hasRange = e.endDate && e.endDate !== e.date;
@@ -1985,8 +2146,8 @@ function ERow({ e }) {
       </div>
     </div>
   );
-}
-function TRow({ t, done, onToggle, onDelete, showAuthor }) {
+});
+const TRow = React.memo(function TRow({ t, done, onToggle, onDelete, showAuthor }) {
   const pMeta=PRIO[t.priority]||PRIO["보통"];
   return (
     <div style={{ padding:"13px 16px", display:"flex", alignItems:"center", gap:12 }}>
@@ -2016,13 +2177,13 @@ function TRow({ t, done, onToggle, onDelete, showAuthor }) {
         color:T.l4, fontSize:17, cursor:"pointer", padding:"0 2px", fontFamily:F }}>✕</button>
     </div>
   );
-}
+});
 
 // --- AI Chat Sheet ---
 
 // --- Gist 설정 모달 ---
 /* ================== CALENDAR TAB ================== */
-function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent, onDeleteEvent, onEditEvent, onViewNotice }) {
+const CalendarTab = React.memo(function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, todayStr, CAT, onAddEvent, onDeleteEvent, onEditEvent, onViewNotice }) {
   var cY = calDate.getFullYear();
   var cM = calDate.getMonth();
   var firstDow = new Date(cY, cM, 1).getDay();
@@ -2233,7 +2394,7 @@ function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, 
                     <button onClick={()=>onEditEvent&&onEditEvent(e)} style={{
                       padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
                       border:"1px solid "+T.border1, background:T.glass1, color:T.l2, cursor:"pointer" }}>수정</button>
-                    <button onClick={()=>{ if(window.confirm("일정을 삭제할까요?")) onDeleteEvent&&onDeleteEvent(e.id); }} style={{
+                    <button onClick={()=>{ onDeleteEvent&&onDeleteEvent(e.id); }} style={{
                       padding:"4px 12px", borderRadius:8, fontSize:12, fontFamily:F,
                       border:"1px solid #ff6b6b44", background:"#ff6b6b11", color:"#e05252", cursor:"pointer" }}>삭제</button>
                   </div>
@@ -2245,10 +2406,10 @@ function CalendarTab({ events, notices, calDate, setCalDate, selDay, setSelDay, 
       </div>
     </div>
   );
-}
+});
 
 
-function MemoTab({ memos, onSave }) {
+const MemoTab = React.memo(function MemoTab({ memos, onSave }) {
   const [input, setInput] = useState("");
   const [editId, setEditId] = useState(null);
   const [editText, setEditText] = useState("");
@@ -2350,9 +2511,9 @@ function MemoTab({ memos, onSave }) {
       )}
     </div>
   );
-}
+});
 
-function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors }) {
+const CatManagerSheet = React.memo(function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors }) {
   const cats = categories && categories.length ? [...categories] : [...DEFAULT_CATS];
   const [list, setList] = useState(cats);
   const [input, setInput] = useState("");
@@ -2436,13 +2597,14 @@ function CatManagerSheet({ onClose, categories, onSave, catColors, onSaveColors 
       <GreenBtn full onClick={handleSave}>저장하기</GreenBtn>
     </Sheet>
   );
-}
+});
 
 
-function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
+const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const cats = categories && categories.length ? categories : DEFAULT_CATS;
   const [aiDrafting, setAiDrafting] = useState(false);
   const [title, setTitle]       = useState(initial ? initial.title : "");
+  const [titleTouched, setTitleTouched] = useState(false);
   const [category, setCategory] = useState(initial ? initial.category : cats[0]);
   const [pinned, setPinned]     = useState(initial ? !!initial.pinned : false);
   const [noticeDate, setNoticeDate] = useState(initial ? (initial.noticeDate||"") : "");
@@ -2516,7 +2678,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
     const sel=window.getSelection(); if(!sel||!sel.rangeCount) return;
     const r=sel.getRangeAt(0);
     const hr=document.createElement("hr");
-    hr.style.cssText="border:none;border-top:1.5px solid #C8DDD4;margin:10px 0";
+    hr.style.cssText="border:none;border-top:1.5px solid "+(T.isDark?"#3A3A3C":"#C8DDD4")+";margin:10px 0";
     const br=document.createElement("br");
     r.collapse(false); r.insertNode(br); r.insertNode(hr);
     r.setStartAfter(br); r.collapse(true);
@@ -2701,12 +2863,12 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
       backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
       display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div style={{
-        background:"rgba(245,250,247,0.98)",
-        borderTop:"2px solid "+T.green,
+        background:T.isDark ? "rgba(28,28,30,0.98)" : "rgba(245,250,247,0.98)",
+        borderTop:"2px solid "+T.brand,
         width:"100%", maxWidth: window.innerWidth >= 768 ? 800 : 430,
         height:"100%",
         display:"flex", flexDirection:"column",
-        boxShadow:"0 -20px 60px rgba(0,0,0,0.7)" }}>
+        boxShadow:T.isDark ? "0 -20px 60px rgba(0,0,0,0.9)" : "0 -20px 60px rgba(0,0,0,0.7)" }}>
 
         {/* ① 헤더 - 고정 */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
@@ -2726,9 +2888,10 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
             {/* 왼쪽: 메타정보 + 버튼 */}
             <div style={{ width:260, flexShrink:0, display:"flex", flexDirection:"column" }}>
               <input value={title} onChange={e=>setTitle(e.target.value)}
+                onBlur={()=>setTitleTouched(true)}
                 onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}
                 placeholder="공지 제목"
-                style={{ ...fBase, marginBottom:10, fontSize:17, fontWeight:600 }}/>
+                style={{ ...fBase(), marginBottom:10, fontSize:17, fontWeight:600, border:titleTouched && !title.trim() ? "1.5px solid "+T.red : "1.5px solid "+T.b1 }}/>
               <div style={{ marginBottom:10 }}>
                 <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
@@ -2748,12 +2911,12 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                   <div>
                     <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>시작일</div>
                     <input type="date" value={noticeDate} onChange={e=>setNoticeDate(e.target.value)}
-                      style={{ ...fBase, marginBottom:0, width:"100%", height:44 }}/>
+                      style={{ ...fBase(), marginBottom:0, width:"100%", height:44 }}/>
                   </div>
                   <div>
                     <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>종료일</div>
                     <input type="date" value={noticeEndDate} onChange={e=>setNoticeEndDate(e.target.value)}
-                      min={noticeDate} style={{ ...fBase, marginBottom:0, width:"100%", height:44 }}/>
+                      min={noticeDate} style={{ ...fBase(), marginBottom:0, width:"100%", height:44 }}/>
                   </div>
                 </div>
               </div>
@@ -2815,6 +2978,11 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                   }}>
                   {initial ? "수정 완료" : "등록하기"}
                 </button>
+                {!title.trim() && (
+                  <div style={{ fontSize:11, color:T.t3, fontFamily:F, textAlign:"center", marginTop:6 }}>
+                    제목을 입력하면 등록할 수 있어요
+                  </div>
+                )}
               </div>
             </div>
             {/* 오른쪽: 툴바(고정) + 에디터(스크롤) */}
@@ -2873,7 +3041,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
                   lastEnterRef.current = null;
                 }}
-                style={{ ...fBase, flex:1, minHeight:200, fontSize:15, lineHeight:1.9, padding:"14px 16px",
+                style={{ ...fBase(), flex:1, minHeight:200, fontSize:15, lineHeight:1.9, padding:"14px 16px",
                   whiteSpace:"pre-wrap", overflowY:"auto" }}/>
             </div>
           </div>
@@ -2884,9 +3052,10 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
             <div style={{ flexShrink:0, padding:"12px 22px 0",
               maxHeight: "35%", overflowY:"auto" }}>
               <input value={title} onChange={e=>setTitle(e.target.value)}
+                onBlur={()=>setTitleTouched(true)}
                 onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}
                 placeholder="공지 제목"
-                style={{ ...fBase, marginBottom:10, fontSize:17, fontWeight:600 }}/>
+                style={{ ...fBase(), marginBottom:10, fontSize:17, fontWeight:600, border:titleTouched && !title.trim() ? "1.5px solid "+T.red : "1.5px solid "+T.b1 }}/>
               <div style={{ marginBottom:8 }}>
                 <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>카테고리</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
@@ -2906,13 +3075,13 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                   <div>
                     <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>시작일</div>
                     <input type="date" value={noticeDate} onChange={e=>setNoticeDate(e.target.value)}
-                      style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0, height:50,
+                      style={{ ...fBase(), marginBottom:0, width:"100%", minWidth:0, height:50,
                         WebkitAppearance:"none", appearance:"none", boxSizing:"border-box", display:"block", lineHeight:"normal" }}/>
                   </div>
                   <div>
                     <div style={{ fontSize:11, color:T.l4, fontFamily:F, marginBottom:4 }}>종료일</div>
                     <input type="date" value={noticeEndDate} onChange={e=>setNoticeEndDate(e.target.value)}
-                      min={noticeDate} style={{ ...fBase, marginBottom:0, width:"100%", minWidth:0, height:50,
+                      min={noticeDate} style={{ ...fBase(), marginBottom:0, width:"100%", minWidth:0, height:50,
                         WebkitAppearance:"none", appearance:"none", boxSizing:"border-box", display:"block", lineHeight:"normal" }}/>
                   </div>
                 </div>
@@ -2949,7 +3118,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                   setAiDrafting(false);
                 }} style={{
                   width:"100%", padding:"10px 14px", border:"none",
-                  background:"linear-gradient(135deg,rgba(0,112,74,0.10),rgba(0,112,74,0.06))",
+                  background:T.isDark ? "linear-gradient(135deg,rgba(48,217,138,0.12),rgba(48,217,138,0.06))" : "linear-gradient(135deg,rgba(0,112,74,0.10),rgba(0,112,74,0.06))",
                   borderTop:"1px solid "+T.brandBorder,
                   color:T.brand, cursor:"pointer", fontFamily:F, fontSize:13, fontWeight:600,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
@@ -2960,7 +3129,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
             {/* ③ 툴바 - 항상 고정 (flex 레이아웃으로 고정, sticky/position 아님) */}
             <div style={{ flexShrink:0, padding:"8px 22px",
-              background:"rgba(245,250,247,0.99)",
+              background:T.isDark ? "rgba(28,28,30,0.99)" : "rgba(245,250,247,0.99)",
               borderTop:"1px solid "+T.border0,
               borderBottom:"1px solid "+T.border0 }}>
               <ToolbarContent/>
@@ -3018,7 +3187,7 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
 
                   lastEnterRef.current = null;
                 }}
-              style={{ ...fBase, flex:1, minHeight:0, fontSize:15, lineHeight:1.8,
+              style={{ ...fBase(), flex:1, minHeight:0, fontSize:15, lineHeight:1.8,
                 padding:"12px 22px", overflowY:"auto" }}/>
 
             {/* ⑤ 하단 버튼 - 고정 */}
@@ -3048,13 +3217,18 @@ function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
                 }}>
                 {initial ? "수정 완료" : "등록하기"}
               </button>
+              {!title.trim() && (
+                <div style={{ fontSize:11, color:T.t3, fontFamily:F, textAlign:"center", marginTop:6 }}>
+                  제목을 입력하면 등록할 수 있어요
+                </div>
+              )}
             </div>
           </>
         )}
       </div>
     </div>
   );
-}
+});
 
 /* ===================== ORDER TAB ===================== */
 /* ════════════════ AI ASSISTANT (통합) ════════════════ */
@@ -3117,8 +3291,8 @@ function AIAssistantSheet({ onClose, notices, events, tasks, roleTasks, profile,
     }).join("\n");
     const upcomingEvs = (events||[]).filter(e=>e.date>=new Date().toISOString().slice(0,10))
       .slice(0,10).map(e=>`${e.date} ${e.title} [${e.category||""}]`).join("\n");
-    const myTasks = (tasks||[]).filter(t=>!t.done).slice(0,10).map(t=>`• ${t.text} (${t.priority||"보통"})`).join("\n");
-    const roleTk  = (roleTasks||[]).filter(t=>!t.done).slice(0,10).map(t=>`• ${t.text}`).join("\n");
+    const myTasks = incompleteTasks.slice(0,10).map(t=>`• ${t.text} (${t.priority||"보통"})`).join("\n");
+    const roleTk  = incompleteRoleTasks.slice(0,10).map(t=>`• ${t.text}`).join("\n");
     return `당신은 스타벅스 매장 파트너를 위한 전문 업무 어시스턴트입니다.
 사용자: ${profile?.name||"파트너"} (${profile?.role||"바리스타"})
 오늘 날짜: ${today}
@@ -3184,7 +3358,7 @@ ${roleTk||"(없음)"}
       const noticeCtx = (notices||[]).slice(0,12).map(n=>`• ${n.title} [${n.category||""}]`).join("\n");
       const evCtx = (events||[]).filter(e=>e.date>=new Date().toISOString().slice(0,10)).slice(0,6)
         .map(e=>`• ${e.date} ${e.title}`).join("\n");
-      const taskCtx = [...(tasks||[]).filter(t=>!t.done).slice(0,5), ...(roleTasks||[]).filter(t=>!t.done).slice(0,3)]
+      const taskCtx = [...incompleteTasks.slice(0,5), ...incompleteRoleTasks.slice(0,3)]
         .map(t=>`• ${t.text}`).join("\n");
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
@@ -3292,7 +3466,7 @@ ${roleTk||"(없음)"}
             <div style={{ maxHeight:340, overflowY:"auto", marginBottom:12,
               display:"flex", flexDirection:"column", gap:10 }}>
               {messages.map((m,i)=>(
-                <div key={i} style={{ display:"flex", justifyContent:m.role==="user"?"flex-end":"flex-start" }}>
+                <div key={m.id || (m.role + '-' + i)} style={{ display:"flex", justifyContent:m.role==="user"?"flex-end":"flex-start" }}>
                   {m.role==="assistant" && (
                     <div style={{ width:28, height:28, borderRadius:"50%", background:T.brandDim,
                       border:"1px solid "+T.brandBorder, flexShrink:0, marginRight:8, marginTop:2,
@@ -3484,12 +3658,12 @@ function GlobalSearchSheet({ onClose, notices, events, tasks, roleTasks, onViewN
         res.push({ type:"event", icon:"📅", title:e.title, sub:e.date+" · "+e.category, item:e });
       }
     });
-    (tasks||[]).filter(t=>!t.done).forEach(t=>{
+    incompleteTasks.forEach(t=>{
       if ((t.text||"").toLowerCase().includes(kw)) {
         res.push({ type:"task", icon:"✅", title:t.text, sub:"개인 할일 · "+t.priority, item:t });
       }
     });
-    (roleTasks||[]).filter(t=>!t.done).forEach(t=>{
+    incompleteRoleTasks.forEach(t=>{
       if ((t.text||"").toLowerCase().includes(kw)) {
         res.push({ type:"roletask", icon:"👥", title:t.text, sub:"팀 할일", item:t });
       }
