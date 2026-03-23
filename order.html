@@ -607,6 +607,37 @@ function PromptModal({ message, placeholder, defaultValue="", onConfirm, onCance
   );
 }
 
+/* ─── Toast System ───────────────────────────────── */
+function useToast() {
+  const [toasts, setToasts] = useState([]);
+  const show = useCallback((msg, type="info") => {
+    const id = Date.now();
+    setToasts(p => [...p, {id, msg, type}]);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4000);
+  }, []);
+  return { toasts, show };
+}
+
+function Toast({ toasts }) {
+  return (
+    <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:9999,
+      pointerEvents:"none", display:"flex", flexDirection:"column", gap:8, padding:16 }}>
+      {toasts.map(t => (
+        <div key={t.id} style={{
+          padding:"12px 16px", borderRadius:12, fontFamily:F, fontSize:13,
+          fontWeight:600, animation:"slideDown .25s ease",
+          background: t.type==="error" ? T.red : t.type==="success" ? T.brand : T.card,
+          color: t.type==="error" || t.type==="success" ? "#fff" : T.t1,
+          boxShadow: T.sh2, pointerEvents:"auto", maxWidth:500,
+          borderLeft: `4px solid ${t.type==="error" ? T.red : t.type==="success" ? T.brand : T.blue}`
+        }}>
+          {t.type==="error" ? "⚠ " : t.type==="success" ? "✓ " : "ℹ "}{t.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ─── App Entry ──────────────────────────────────── */
 function App() {
   const { dark, toggle: toggleTheme, T: themeT } = useTheme();
@@ -618,6 +649,9 @@ function App() {
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [promptDialog, setPromptDialog] = useState(null);
+
+  // ── Toast 시스템 ──
+  const { toasts, show: showToast } = useToast();
 
   // ── Firebase 동기화 상태 ──
   const [storeId, setStoreId] = useState(() => LS.get("storeId", ""));
@@ -678,8 +712,17 @@ function App() {
   const saveBevHistory = async (v, newEntry) => {
     setBevHistory(v); LS.set("bevHistory", v);
     if (storeId && window.db && newEntry) {
-      await DB.saveBevEntry(storeId, newEntry);
-      log("upload", "beverage", `${newEntry.date} 음료 판매 데이터 업로드`);
+      try {
+        const ok = await DB.saveBevEntry(storeId, newEntry);
+        if (!ok) {
+          showToast("음료 데이터 저장 실패. 다시 시도해주세요.", "error");
+        } else {
+          showToast("음료 데이터가 저장되었습니다.", "success");
+        }
+        log("upload", "beverage", `${newEntry.date} 음료 판매 데이터 업로드`);
+      } catch(e) {
+        showToast("음료 저장 중 오류: "+e.message, "error");
+      }
     }
   };
 
@@ -708,17 +751,38 @@ function App() {
     setUploadHistory(v); LS.set("history", v);
     if (storeId && window.db && newEntry) {
       setSyncStatus("loading");
-      const ok = await DB.saveHistoryEntry(storeId, newEntry);
-      setSyncStatus(ok ? "ok" : "error");
-      log("upload", "inventory", `${newEntry.date} 실사 데이터 업로드 (${Object.keys(newEntry.items||{}).length}개 SKU)`);
+      try {
+        const ok = await DB.saveHistoryEntry(storeId, newEntry);
+        setSyncStatus(ok ? "ok" : "error");
+        if (!ok) {
+          showToast("저장 실패. 다시 시도해주세요.", "error");
+        } else {
+          showToast("데이터가 저장되었습니다.", "success");
+        }
+        log("upload", "inventory", `${newEntry.date} 실사 데이터 업로드 (${Object.keys(newEntry.items||{}).length}개 SKU)`);
+      } catch(e) {
+        setSyncStatus("error");
+        showToast("저장 중 오류: "+e.message, "error");
+      }
     }
   };
   const deleteHistoryEntry = async (id) => {
     if (storeId && window.db) {
       setSyncStatus("loading");
-      await DB.deleteHistoryEntry(storeId, id);
-      setSyncStatus("ok");
-      log("delete", "inventory", `${id} 실사 데이터 삭제`);
+      try {
+        const ok = await DB.deleteHistoryEntry(storeId, id);
+        setSyncStatus(ok ? "ok" : "error");
+        if (!ok) {
+          showToast("삭제 실패. 다시 시도해주세요.", "error");
+        } else {
+          showToast("데이터가 삭제되었습니다.", "success");
+        }
+        log("delete", "inventory", `${id} 실사 데이터 삭제`);
+      } catch(e) {
+        setSyncStatus("error");
+        showToast("삭제 중 오류: "+e.message, "error");
+        log("delete_error", "inventory", `${id} 삭제 실패`);
+      }
     }
   };
   const saveManualItems = async (v) => {
@@ -857,7 +921,7 @@ function App() {
           borderRight:"0.5px solid "+T.b0,
           display:"flex", flexDirection:"column",
           position:"fixed", top:0, left:0, height:"100vh",
-          overflowY:"auto", zIndex:200,
+          overflowY:"auto", zIndex:200, WebkitOverflowScrolling:"touch",
           transition:"background .35s ease, border-color .35s ease" }}>
           <div style={{ padding:"22px 20px 16px", borderBottom:"0.5px solid "+T.b0 }}>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
@@ -985,6 +1049,8 @@ function App() {
         paddingTop:isPC?0:56,
         paddingBottom:isPC?0:"calc(68px + env(safe-area-inset-bottom))",
         minHeight:"100vh",
+        overflowY:"auto",
+        WebkitOverflowScrolling:"touch",
         transition:"margin-left .3s ease"
       }}>
 
@@ -1174,6 +1240,7 @@ function App() {
         onConfirm={(val)=>{ promptDialog.onConfirm(val); setPromptDialog(null); }}
         onCancel={()=>setPromptDialog(null)} />
     )}
+    <Toast toasts={toasts} />
     </>
   );
 }
@@ -1737,6 +1804,8 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
   const [bevPending, setBevPending] = useState([]);
   const [error,    setError]    = useState("");
   const [localConfirm, setLocalConfirm] = useState(null);
+  const [saving, setSaving] = useState(false); // 저장 중 상태
+  const [undoStack, setUndoStack] = useState(null); // { type, data, date, restore }
   const fileRef = useRef();
   const bevFileRef = useRef();
 
@@ -1746,6 +1815,7 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
     for (const file of files) {
       const ext = file.name.split(".").pop().toLowerCase();
       if (!["xlsx","xls"].includes(ext)) { setError('"'+file.name+'" — xlsx 또는 xls 파일만 지원해요'); continue; }
+      if (file.size > 10*1024*1024) { setError('"'+file.name+'" — 10MB 이하의 파일만 업로드할 수 있습니다'); continue; }
       try {
         const buf = await file.arrayBuffer();
         const guessDate = extractDateFromFilename(file.name);
@@ -1769,17 +1839,22 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
 
   const removePending = (id) => setPending(prev => prev.filter(p => p.id !== id));
 
-  const doSaveOne = (item) => {
-    const exists = uploadHistory.findIndex(h => h.date === item.data.date);
-    let updated;
-    if (exists >= 0) {
-      updated = uploadHistory.map((h,i) => i===exists ? item.data : h);
-    } else {
-      updated = [...uploadHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
+  const doSaveOne = async (item) => {
+    setSaving(true);
+    try {
+      const exists = uploadHistory.findIndex(h => h.date === item.data.date);
+      let updated;
+      if (exists >= 0) {
+        updated = uploadHistory.map((h,i) => i===exists ? item.data : h);
+      } else {
+        updated = [...uploadHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
+      }
+      const isNew = exists < 0;
+      onSave(updated, isNew ? item.data : null);
+      removePending(item.id);
+    } finally {
+      setSaving(false);
     }
-    const isNew = exists < 0;
-    onSave(updated, isNew ? item.data : null);
-    removePending(item.id);
   };
   const saveOne = (item) => {
     const exists = uploadHistory.findIndex(h => h.date === item.data.date);
@@ -1790,25 +1865,44 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
     }
   };
 
-  const saveAll = () => {
-    let updated = [...uploadHistory];
-    const newEntries = [];
-    for (const item of pending) {
-      const exists = updated.findIndex(h => h.date === item.data.date);
-      if (exists >= 0) updated = updated.map((h,i) => i===exists ? item.data : h);
-      else { updated = [...updated, item.data]; newEntries.push(item.data); }
+  const saveAll = async () => {
+    setSaving(true);
+    try {
+      let updated = [...uploadHistory];
+      const newEntries = [];
+      for (const item of pending) {
+        const exists = updated.findIndex(h => h.date === item.data.date);
+        if (exists >= 0) updated = updated.map((h,i) => i===exists ? item.data : h);
+        else { updated = [...updated, item.data]; newEntries.push(item.data); }
+      }
+      const sorted = updated.sort((a,b) => a.date.localeCompare(b.date));
+      // 새 항목들 개별 Firebase 저장
+      newEntries.forEach(entry => onSave(sorted, entry));
+      if (newEntries.length === 0) onSave(sorted, null);
+      setPending([]);
+      alert(pending.length+"개 파일이 저장되었습니다 ✓");
+    } finally {
+      setSaving(false);
     }
-    const sorted = updated.sort((a,b) => a.date.localeCompare(b.date));
-    // 새 항목들 개별 Firebase 저장
-    newEntries.forEach(entry => onSave(sorted, entry));
-    if (newEntries.length === 0) onSave(sorted, null);
-    setPending([]);
-    alert(pending.length+"개 파일이 저장되었습니다 ✓");
   };
 
   const deleteHistory = (idx) => {
     setLocalConfirm({ message:"이 기록을 삭제할까요?", confirmText:"삭제", danger:true, onConfirm:()=>{
       const toDelete = uploadHistory[idx];
+      // 되돌리기를 위해 저장
+      setUndoStack({
+        type: "deleteHistory",
+        data: toDelete,
+        index: idx,
+        restore: () => {
+          const restored = [...uploadHistory];
+          restored.splice(idx, 0, toDelete);
+          onSave(restored, null);
+        }
+      });
+      // 타이머: 5초 후 자동 제거
+      setTimeout(() => setUndoStack(null), 5000);
+
       onSave(uploadHistory.filter((_,i) => i!==idx), null);
       const delKey = toDelete?.date || toDelete?._id;
       if (delKey) window._deleteHistoryEntry && window._deleteHistoryEntry(delKey);
@@ -1824,6 +1918,7 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
     for (const file of files) {
       const ext = file.name.split(".").pop().toLowerCase();
       if (!["xlsx","xls"].includes(ext)) { setError('"'+file.name+'" — xlsx 또는 xls 파일만 지원해요'); continue; }
+      if (file.size > 10*1024*1024) { setError('"'+file.name+'" — 10MB 이하의 파일만 업로드할 수 있습니다'); continue; }
       try {
         const buf = await file.arrayBuffer();
         const guessDate = extractDateFromFilename(file.name);
@@ -1834,16 +1929,21 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
     if (newItems.length) setBevPending(prev => [...prev, ...newItems]);
   };
 
-  const doSaveBevOne = (item) => {
-    const exists = bevHistory.findIndex(h => h.date === item.data.date);
-    let updated;
-    if (exists >= 0) {
-      updated = bevHistory.map((h,i) => i===exists ? item.data : h);
-    } else {
-      updated = [...bevHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
+  const doSaveBevOne = async (item) => {
+    setSaving(true);
+    try {
+      const exists = bevHistory.findIndex(h => h.date === item.data.date);
+      let updated;
+      if (exists >= 0) {
+        updated = bevHistory.map((h,i) => i===exists ? item.data : h);
+      } else {
+        updated = [...bevHistory, item.data].sort((a,b) => a.date.localeCompare(b.date));
+      }
+      onSaveBev(updated, item.data);
+      setBevPending(prev => prev.filter(p => p.id !== item.id));
+    } finally {
+      setSaving(false);
     }
-    onSaveBev(updated, item.data);
-    setBevPending(prev => prev.filter(p => p.id !== item.id));
   };
   const saveBevOne = (item) => {
     const exists = bevHistory.findIndex(h => h.date === item.data.date);
@@ -1916,7 +2016,7 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
               파싱 완료 — {pending.length}개 파일
             </div>
             {pending.length > 1 && (
-              <GreenBtn small onClick={saveAll}>전체 저장</GreenBtn>
+              <GreenBtn small onClick={saveAll} disabled={saving}>{saving ? "저장 중..." : "전체 저장"}</GreenBtn>
             )}
           </div>
           {pending.map(item => (
@@ -1928,6 +2028,7 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
               onSave={saveOne}
               onRemove={removePending}
               onToggle={toggleExpand}
+              saving={saving}
             />
           ))}
         </div>
@@ -1960,10 +2061,12 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
                     {Object.keys(h.items||{}).length}개 SKU · 판매합계 {Math.round(Object.values(h.items||{}).reduce((s,i)=>s+i.sold,0))}
                   </div>
                 </div>
-                <button onClick={() => deleteHistoryEntry(uploadHistory[uploadHistory.length-1-i].date)} style={{
-                  padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
-                  background:T.rDim, color:T.red, cursor:"pointer",
-                  fontSize:12, fontFamily:F }}>삭제</button>
+                <button onClick={() => deleteHistoryEntry(uploadHistory[uploadHistory.length-1-i].date)} disabled={saving}
+                  style={{
+                  padding:"10px 14px", minWidth:44, minHeight:44, borderRadius:8, border:"1px solid "+T.rBdr,
+                  background:saving?"#f5f5f5":T.rDim, color:saving?T.t3:T.red, cursor:saving?"not-allowed":"pointer",
+                  fontSize:12, fontFamily:F, display:"flex", alignItems:"center", justifyContent:"center",
+                  transition:"all .15s" }}>삭제</button>
               </div>
             ))}
           </Card>
@@ -2036,10 +2139,10 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
                 ))}
               </div>
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={()=>saveBevOne(item)} style={{ flex:1, padding:"10px", borderRadius:10,
-                  border:"none", background:T.blue||"#007AFF", color:"#fff", fontSize:13,
-                  fontWeight:700, cursor:"pointer", fontFamily:F }}>
-                  💾 저장
+                <button onClick={()=>saveBevOne(item)} disabled={saving} style={{ flex:1, padding:"10px", borderRadius:10,
+                  border:"none", background:saving?"#8E8E93":(T.blue||"#007AFF"), color:"#fff", fontSize:13,
+                  fontWeight:700, cursor:saving?"not-allowed":"pointer", fontFamily:F }}>
+                  💾 {saving ? "저장 중..." : "저장"}
                 </button>
                 <button onClick={()=>setBevPending(prev=>prev.filter(p=>p.id!==item.id))}
                   style={{ padding:"10px 14px", borderRadius:10, border:"1px solid "+T.b1,
@@ -2081,9 +2184,11 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
                     <button onClick={()=>setLocalConfirm({ message:"이 날짜 음료 데이터를 삭제할까요?", confirmText:"삭제", danger:true, onConfirm:()=>{
                       const updated = bevHistory.filter(b=>b.date!==h.date);
                       onSaveBev(updated, null);
-                    }})} style={{ padding:"5px 10px", borderRadius:8, border:"1px solid "+T.rBdr,
-                      background:T.rDim, color:T.red, cursor:"pointer",
-                      fontSize:12, fontFamily:F }}>삭제</button>
+                    }})} disabled={saving}
+                      style={{ padding:"10px 14px", minWidth:44, minHeight:44, borderRadius:8, border:"1px solid "+T.rBdr,
+                      background:saving?"#f5f5f5":T.rDim, color:saving?T.t3:T.red, cursor:saving?"not-allowed":"pointer",
+                      fontSize:12, fontFamily:F, display:"flex", alignItems:"center", justifyContent:"center",
+                      transition:"all .15s" }}>삭제</button>
                   </div>
                 ))}
               </Card>
@@ -2098,12 +2203,27 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
         onConfirm={()=>{ localConfirm.onConfirm(); setLocalConfirm(null); }}
         onCancel={()=>setLocalConfirm(null)} />
     )}
+    {undoStack && (
+      <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", zIndex:9998,
+        padding:"12px 16px", borderRadius:12, background:T.t1, color:"#fff", fontFamily:F, fontSize:13,
+        fontWeight:600, boxShadow:T.sh2, display:"flex", alignItems:"center", gap:12,
+        animation:"slideUp .25s ease" }}>
+        <span>{undoStack.type === "deleteHistory" ? "데이터가 삭제되었습니다" : "작업이 완료되었습니다"}</span>
+        <button onClick={() => {
+          undoStack.restore();
+          setUndoStack(null);
+        }} style={{ padding:"4px 10px", borderRadius:8, background:"#fff", color:T.t1,
+          border:"none", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:F }}>
+          되돌리기
+        </button>
+      </div>
+    )}
     </>
   );
 });
 
 /* ─── 파일 카드 (업로드 대기) ─────────────────────── */
-const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle }) {
+const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle, saving }) {
   const [catFilter, setCatFilter] = useState("전체");
   const cats = ["전체", ...new Set(Object.values(item.data.items).map(i=>i.cat))];
   const filteredItems = Object.values(item.data.items).filter(i =>
@@ -2162,7 +2282,7 @@ const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, 
                 fontSize:11, fontWeight:catFilter===c?700:400, cursor:"pointer", fontFamily:F }}>{c}</button>
             ))}
           </div>
-          <div style={{ maxHeight:220, overflowY:"auto" }}>
+          <div style={{ maxHeight:220, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
             <div style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
               padding:"7px 14px", background:T.brandDim, gap:4 }}>
               {["품목명","재고","판매","내일","모레","유통"].map(h => (
@@ -2195,8 +2315,8 @@ const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, 
 
       {/* 저장 버튼 */}
       <div style={{ padding:"10px 14px" }}>
-        <GreenBtn full onClick={()=>onSave(item)}>
-          📅 {item.customDate} ({DOW_KR[item.data.dow]}요일) 로 저장
+        <GreenBtn full onClick={()=>onSave(item)} disabled={saving}>
+          📅 {saving ? "저장 중..." : item.customDate + " (" + DOW_KR[item.data.dow] + "요일) 로 저장"}
         </GreenBtn>
       </div>
     </div>
@@ -2677,10 +2797,10 @@ const BevStatView = React.memo(function BevStatView({ bevHistory, onSwitchMode }
       {showCustom&&(
         <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:12,color:T.t3,fontFamily:F}}>기간</span>
-          <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+          <input type="date" value={customFrom} onChange={e=>{const newVal=e.target.value;if(newVal&&customTo&&newVal>customTo)return;setCustomFrom(newVal);}}
             style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
           <span style={{color:T.t3}}>~</span>
-          <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+          <input type="date" value={customTo} onChange={e=>{const newVal=e.target.value;if(newVal&&customFrom&&newVal<customFrom)return;setCustomTo(newVal);}}
             style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
         </div>
       )}
@@ -3433,10 +3553,10 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
       {showCustom&&(
         <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:12,color:T.t3,fontFamily:F}}>기간</span>
-          <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+          <input type="date" value={customFrom} onChange={e=>{const newVal=e.target.value;if(newVal&&customTo&&newVal>customTo)return;setCustomFrom(newVal);}}
             style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
           <span style={{color:T.t3}}>~</span>
-          <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+          <input type="date" value={customTo} onChange={e=>{const newVal=e.target.value;if(newVal&&customFrom&&newVal<customFrom)return;setCustomTo(newVal);}}
             style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.b1,fontFamily:F,fontSize:12,background:T.card}}/>
         </div>
       )}
