@@ -481,6 +481,29 @@ function PromptModal({ message, placeholder, defaultValue="", onConfirm, onCance
   );
 }
 
+function ToastContainer({ toasts }) {
+  if (!toasts.length) return null;
+  return (
+    <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", zIndex:9999, display:"flex", flexDirection:"column", gap:8 }}>
+      {toasts.map(t=>(
+        <div key={t.id} style={{
+          padding:"10px 18px", borderRadius:12, fontFamily:F, fontSize:13, fontWeight:600,
+          background:t.type==="error"?T.red:t.type==="success"?T.brand:T.card,
+          color:t.type==="error"||t.type==="success"?"#fff":T.t1,
+          boxShadow:"0 4px 20px rgba(0,0,0,0.2)", animation:"toastIn .3s ease",
+          display:"flex", alignItems:"center", gap:8
+        }}>
+          {t.action && <button onClick={t.action.fn} style={{
+            background:"rgba(255,255,255,0.25)", border:"none", borderRadius:8,
+            padding:"4px 10px", color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:F
+          }}>{t.action.label}</button>}
+          <span>{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function fBase() {
   return {
     width:"100%", padding:"13px 15px", borderRadius:12, border:"1px solid "+T.b1,
@@ -940,9 +963,17 @@ function App() {
   const daysInMo=new Date(cY,cM+1,0).getDate();
 
   const [nf, setNf] = useState({ title:"", category:"이벤트", content:"", pinned:false, author:"" });
-  const [ef, setEf] = useState({ title:"", date:todayStr(), endDate:"", category:(categories||DEFAULT_CATS)[0]||"이벤트", memo:"" });
+  const [ef, setEf] = useState({ title:"", date:todayStr(), endDate:"", category:(categories||DEFAULT_CATS)[0]||"이벤트", memo:"", repeat:"none" });
   const [editingEventId, setEditingEventId] = useState(null);
-  const [tf, setTf] = useState({ text:"", priority:"보통", dueDate:todayStr() });
+  const [tf, setTf] = useState({ text:"", priority:"보통", dueDate:todayStr(), repeat:"none" });
+
+  /* ─── 토스트 시스템 ─── */
+  const [toasts, setToasts] = useState([]);
+  const showToast = useCallback((msg, type="info", action=null) => {
+    const id = Date.now();
+    setToasts(p=>[...p, {id, msg, type, action}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)), 5000);
+  }, []);
 
   const loading = nL || eL || rL;
 
@@ -962,29 +993,7 @@ function App() {
   const todayEvents = (events||[]).filter(e=>todayStr()>=e.date&&todayStr()<=(e.endDate||e.date));
   const unreadCount = (notices||[]).filter(n=>!n._read).length;
 
-  // ── KPI 대시보드 데이터 ──
-  const kpiData = useMemo(() => {
-    const allTasks = [...(tasks||[]), ...(roleTasks||[])];
-    const totalTasks = allTasks.length;
-    const doneTasks = allTasks.filter(t=>t.done).length;
-    const taskRate = totalTasks > 0 ? Math.round((doneTasks/totalTasks)*100) : 0;
 
-    const totalNotices = (notices||[]).length;
-    const readNotices = (notices||[]).filter(n=>n._read).length;
-    const readRate = totalNotices > 0 ? Math.round((readNotices/totalNotices)*100) : 0;
-
-    const now = new Date();
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
-    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
-    const ws = weekStart.toISOString().slice(0,10), we = weekEnd.toISOString().slice(0,10);
-    const weekEvents = (events||[]).filter(e => e.date >= ws && e.date <= we).length;
-
-    // 이번주 완료 할일 (done이면서 최근 7일)
-    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate()-7);
-    const recentDone = allTasks.filter(t=>t.done).length;
-
-    return { taskRate, readRate, weekEvents, doneTasks, totalTasks, readNotices, totalNotices, recentDone };
-  }, [tasks, roleTasks, notices, events]);
   // 홈 미니캘린더용
   const cY2=calDate.getFullYear(), cM2=calDate.getMonth();
   const fd2=new Date(cY2,cM2,1).getDay(), dm2=new Date(cY2,cM2+1,0).getDate();
@@ -1013,7 +1022,13 @@ function App() {
   const deleteTask = id => {
     const t = (tasks||[]).find(x=>x.id===id);
     saveTasks(p=>p.filter(x=>x.id!==id));
-    if(t) log("delete", "task", `'${t.text}' 삭제`);
+    if(t) {
+      log("delete", "task", `'${t.text}' 삭제`);
+      showToast(`'${t.text}' 삭제됨`, "info", {
+        label:"되돌리기",
+        fn:()=>saveTasks(p=>[...p, t])
+      });
+    }
   };
   const toggleRoleTask = id => {
     const t = (roleTasks||[]).find(x=>x.id===id);
@@ -1023,7 +1038,13 @@ function App() {
   const deleteRoleTask = id => {
     const t = (roleTasks||[]).find(x=>x.id===id);
     saveRoleTasks(p=>p.filter(x=>x.id!==id));
-    if(t) log("delete", "roleTask", `'${t.text}' 삭제`);
+    if(t) {
+      log("delete", "roleTask", `'${t.text}' 삭제`);
+      showToast(`'${t.text}' 삭제됨`, "info", {
+        label:"되돌리기",
+        fn:()=>saveRoleTasks(p=>[...p, t])
+      });
+    }
   };
 
   const submitNotice = () => {
@@ -1035,9 +1056,19 @@ function App() {
   };
   const deleteNoticeWithEvents = (nid) => {
     const n = (notices||[]).find(x=>x.id===nid);
+    const relatedEvents = (events||[]).filter(e=>e.noticeId===nid);
     saveNotices(p=>(p||[]).filter(x=>x.id!==nid));
     saveEvents(p=>(p||[]).filter(e=>e.noticeId!==nid));
-    if(n) log("delete", "notice", `'${n.title}' 삭제`);
+    if(n) {
+      log("delete", "notice", `'${n.title}' 삭제`);
+      showToast(`'${n.title}' 삭제됨`, "info", {
+        label:"되돌리기",
+        fn:()=>{
+          saveNotices(p=>[n,...(p||[])]);
+          if(relatedEvents.length) saveEvents(p=>[...(p||[]),...relatedEvents]);
+        }
+      });
+    }
   };
 
   const submitNoticeRich = (data) => {
@@ -1057,25 +1088,71 @@ function App() {
       log("create", "event", `'${data.title}' 일정 자동 등록`);
     }
   };
+  // 반복 날짜 생성 유틸
+  const generateRepeatDates = (startDate, repeat, count=8) => {
+    const dates = [];
+    const d = new Date(startDate+"T00:00:00");
+    for (let i=1; i<=count; i++) {
+      const nd = new Date(d);
+      if (repeat==="daily") nd.setDate(d.getDate()+i);
+      else if (repeat==="weekly") nd.setDate(d.getDate()+(i*7));
+      else if (repeat==="biweekly") nd.setDate(d.getDate()+(i*14));
+      else if (repeat==="monthly") nd.setMonth(d.getMonth()+i);
+      dates.push(nd.toISOString().slice(0,10));
+    }
+    return dates;
+  };
+
   const submitEvent = () => {
     if (!ef.title.trim()) return;
+    if (ef.endDate && ef.endDate < ef.date) {
+      showToast("종료 날짜는 시작 날짜 이후여야 합니다", "error");
+      return;
+    }
     if (editingEventId) {
       saveEvents(p=>(p||[]).map(e=>e.id===editingEventId?{...e,...ef,endDate:ef.endDate||ef.date}:e));
       log("update", "event", `'${ef.title}' 수정`);
       setEditingEventId(null);
     } else {
-      saveEvents(p=>[...(p||[]),{id:"e"+Date.now(),...ef,endDate:ef.endDate||ef.date}].sort((a,b)=>a.date.localeCompare(b.date)));
-      log("create", "event", `'${ef.title}' 등록 (${ef.date})`);
+      const baseEv = {id:"e"+Date.now(),...ef,endDate:ef.endDate||ef.date};
+      const newEvents = [baseEv];
+      if (ef.repeat && ef.repeat!=="none") {
+        const REPEAT_LABEL = {daily:"매일",weekly:"매주",biweekly:"격주",monthly:"매월"};
+        const repeatDates = generateRepeatDates(ef.date, ef.repeat);
+        repeatDates.forEach((rd,i) => {
+          const dur = ef.endDate ? (new Date(ef.endDate)-new Date(ef.date))/(86400000) : 0;
+          const endD = dur>0 ? new Date(new Date(rd+"T00:00:00").getTime()+dur*86400000).toISOString().slice(0,10) : rd;
+          newEvents.push({id:"e"+Date.now()+"r"+(i+1), ...ef, date:rd, endDate:endD, repeat:ef.repeat, _repeatGroup:baseEv.id});
+        });
+        log("create", "event", `'${ef.title}' ${REPEAT_LABEL[ef.repeat]} 반복 등록 (${newEvents.length}건)`);
+      } else {
+        log("create", "event", `'${ef.title}' 등록 (${ef.date})`);
+      }
+      saveEvents(p=>[...(p||[]),...newEvents].sort((a,b)=>a.date.localeCompare(b.date)));
     }
-    setEf({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"" });
+    setEf({ title:"", date:todayStr(), endDate:"", category:"이벤트", memo:"", repeat:"none" });
     setAddEvent(false);
   };
   const submitTask = () => {
     if (!tf.text.trim()) return;
-    const newTask = { id:"t"+Date.now(), ...tf, done:false, author:profile?.name||"나" };
-    if (taskMode === "role") { saveRoleTasks(p=>[...p, newTask]); log("create", "roleTask", `'${tf.text}' 추가`); }
-    else                     { saveTasks(p=>[...p, newTask]); log("create", "task", `'${tf.text}' 추가`); }
-    setTf({ text:"", priority:"보통", dueDate:todayStr() });
+    if (!tf.dueDate) {
+      showToast("마감일을 선택해주세요", "error");
+      return;
+    }
+    const REPEAT_LABEL = {daily:"매일",weekly:"매주",biweekly:"격주",monthly:"매월"};
+    const baseTasks = [];
+    const baseTask = { id:"t"+Date.now(), ...tf, done:false, author:profile?.name||"나" };
+    baseTasks.push(baseTask);
+    if (tf.repeat && tf.repeat!=="none") {
+      const repeatDates = generateRepeatDates(tf.dueDate, tf.repeat);
+      repeatDates.forEach((rd,i) => {
+        baseTasks.push({...baseTask, id:"t"+Date.now()+"r"+(i+1), dueDate:rd, _repeatGroup:baseTask.id});
+      });
+    }
+    const label = tf.repeat && tf.repeat!=="none" ? `'${tf.text}' ${REPEAT_LABEL[tf.repeat]} 반복 추가 (${baseTasks.length}건)` : `'${tf.text}' 추가`;
+    if (taskMode === "role") { saveRoleTasks(p=>[...p, ...baseTasks]); log("create", "roleTask", label); }
+    else                     { saveTasks(p=>[...p, ...baseTasks]); log("create", "task", label); }
+    setTf({ text:"", priority:"보통", dueDate:todayStr(), repeat:"none" });
     setAddTask(false);
   };
   const eventsOnDay = d => {
@@ -1462,33 +1539,23 @@ function App() {
               <span style={{ fontSize:20, color:"rgba(255,255,255,0.8)" }}>›</span>
             </a>
 
-            {/* ── KPI 대시보드 카드 ── */}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:18 }}>
-              {[
-                { label:"업무 완료율", value:kpiData.taskRate+"%",
-                  sub:`${kpiData.doneTasks}/${kpiData.totalTasks}건`,
-                  color:kpiData.taskRate>=80?T.brand:kpiData.taskRate>=50?T.amber:T.red,
-                  bg:kpiData.taskRate>=80?T.brandDim:kpiData.taskRate>=50?T.aDim:"rgba(255,59,48,0.10)",
-                  icon:"📊" },
-                { label:"이번주 일정", value:kpiData.weekEvents+"건",
-                  sub:todayEvents.length>0?`오늘 ${todayEvents.length}건`:"오늘 없음",
-                  color:T.blue, bg:T.bDim, icon:"📅" },
-                { label:"공지 읽음률", value:kpiData.readRate+"%",
-                  sub:`${kpiData.readNotices}/${kpiData.totalNotices}건`,
-                  color:kpiData.readRate>=80?T.brand:kpiData.readRate>=50?T.amber:T.red,
-                  bg:kpiData.readRate>=80?T.brandDim:kpiData.readRate>=50?T.aDim:"rgba(255,59,48,0.10)",
-                  icon:"📢" },
-              ].map((k,i)=>(
-                <div key={i} style={{ ...glassBox({ padding:"14px 12px", textAlign:"center" }),
-                  borderLeft:`3px solid ${k.color}` }}>
-                  <div style={{ fontSize:20, marginBottom:4 }}>{k.icon}</div>
-                  <div style={{ fontSize:22, fontWeight:900, color:k.color, fontFamily:F, lineHeight:1 }}>{k.value}</div>
-                  <div style={{ fontSize:11, fontWeight:600, color:T.t2, fontFamily:F, marginTop:4 }}>{k.label}</div>
-                  <div style={{ fontSize:10, color:T.t3, fontFamily:F, marginTop:2,
-                    background:k.bg, borderRadius:6, padding:"2px 6px", display:"inline-block" }}>{k.sub}</div>
-                </div>
-              ))}
-            </div>
+            {/* 고정 공지 배너 */}
+            {pinnedN.length > 0 && (
+              <div style={{ marginBottom:16 }}>
+                {pinnedN.slice(0,2).map(n=>(
+                  <div key={n.id} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+                      borderRadius:12, marginBottom:6, cursor:"pointer",
+                      background:T.isDark?"rgba(48,217,138,0.08)":"rgba(0,112,74,0.05)",
+                      border:"1px solid "+(T.isDark?"rgba(48,217,138,0.20)":"rgba(0,112,74,0.12)") }}>
+                    <span style={{ fontSize:14 }}>📌</span>
+                    <div style={{ flex:1, fontSize:13, fontWeight:600, color:T.t1, fontFamily:F,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.title}</div>
+                    {!n._read && <span style={{ width:8, height:8, borderRadius:"50%", background:T.red, flexShrink:0 }}/>}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* 오늘 할 일 */}
             {(todayEvents.length > 0 || incompleteTasks.length > 0) && (
@@ -1496,9 +1563,17 @@ function App() {
                 <SH title="오늘 할 일" count={todayEvents.length+incompleteTasks.length}
                   onMore={()=>setTab("tasks")}/>
                 <div style={{ ...glassBox({ overflow:"hidden" }) }}>
-                  {todayEvents.map((e,i)=>(
-                    <div key={e.id} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                      borderBottom:i<todayEvents.length-1||incompleteTasks.length>0?"1px solid "+T.b0:"none" }}>
+                  {todayEvents.map((e,i)=>{
+                    const linkedNotice = e.noticeId ? (notices||[]).find(n=>n.id===e.noticeId) : null;
+                    return (
+                    <div key={e.id} onClick={()=>{
+                      if (linkedNotice) { readNotice(linkedNotice.id); setViewNotice(linkedNotice); }
+                      else { setSelDay(todayStr()); setTab("calendar"); }
+                    }} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
+                      borderBottom:i<todayEvents.length-1||incompleteTasks.length>0?"1px solid "+T.b0:"none",
+                      transition:"background .12s" }}
+                      onMouseEnter={ev=>ev.currentTarget.style.background=T.glassHover}
+                      onMouseLeave={ev=>ev.currentTarget.style.background="transparent"}>
                       <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
                         background:(CAT[e.category]||CAT["기타"]).color }}/>
                       <div style={{ flex:1, fontSize:14, fontWeight:500, color:T.t1, fontFamily:F,
@@ -1507,7 +1582,8 @@ function App() {
                         background:(CAT[e.category]||CAT["기타"]).dim, borderRadius:8, padding:"2px 8px",
                         fontWeight:600, fontFamily:F, flexShrink:0 }}>{e.category}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                   {incompleteTasks.slice(0,3).map((t,i,arr)=>(
                     <div key={t.id} onClick={()=>toggleTask(t.id)} style={{
                       padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer",
@@ -1662,17 +1738,48 @@ function App() {
                 <ActionBtn onClick={()=>setAddNotice(true)}>+ 작성</ActionBtn>
               </div>
             </div>
-            <div style={{ ...glassBox({ overflow:"hidden",
-              boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
-              {(notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat)
-                .map((n,i,arr)=>(
-                  <div key={n.id}>
-                    <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
-                      onDelete={()=>deleteNoticeWithEvents(n.id)}/>
-                    {i<arr.length-1&&<Sep/>}
+            {/* 고정 공지 상단 섹션 */}
+            {(()=>{
+              const filtered = (notices||[]).filter(n=>noticeCat==="전체"||n.category===noticeCat);
+              const pinned = filtered.filter(n=>n.pinned);
+              const unpinned = filtered.filter(n=>!n.pinned);
+              return (<>
+                {pinned.length > 0 && (
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:T.t3, letterSpacing:1, textTransform:"uppercase",
+                      marginBottom:6, paddingLeft:2, fontFamily:F, display:"flex", alignItems:"center", gap:4 }}>
+                      📌 고정 공지 · {pinned.length}
+                    </div>
+                    <div style={{ ...glassBox({ overflow:"hidden",
+                      border:"1px solid "+(T.isDark?"rgba(48,217,138,0.20)":"rgba(0,112,74,0.15)"),
+                      boxShadow:T.isDark?"0 4px 20px rgba(48,217,138,0.08)":"0 4px 20px rgba(0,112,74,0.08)" }) }}>
+                      {pinned.map((n,i,arr)=>(
+                        <div key={n.id}>
+                          <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
+                            onDelete={()=>deleteNoticeWithEvents(n.id)}/>
+                          {i<arr.length-1&&<Sep/>}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-            </div>
+                )}
+                <div style={{ ...glassBox({ overflow:"hidden",
+                  boxShadow:"0 8px 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08)" }) }}>
+                  {unpinned.length===0 && pinned.length===0
+                    ? <EmptyState emoji="📢" text="공지가 없어요" action={()=>setAddNotice(true)} actionLabel="작성하기"/>
+                    : unpinned.length===0
+                      ? <div style={{ padding:"20px", textAlign:"center", color:T.t3, fontSize:13, fontFamily:F }}>고정 외 공지가 없어요</div>
+                      : unpinned.map((n,i,arr)=>(
+                          <div key={n.id}>
+                            <NRow n={n} onClick={()=>{readNotice(n.id);setViewNotice(n);}}
+                              onDelete={()=>deleteNoticeWithEvents(n.id)}/>
+                            {i<arr.length-1&&<Sep/>}
+                          </div>
+                        ))
+                  }
+                </div>
+              </>);
+            })()}
           </div>
         )}
 
@@ -1844,7 +1951,7 @@ function App() {
           </div>
           <div style={{ height:1, background:T.border0, marginBottom:20 }}/>
           <div className="notice-body" style={{ fontSize:15, color:T.l2, lineHeight:1.8, fontFamily:F, marginBottom:24 }}
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewNotice.content || "", { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] }) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewNotice.content || "", { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3","hr"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] }) }}
           />
           <div style={{ display:"flex", gap:10, marginBottom:8 }}>
             <button onClick={()=>togglePin(viewNotice.id)} style={{
@@ -1900,6 +2007,26 @@ function App() {
             <Seg value={ef.category} onChange={v=>setEf({...ef,category:v})} options={[...(categories||DEFAULT_CATS)]}/>
           </div>
           <Field label="메모 (선택)" value={ef.memo} onChange={v=>setEf({...ef,memo:v})} placeholder="간단한 메모"/>
+          {!editingEventId && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>🔄 반복 설정</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {[{v:"none",l:"없음"},{v:"daily",l:"매일"},{v:"weekly",l:"매주"},{v:"biweekly",l:"격주"},{v:"monthly",l:"매월"}].map(o=>(
+                  <button key={o.v} onClick={()=>setEf({...ef,repeat:o.v})} style={{
+                    padding:"7px 14px", borderRadius:10, fontSize:12, fontWeight:600, fontFamily:F, cursor:"pointer",
+                    border:"1px solid "+(ef.repeat===o.v?T.brand:T.b1),
+                    background:ef.repeat===o.v?T.brandDim:T.card2,
+                    color:ef.repeat===o.v?T.brand:T.t2 }}>{o.l}</button>
+                ))}
+              </div>
+              {ef.repeat!=="none" && (
+                <div style={{ fontSize:11, color:T.brand, fontFamily:F, marginTop:6, padding:"6px 10px",
+                  background:T.brandDim, borderRadius:8 }}>
+                  ✨ {ef.date}부터 {ef.repeat==="daily"?"매일":ef.repeat==="weekly"?"매주":ef.repeat==="biweekly"?"격주":"매월"} 8회 자동 생성됩니다
+                </div>
+              )}
+            </div>
+          )}
           <GreenBtn full onClick={submitEvent}>추가하기</GreenBtn>
         </Sheet>
       )}
@@ -1932,6 +2059,24 @@ function App() {
             <Seg value={tf.priority} onChange={v=>setTf({...tf,priority:v})} options={["높음","보통","낮음"]}/>
           </div>
           <Field label="마감일" type="date" value={tf.dueDate} onChange={v=>setTf({...tf,dueDate:v})}/>
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:12, color:T.l3, fontFamily:F, marginBottom:5 }}>🔄 반복 설정</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {[{v:"none",l:"없음"},{v:"daily",l:"매일"},{v:"weekly",l:"매주"},{v:"biweekly",l:"격주"},{v:"monthly",l:"매월"}].map(o=>(
+                <button key={o.v} onClick={()=>setTf({...tf,repeat:o.v})} style={{
+                  padding:"7px 14px", borderRadius:10, fontSize:12, fontWeight:600, fontFamily:F, cursor:"pointer",
+                  border:"1px solid "+(tf.repeat===o.v?T.brand:T.b1),
+                  background:tf.repeat===o.v?T.brandDim:T.card2,
+                  color:tf.repeat===o.v?T.brand:T.t2 }}>{o.l}</button>
+              ))}
+            </div>
+            {tf.repeat!=="none" && (
+              <div style={{ fontSize:11, color:T.brand, fontFamily:F, marginTop:6, padding:"6px 10px",
+                background:T.brandDim, borderRadius:8 }}>
+                ✨ {tf.dueDate}부터 {tf.repeat==="daily"?"매일":tf.repeat==="weekly"?"매주":tf.repeat==="biweekly"?"격주":"매월"} 8회 자동 생성됩니다
+              </div>
+            )}
+          </div>
           <GreenBtn full onClick={submitTask}>추가하기</GreenBtn>
         </Sheet>
       )}
@@ -2075,6 +2220,8 @@ function App() {
           onConfirm={(val)=>{ promptDialog.onConfirm(val); setPromptDialog(null); }}
           onCancel={()=>setPromptDialog(null)} />
       )}
+
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }
@@ -2111,7 +2258,8 @@ const NRow = React.memo(function NRow({ n, onClick, onDelete }) {
           />
           <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
             <Pill label={n.category} color={meta.color} dim={meta.dim}/>
-            {n.pinned&&<Pill label="고정" color={T.gold} dim={T.goldDim}/>}
+            {!n._read&&<Pill label="NEW" color={T.red} dim="rgba(255,59,48,0.10)"/>}
+            {n.pinned&&<Pill label="📌 고정" color={T.gold} dim={T.goldDim}/>}
             {n.author==="AI 분석"&&<Pill label="✨ AI" color={T.green} dim={T.greenDim}/>}
           </div>
         </div>
@@ -2138,10 +2286,13 @@ const ERow = React.memo(function ERow({ e }) {
       </div>
       <div style={{ flex:1 }}>
         <div style={{ fontSize:15, fontWeight:600, color:T.l1, fontFamily:F, marginBottom:2 }}>{e.title}</div>
-        <div style={{ fontSize:13, color:T.l3, fontFamily:F }}>
-          {hasRange
-            ? e.date+" ~ "+e.endDate+" · "+e.category
-            : e.category+(e.memo?" · "+e.memo:"")}
+        <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:13, color:T.l3, fontFamily:F }}>
+            {hasRange
+              ? e.date+" ~ "+e.endDate+" · "+e.category
+              : e.category+(e.memo?" · "+e.memo:"")}
+          </span>
+          {(e.repeat&&e.repeat!=="none")&&<span style={{ fontSize:10, color:T.blue, background:T.bDim, borderRadius:6, padding:"1px 6px", fontWeight:600, fontFamily:F }}>🔄 {e.repeat==="daily"?"매일":e.repeat==="weekly"?"매주":e.repeat==="biweekly"?"격주":"매월"}</span>}
         </div>
       </div>
     </div>
@@ -2169,6 +2320,7 @@ const TRow = React.memo(function TRow({ t, done, onToggle, onDelete, showAuthor 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
             <Pill label={t.priority} color={pMeta.color} dim={pMeta.dim}/>
             {t.dueDate&&<span style={{ fontSize:12, color:T.l3, fontFamily:F }}>{fmtShort(t.dueDate)}</span>}
+            {(t.repeat&&t.repeat!=="none")&&<span style={{ fontSize:10, color:T.blue, background:T.bDim, borderRadius:6, padding:"1px 6px", fontWeight:600, fontFamily:F }}>🔄 {t.repeat==="daily"?"매일":t.repeat==="weekly"?"매주":t.repeat==="biweekly"?"격주":"매월"}</span>}
             {showAuthor&&t.author&&<span style={{ fontSize:12, color:T.l3, fontFamily:F }}>· {t.author}</span>}
           </div>
         )}
@@ -2603,6 +2755,7 @@ const CatManagerSheet = React.memo(function CatManagerSheet({ onClose, categorie
 const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, initial, categories, notices }) {
   const cats = categories && categories.length ? categories : DEFAULT_CATS;
   const [aiDrafting, setAiDrafting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [title, setTitle]       = useState(initial ? initial.title : "");
   const [titleTouched, setTitleTouched] = useState(false);
   const [category, setCategory] = useState(initial ? initial.category : cats[0]);
@@ -2652,9 +2805,11 @@ const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, i
   }, []);
 
   const handleSave = () => {
-    if (!title.trim()) return;
+    if (!title.trim() || saving) return;
+    setSaving(true);
     const content = editorRef.current ? editorRef.current.innerHTML : "";
     onSave({ title: title.trim(), category, content, pinned, noticeDate, noticeEndDate });
+    setSaving(false);
   };
 
   const tools = [
@@ -2942,7 +3097,7 @@ const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, i
                       const d = await res.json();
                       const edited = (d.content||[]).map(b=>b.text||"").join("");
                       if (edited && editorRef.current) {
-                        editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
+                        editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3","hr"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
                       }
                     } catch(e) { alert("AI API 키를 확인해주세요"); }
                     setAiDrafting(false);
@@ -2963,22 +3118,22 @@ const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, i
                 </div>
                 <button
                   onMouseDown={e => { e.preventDefault(); handleSave(); }}
-                  disabled={!title.trim()}
+                  disabled={!title.trim() || saving}
                   style={{
-                    background: !title.trim()
+                    background: (!title.trim() || saving)
                       ? (T.isDark?"#2C2C2E":"#E8F0EB")
                       : (T.isDark?"linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)"),
-                    color: !title.trim() ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
+                    color: (!title.trim() || saving) ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
                     border:"none", borderRadius:14, padding:"15px 24px",
                     fontSize:15, fontWeight:700, fontFamily:F,
-                    cursor: !title.trim() ? "not-allowed" : "pointer",
+                    cursor: (!title.trim() || saving) ? "not-allowed" : "pointer",
                     width:"100%",
-                    boxShadow: !title.trim() ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
+                    boxShadow: (!title.trim() || saving) ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
                     letterSpacing:"0.3px"
                   }}>
-                  {initial ? "수정 완료" : "등록하기"}
+                  {saving ? "저장 중..." : (initial ? "수정 완료" : "등록하기")}
                 </button>
-                {!title.trim() && (
+                {(!title.trim() && !saving) && (
                   <div style={{ fontSize:11, color:T.t3, fontFamily:F, textAlign:"center", marginTop:6 }}>
                     제목을 입력하면 등록할 수 있어요
                   </div>
@@ -3112,7 +3267,7 @@ const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, i
                     const d = await res.json();
                     const edited = (d.content||[]).map(b=>b.text||"").join("");
                     if (edited && editorRef.current) {
-                      editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
+                      editorRef.current.innerHTML = DOMPurify.sanitize(edited.replace(/```html?\n?/g,"").replace(/```/g,"").trim(), { ALLOWED_TAGS: ["b","i","u","em","strong","br","p","div","span","mark","img","a","ul","ol","li","h1","h2","h3","hr"], ALLOWED_ATTR: ["style","href","src","alt","target","class"] });
                     }
                   } catch(e) { alert("AI API 키를 확인해주세요"); }
                   setAiDrafting(false);
@@ -3202,22 +3357,22 @@ const RichNoticeSheet = React.memo(function RichNoticeSheet({ onClose, onSave, i
               </div>
               <button
                 onMouseDown={e => { e.preventDefault(); handleSave(); }}
-                disabled={!title.trim()}
+                disabled={!title.trim() || saving}
                 style={{
-                  background: !title.trim()
+                  background: (!title.trim() || saving)
                     ? (T.isDark?"#2C2C2E":"#E8F0EB")
                     : (T.isDark?"linear-gradient(135deg,#0A3D24 0%,#1A1A2E 100%)":"linear-gradient(135deg,#00704A 0%,#1E3932 100%)"),
-                  color: !title.trim() ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
+                  color: (!title.trim() || saving) ? (T.isDark?"#636366":"#7A9E7E") : "#FFFFFF",
                   border:"none", borderRadius:14, padding:"15px 24px",
                   fontSize:15, fontWeight:700, fontFamily:F,
-                  cursor: !title.trim() ? "not-allowed" : "pointer",
+                  cursor: (!title.trim() || saving) ? "not-allowed" : "pointer",
                   width:"100%",
-                  boxShadow: !title.trim() ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
+                  boxShadow: (!title.trim() || saving) ? "none" : (T.isDark?"0 4px 20px rgba(48,217,138,0.20)":"0 4px 20px rgba(0,112,74,0.30)"),
                   letterSpacing:"0.3px"
                 }}>
-                {initial ? "수정 완료" : "등록하기"}
+                {saving ? "저장 중..." : (initial ? "수정 완료" : "등록하기")}
               </button>
-              {!title.trim() && (
+              {(!title.trim() && !saving) && (
                 <div style={{ fontSize:11, color:T.t3, fontFamily:F, textAlign:"center", marginTop:6 }}>
                   제목을 입력하면 등록할 수 있어요
                 </div>
