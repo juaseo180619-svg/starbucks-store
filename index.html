@@ -2229,7 +2229,7 @@ function App() {
 
 /* ================== 리치텍스트 공지 작성 ================== */
 
-const NRow = React.memo(function NRow({ n, onClick, onDelete }) {
+function NRow({ n, onClick, onDelete }) {
   const meta=CAT[n.category]||CAT["기타"];
   return (
     <div style={{ position:"relative" }}>
@@ -2267,9 +2267,9 @@ const NRow = React.memo(function NRow({ n, onClick, onDelete }) {
       </div>
     </div>
   );
-});
+}
 
-const ERow = React.memo(function ERow({ e }) {
+function ERow({ e }) {
   const meta=CAT[e.category]||CAT["기타"];
   const d=new Date(e.date+"T00:00:00");
   const hasRange = e.endDate && e.endDate !== e.date;
@@ -2297,8 +2297,8 @@ const ERow = React.memo(function ERow({ e }) {
       </div>
     </div>
   );
-});
-const TRow = React.memo(function TRow({ t, done, onToggle, onDelete, showAuthor }) {
+}
+function TRow({ t, done, onToggle, onDelete, showAuthor }) {
   const pMeta=PRIO[t.priority]||PRIO["보통"];
   return (
     <div style={{ padding:"13px 16px", display:"flex", alignItems:"center", gap:12 }}>
@@ -2329,7 +2329,7 @@ const TRow = React.memo(function TRow({ t, done, onToggle, onDelete, showAuthor 
         color:T.l4, fontSize:17, cursor:"pointer", padding:"0 2px", fontFamily:F }}>✕</button>
     </div>
   );
-});
+}
 
 // --- AI Chat Sheet ---
 
