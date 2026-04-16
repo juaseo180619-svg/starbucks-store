@@ -281,7 +281,7 @@ const getDayType = (dateStr, dow) => {
 const FOOD_SUB_KEYWORDS = {
   "케이크":   ["케이크","롤케익","롤케이크","파운드","치즈케이크","치즈케익","타르트"],
   "샌드위치": ["샌드위치","샌드","랩","버거","베이글","바게트","치아바타"],
-  "빵/페이스트리": ["파이","크루아상","스콘","머핀","빵","롤","번","크림빵","소시지빵","도넛","바나나","마들렌","휘낭시에","카스텔라","부쉐","크로플"],
+  "상온빵":   ["파이","크루아상","스콘","머핀","빵","롤","번","크림빵","소시지빵","도넛","바나나","마들렌","휘낭시에","카스텔라","부쉐","크로플"],
   "디저트":   ["마카롱","쿠키","브라우니","트뤼플","와플","아이스크림","요거트","푸딩"],
   "간편식":   ["샐러드","수프","죽","라면","삼각","주먹밥"],
 };
@@ -665,6 +665,7 @@ function App() {
   const [manualItems,   setManualItems]   = useState(() => LS.get("manualItems", ["우유","저지방우유","두유","오트유","바닐라크림베이스","딸기베이스","유자베이스"]));
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
   const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {}));
+  const [foodSubOverrides, setFoodSubOverrides] = useState(() => LS.get("foodSubOverrides", {}));
   const [uploadSummary, setUploadSummary] = useState(null); // 업로드 직후 변화 요약 토스트
 
   // ── 초기 Firebase 데이터 로드 ──
@@ -682,7 +683,7 @@ function App() {
         if (cfg) {
           if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
           if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
-
+          if (cfg.foodSubOverrides) { setFoodSubOverrides(cfg.foodSubOverrides); LS.set("foodSubOverrides", cfg.foodSubOverrides); }
         }
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
         if (hist !== null && hist.length > 0) {
@@ -797,6 +798,13 @@ function App() {
     if (storeId && window.db) {
       await DB.saveConfig(storeId, { manualItems, skuAliases: v });
       log("update", "config", `SKU 별칭 설정 변경`);
+    }
+  };
+  const saveFoodSubOverrides = async (v) => {
+    setFoodSubOverrides(v); LS.set("foodSubOverrides", v);
+    if (storeId && window.db) {
+      await DB.saveConfig(storeId, { foodSubOverrides: v });
+      log("update", "config", `푸드 서브카테고리 수동 지정 변경`);
     }
   };
   const saveManualRecords = async (v) => {
@@ -1147,6 +1155,8 @@ function App() {
             uploadHistory={uploadHistory}
             bevHistory={bevHistory}
             skuAliases={skuAliases}
+            foodSubOverrides={foodSubOverrides}
+            onSaveFoodSubOverrides={saveFoodSubOverrides}
           />
         )}
       </div>
@@ -1317,7 +1327,7 @@ function EmptyState({ emoji, text, sub }) {
 }
 
 /* ─── 대시보드 ───────────────────────────────────── */
-const DashboardTab = React.memo(function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, setTab, skuAliases }) {
+function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems, setTab, skuAliases }) {
   const today = todayStr();
   const dow = getDow(today);
   const [expandedAlert, setExpandedAlert] = useState(null); // "today" | "tmr" | "zero" | null
@@ -1794,10 +1804,10 @@ const DashboardTab = React.memo(function DashboardTab({ latestUpload, uploadHist
       </div>
     </div>
   );
-});
+}
 
 /* ─── 실사 업로드 탭 ─────────────────────────────── */
-const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
+function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
   const [uploadMode, setUploadMode] = useState("inventory"); // "inventory" | "bev"
   const [dragging, setDragging] = useState(false);
   const [pending,  setPending]  = useState([]);
@@ -2220,10 +2230,10 @@ const UploadTab = React.memo(function UploadTab({ uploadHistory, onSave, bevHist
     )}
     </>
   );
-});
+}
 
 /* ─── 파일 카드 (업로드 대기) ─────────────────────── */
-const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle, saving }) {
+function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onToggle, saving }) {
   const [catFilter, setCatFilter] = useState("전체");
   const cats = ["전체", ...new Set(Object.values(item.data.items).map(i=>i.cat))];
   const filteredItems = Object.values(item.data.items).filter(i =>
@@ -2321,7 +2331,7 @@ const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, 
       </div>
     </div>
   );
-});
+}
 
 /* ─── 발주 추천 탭 ───────────────────────────────── */
 /* ─── 버퍼 입력 셀: 독립 로컬 state로 stale closure 완전 제거 ─── */
@@ -2329,7 +2339,7 @@ const PendingFileCard = React.memo(function PendingFileCard({ item, skuAliases, 
 
 
 /* ─── 음료 통계 뷰 ────────────────────────────────── */
-const BevStatView = React.memo(function BevStatView({ bevHistory, onSwitchMode }) {
+function BevStatView({ bevHistory, onSwitchMode }) {
   const DOW   = ["일","월","화","수","목","금","토"];
   const rnd   = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
   const today = new Date().toISOString().slice(0,10);
@@ -2999,10 +3009,11 @@ const BevStatView = React.memo(function BevStatView({ bevHistory, onSwitchMode }
       )}
     </div>
   );
-});
+}
 
 
-const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[], skuAliases }) {
+function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides={}, onSaveFoodSubOverrides }) {
+  const getResolvedFoodSub = (sku, name) => foodSubOverrides[sku] || getFoodSub(name);
   const [statMode, setStatMode] = React.useState("inventory"); // "inventory" | "bev"
   const DOW = ["일","월","화","수","목","금","토"];
   const rnd = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
@@ -3039,6 +3050,11 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
   const [customTo,   setCustomTo]   = React.useState("");
   const [showCustom, setShowCustom] = React.useState(false);
   const [catFilter,  setCatFilter]  = React.useState("전체");
+  const [foodSubFilter, setFoodSubFilter] = React.useState("전체");
+  // Food가 선택되지 않으면 서브필터 자동 해제
+  React.useEffect(() => {
+    if (catFilter !== "[20] Food" && foodSubFilter !== "전체") setFoodSubFilter("전체");
+  }, [catFilter]);
   const [viewMode,   setViewMode]   = React.useState("overview"); // overview | heatmap | matrix | drill
   const [drillSku,   setDrillSku]   = React.useState(null);
   const [sortKey,    setSortKey]    = React.useState("totalSold");
@@ -3085,8 +3101,13 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
       Object.entries(h.items||{}).forEach(([sku,item])=>{
         if(autoSkipSet.has(`${h.date}__${sku}`)) return;
         if(catFilter!=="전체"&&item.cat!==catFilter) return;
+        // Food 서브카테고리 필터
+        if(catFilter==="[20] Food" && foodSubFilter!=="전체") {
+          const name = skuAliases[sku]||item.name;
+          if(getResolvedFoodSub(sku, name)!==foodSubFilter) return;
+        }
         if(!map[sku]) map[sku]={
-          name:skuAliases[sku]||item.name, cat:item.cat,
+          name:skuAliases[sku]||item.name, cat:item.cat, foodSub:getResolvedFoodSub(sku, skuAliases[sku]||item.name),
           days:[], soldArr:[], zeroArr:[], inArr:[], spark:[]
         };
         const s=map[sku];
@@ -3116,9 +3137,9 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
       const wdAvg=rnd(([1,2,3,4,5].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>s+v/(a.length||1),0),1)||null;
       const weAvg=rnd(([0,6].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>s+v/(a.length||1),0),1)||null;
       const weDiff=(wdAvg&&weAvg)?Math.round(((weAvg-wdAvg)/wdAvg)*100):null;
-      return {sku,name:s.name,cat:s.cat,totalSold,avgSold,zeroRate,totalIn,wasteRate,dowAvg,wdAvg,weAvg,weDiff,spark:s.spark,days:s.days.length};
+      return {sku,name:s.name,cat:s.cat,foodSub:s.foodSub,totalSold,avgSold,zeroRate,totalIn,wasteRate,dowAvg,wdAvg,weAvg,weDiff,spark:s.spark,days:s.days.length};
     });
-  }, [periodHist, catFilter, autoSkipSet, skuAliases]);
+  }, [periodHist, catFilter, foodSubFilter, autoSkipSet, skuAliases, foodSubOverrides]);
 
   // ── 기간 KPI ──
   const kpi = React.useMemo(()=>{
@@ -3146,13 +3167,22 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
   const tableData=React.useMemo(()=>{
     let rows=[...skuStats];
     if(debouncedSearch) rows=rows.filter(s=>(s.name||"").toLowerCase().includes(debouncedSearch.toLowerCase()));
-    // 기본 정렬: 카테고리 그룹(Bev→Food→원재료) → totalSold 내림차순
+    // Food 서브카테고리 그룹 정렬 순서
+    const foodSubOrder = ["샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"];
+    // 기본 정렬: 카테고리 그룹(Bev→Food→원재료) → (Food 안에서는 서브카테고리 그룹) → totalSold 내림차순
     if(sortKey==="totalSold"&&!sortAsc) {
       const catOrder=["[10] Bev","[20] Food","[50] 원재료"];
       rows.sort((a,b)=>{
         const ci=catOrder.indexOf(a.cat), cj=catOrder.indexOf(b.cat);
         const co=(ci===-1?99:ci)-(cj===-1?99:cj);
         if(co!==0) return co;
+        // Food이고 서브필터가 "전체"일 때 서브카테고리별로 그룹
+        if(a.cat==="[20] Food" && b.cat==="[20] Food") {
+          const si=foodSubOrder.indexOf(a.foodSub||"기타 푸드");
+          const sj=foodSubOrder.indexOf(b.foodSub||"기타 푸드");
+          const so=(si===-1?99:si)-(sj===-1?99:sj);
+          if(so!==0) return so;
+        }
         return (b.totalSold??0)-(a.totalSold??0);
       });
     } else {
@@ -3363,20 +3393,77 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
   };
 
   // ── 품목 드릴다운 ──
+  const [editingFoodSub, setEditingFoodSub] = React.useState(false);
   const DrillView=()=>{
     const stat=skuStats.find(s=>s.sku===drillSku);
     if(!stat) return null;
     const sparkData=stat.spark.slice(-21);
     const maxSpark=Math.max(...sparkData.map(d=>d.sold),1);
+    const isFood=stat.cat==="[20] Food";
+    const autoSub=getFoodSub(skuAliases[stat.sku]||stat.name);
+    const currentSub=stat.foodSub||"기타 푸드";
+    const isOverridden=!!foodSubOverrides[stat.sku];
     return(
       <div>
-        <button onClick={()=>setViewMode("overview")} style={{
+        <button onClick={()=>{setViewMode("overview");setEditingFoodSub(false);}} style={{
           fontSize:12,color:T.brand,background:T.brandDim,border:"1px solid "+T.brandBorder,
           borderRadius:8,padding:"5px 12px",cursor:"pointer",fontFamily:F,marginBottom:14}}>
           ← 목록으로
         </button>
         <div style={{fontSize:16,fontWeight:800,color:T.t1,fontFamily:F,marginBottom:4}}>{stat.name}</div>
-        <div style={{fontSize:12,color:T.t3,fontFamily:F,marginBottom:14}}>{stat.cat} · {rangeFrom} ~ {rangeTo}</div>
+        <div style={{fontSize:12,color:T.t3,fontFamily:F,marginBottom:isFood?8:14}}>
+          {stat.cat} · {rangeFrom} ~ {rangeTo}
+        </div>
+        {isFood&&(
+          <div style={{marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span onClick={()=>setEditingFoodSub(!editingFoodSub)}
+                style={{fontSize:12,padding:"4px 10px",borderRadius:8,cursor:"pointer",fontFamily:F,
+                  fontWeight:600,display:"inline-flex",alignItems:"center",gap:4,
+                  color:isOverridden?T.brand:T.amber,
+                  background:isOverridden?T.brandDim:T.aDim,
+                  border:"1px solid "+(isOverridden?T.brandBorder:T.amber+"33")}}>
+                🍽 {currentSub}
+                {isOverridden&&<span style={{fontSize:9,opacity:0.7}}>(수동)</span>}
+                <span style={{fontSize:10,marginLeft:2}}>{editingFoodSub?"▲":"▼"}</span>
+              </span>
+              {isOverridden&&(
+                <span onClick={()=>{
+                    const next={...foodSubOverrides}; delete next[stat.sku];
+                    onSaveFoodSubOverrides(next); setEditingFoodSub(false);
+                  }}
+                  style={{fontSize:11,color:T.t3,cursor:"pointer",textDecoration:"underline"}}>
+                  자동 분류로 되돌리기
+                </span>
+              )}
+            </div>
+            {editingFoodSub&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                {["샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"].map(sub=>{
+                  const isActive=currentSub===sub;
+                  const isAutoMatch=autoSub===sub;
+                  return(
+                    <span key={sub} onClick={()=>{
+                        const next={...foodSubOverrides};
+                        if(isAutoMatch){ delete next[stat.sku]; }
+                        else{ next[stat.sku]=sub; }
+                        onSaveFoodSubOverrides(next);
+                        setEditingFoodSub(false);
+                      }}
+                      style={{fontSize:12,padding:"5px 12px",borderRadius:8,cursor:"pointer",
+                        fontFamily:F,fontWeight:isActive?700:400,
+                        color:isActive?"#fff":T.t2,
+                        background:isActive?T.brand:T.card,
+                        border:"1px solid "+(isActive?T.brand:T.b1)}}>
+                      {sub}{isAutoMatch&&!isOverridden?" ✓":""}
+                      {isAutoMatch&&isOverridden?<span style={{fontSize:9,marginLeft:3,opacity:0.6}}>(자동)</span>:""}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {/* KPI */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
           {[
@@ -3550,6 +3637,23 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
         </div>
       </div>
 
+      {/* Food 서브카테고리 필터 */}
+      {catFilter==="[20] Food" && (
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12,alignItems:"center",
+          padding:"8px 12px",borderRadius:10,background:T.card2,border:"1px solid "+T.b0}}>
+          <span style={{fontSize:11,color:T.t3,fontFamily:F,fontWeight:600,marginRight:6}}>🍽 Food 세부</span>
+          {["전체","샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"].map(s=>(
+            <button key={s} onClick={()=>setFoodSubFilter(s)} style={{
+              padding:"4px 10px",borderRadius:14,cursor:"pointer",fontFamily:F,fontSize:11,
+              border:"1px solid "+(foodSubFilter===s?T.amber:T.b1),
+              background:foodSubFilter===s?T.aDim:T.card,
+              color:foodSubFilter===s?T.amber:T.t2,fontWeight:foodSubFilter===s?700:400}}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
       {showCustom&&(
         <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:12,color:T.t3,fontFamily:F}}>기간</span>
@@ -3690,6 +3794,10 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
               const m={};
               hist.forEach(h=>Object.entries(h.items||{}).forEach(([sku,item])=>{
                 if(catFilter!=="전체"&&item.cat!==catFilter) return;
+                if(catFilter==="[20] Food" && foodSubFilter!=="전체") {
+                  const name = skuAliases[sku]||item.name;
+                  if(getResolvedFoodSub(sku, name)!==foodSubFilter) return;
+                }
                 if(!m[sku]) m[sku]={name:skuAliases[sku]||item.name,cat:item.cat,sold:0,days:0};
                 m[sku].sold+=(item.sold||0); m[sku].days++;
               }));
@@ -3819,8 +3927,8 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
                     const DOW_NAMES=["일","월","화","수","목","금","토"];
                     downloadCSV(
                       `재고통계_${rangeFrom}~${rangeTo}.csv`,
-                      ["품목","카테고리","총판매","일평균","결품률(%)","폐기율(%)","월평균","화평균","수평균","목평균","금평균","토평균","일평균"],
-                      tableData.map(s=>[s.name,s.cat,s.totalSold,s.avgSold,s.zeroRate,s.wasteRate??0,
+                      ["품목","카테고리","서브카테고리","총판매","일평균","결품률(%)","폐기율(%)","월평균","화평균","수평균","목평균","금평균","토평균","일평균"],
+                      tableData.map(s=>[s.name,s.cat,s.cat==="[20] Food"?(s.foodSub||"기타 푸드"):"",s.totalSold,s.avgSold,s.zeroRate,s.wasteRate??0,
                         ...[1,2,3,4,5,6,0].map(d=>s.dowAvg[d]??0)])
                     );
                   }} style={{fontSize:11,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.b1,
@@ -3852,6 +3960,10 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
                       const wasteColor=s.wasteRate!==null&&s.wasteRate>8?T.amber:T.t3;
                       const showCatHeader=sortKey==="totalSold"&&!sortAsc&&catFilter==="전체"&&(i===0||tableData[i-1].cat!==s.cat);
                       const catLabel=s.cat.replace("[10] ","").replace("[20] ","").replace("[50] ","");
+                      // Food 서브카테고리 그룹 헤더 (Food 필터 or 전체 + 서브필터가 "전체" + Food항목일 때)
+                      const isInFoodSection = s.cat==="[20] Food" && (catFilter==="[20] Food" || catFilter==="전체");
+                      const showSubHeader = sortKey==="totalSold" && !sortAsc && isInFoodSection && foodSubFilter==="전체" &&
+                        (i===0 || tableData[i-1].cat!==s.cat || tableData[i-1].foodSub!==s.foodSub);
                       return(
                         <React.Fragment key={s.sku}>
                           {showCatHeader&&(
@@ -3862,6 +3974,24 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
                                 borderTop:i===0?"none":"2px solid "+T.brandBorder,
                                 letterSpacing:0.5}}>
                                 {catLabel}
+                              </td>
+                            </tr>
+                          )}
+                          {showSubHeader&&!showCatHeader&&(
+                            <tr>
+                              <td colSpan="10" style={{padding:"4px 14px 2px",
+                                fontSize:10,fontWeight:700,color:T.amber,fontFamily:F,
+                                background:T.aDim,letterSpacing:0.3}}>
+                                🍽 {s.foodSub||"기타 푸드"}
+                              </td>
+                            </tr>
+                          )}
+                          {showSubHeader&&showCatHeader&&(
+                            <tr>
+                              <td colSpan="10" style={{padding:"4px 14px 2px",
+                                fontSize:10,fontWeight:700,color:T.amber,fontFamily:F,
+                                background:T.aDim,letterSpacing:0.3}}>
+                                🍽 {s.foodSub||"기타 푸드"}
                               </td>
                             </tr>
                           )}
@@ -3925,7 +4055,7 @@ const HistoryTab = React.memo(function HistoryTab({ uploadHistory, bevHistory=[]
       )}
     </div>
   );
-});
+}
 
 
 
