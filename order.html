@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="발주"/>
   <meta name="theme-color" content="#00704A"/>
-  <title>재고 통계</title>
+  <title>판매 통계</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
@@ -323,75 +323,52 @@ function extractDateFromFilename(filename) {
 }
 
 /* ─── Excel Parsing ──────────────────────────────── */
-function parseInventoryExcel(arrayBuffer, dateOverride) {
-  const wb = XLSX.read(arrayBuffer, { type:"array", cellDates:true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+/* 비상품 분류코드 프리픽스 (포크, 물티슈, 데움 등) */
+const FOOD_EXCLUDE_PREFIX = ['6001','6002','9900'];
 
-  // 헤더 2행, 데이터 3행부터
+function parseSalesExcel(arrayBuffer, dateOverride) {
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type:"array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+
+  let curCatCode = null;
   const items = {};
   const dateStr = dateOverride || todayStr();
 
-  for (let i = 2; i < raw.length; i++) {
-    const row = raw[i];
-    if (!row[2]) continue; // SKU명 없으면 skip
-    const sku   = String(row[1] || "").trim();
-    const name  = String(row[2] || "").trim();
-    const cat   = String(row[3] || "").trim();
-    const unit  = String(row[4] || "EA").trim();
-    const actual = parseFloat(row[7]) || 0;
-    const actualSum = parseFloat(row[8]) || 0;
-    const sold   = parseFloat(row[20]) || 0;
-    const tmrIn  = parseFloat(row[21]) || 0;
-    const d2In   = parseFloat(row[22]) || 0;
-    const dayIn  = parseFloat(row[14]) || 0;
+  rows.forEach(row => {
+    if (!row || row.length < 5) return;
+    const rawCode  = row[0], skuNo = row[2], skuName = row[3];
+    const qty      = parseFloat(row[4]) || 0;
+    const revenue  = parseFloat(row[5]) || 0; // 총매출
+    const discount = parseFloat(row[6]) || 0; // 할인합계
+    const sales    = parseFloat(row[7]) || 0; // 매출액
+    const netSales = parseFloat(row[8]) || 0; // 순매출
 
-    // 유통기한
-    let expDate = null;
-    let dday = null;
-    if (row[11] && row[11] instanceof Date) {
-      expDate = row[11].toISOString().slice(0,10);
-    } else if (row[11] && typeof row[11] === "string") {
-      expDate = row[11].slice(0,10);
+    // 카테고리 행 감지
+    if (rawCode && String(rawCode) !== "분류코드" && String(rawCode) !== "합 계") {
+      curCatCode = String(rawCode);
     }
-    // D-day 파싱: "D-day"=0, "D-3"=3(3일 남음), "D+2"=-2(2일 지남), 숫자만=그대로
-    const ddayRaw = String(row[10] || "").trim();
-    if (ddayRaw) {
-      if (ddayRaw === "D-day" || ddayRaw === "D-0") {
-        dday = 0;
-      } else {
-        const mMinus = ddayRaw.match(/D-(\d+)/);
-        const mPlus  = ddayRaw.match(/D\+(\d+)/);
-        if (mMinus) {
-          dday = parseInt(mMinus[1]); // D-3 → 3 (3일 남음)
-        } else if (mPlus) {
-          dday = -parseInt(mPlus[1]); // D+2 → -2 (2일 지남, 이미 만료)
-        } else {
-          const num = ddayRaw.match(/(-?\d+)/);
-          dday = num ? parseInt(num[1]) : null;
-        }
-      }
-    }
+    // 소계/합계/헤더 행 제외
+    if (!skuNo || !skuName) return;
+    const nameStr = String(skuName).trim();
+    if (nameStr.includes("소") && nameStr.includes("계")) return;
+    if (nameStr === "SKU명") return;
+    // 비상품 카테고리 제외
+    if (curCatCode && FOOD_EXCLUDE_PREFIX.some(p => curCatCode.startsWith(p))) return;
 
-    if (!items[sku]) {
-      items[sku] = {
-        sku, name, cat, unit,
-        batches: [],
-        actualSum: 0,
-        sold: 0,
-        tmrIn: 0,
-        d2In: 0,
-        dayIn: 0,
-      };
-    }
-    items[sku].batches.push({ actual, expDate, dday: dday });
-    // actualSum은 마지막 행 기준 (같은 값 반복됨)
-    items[sku].actualSum = actualSum || items[sku].actualSum || actual;
-    items[sku].sold = sold || items[sku].sold;
-    items[sku].tmrIn = tmrIn || items[sku].tmrIn;
-    items[sku].d2In = d2In || items[sku].d2In;
-    items[sku].dayIn = dayIn || items[sku].dayIn;
-  }
+    const key = String(skuNo).trim();
+    if (!key) return;
+
+    items[key] = {
+      name: nameStr,
+      cat: "[20] Food", // 판매 데이터는 모두 Food
+      qty,
+      revenue: Math.round(revenue),
+      discount: Math.round(Math.abs(discount)),
+      sales: Math.round(sales),
+      netSales: Math.round(netSales),
+    };
+  });
 
   return { date: dateStr, dow: getDow(dateStr), items };
 }
@@ -519,7 +496,7 @@ function useActivityLog(storeId, limitCount = 50) {
 }
 
 const ACTION_ICON = { create:"✏️", update:"📝", delete:"🗑️", complete:"✅", upload:"📁", read:"👁️" };
-const TARGET_LABEL = { notice:"공지", event:"일정", task:"할일", memo:"메모", roleTask:"팀업무", profile:"프로필", inventory:"실사", beverage:"음료", config:"설정" };
+const TARGET_LABEL = { notice:"공지", event:"일정", task:"할일", memo:"메모", roleTask:"팀업무", profile:"프로필", inventory:"판매", beverage:"음료", config:"설정" };
 
 function BottomSheet({ title, onClose, children, noPadding }) {
   return (
@@ -666,6 +643,7 @@ function App() {
   const [manualRecords, setManualRecords] = useState(() => LS.get("manualRecords", []));
   const [skuAliases,    setSkuAliases]    = useState(() => LS.get("skuAliases", {}));
   const [foodSubOverrides, setFoodSubOverrides] = useState(() => LS.get("foodSubOverrides", {}));
+  const [foodSubConfig, setFoodSubConfig] = useState(() => LS.get("foodSubConfig", null)); // null = 기본값 사용
   const [uploadSummary, setUploadSummary] = useState(null); // 업로드 직후 변화 요약 토스트
 
   // ── 초기 Firebase 데이터 로드 ──
@@ -684,6 +662,7 @@ function App() {
           if (cfg.manualItems)  { setManualItems(cfg.manualItems);  LS.set("manualItems", cfg.manualItems); }
           if (cfg.skuAliases)   { setSkuAliases(cfg.skuAliases);   LS.set("skuAliases", cfg.skuAliases); }
           if (cfg.foodSubOverrides) { setFoodSubOverrides(cfg.foodSubOverrides); LS.set("foodSubOverrides", cfg.foodSubOverrides); }
+          if (cfg.foodSubConfig) { setFoodSubConfig(cfg.foodSubConfig); LS.set("foodSubConfig", cfg.foodSubConfig); }
         }
         if (recs !== null) { setManualRecords(recs); LS.set("manualRecords", recs); }
         if (hist !== null && hist.length > 0) {
@@ -734,11 +713,10 @@ function App() {
       if (prev) {
         let newZero = 0, newExpiry = 0, newSold = 0;
         Object.entries(newEntry.items||{}).forEach(([,i]) => {
-          if (i.actualSum === 0) newZero++;
-          if ((i.batches||[]).some(b => b.dday !== null && b.dday <= 3 && b.actual > 0)) newExpiry++;
-          newSold += (i.sold || 0);
+          if ((i.qty||0) === 0) newZero++;
+          newSold += (i.qty || 0);
         });
-        const prevZero = Object.entries(prev.items||{}).filter(([,i]) => i.actualSum === 0).length;
+        const prevZero = Object.entries(prev.items||{}).filter(([,i]) => (i.qty||0) === 0).length;
         setUploadSummary({
           date: newEntry.date,
           zeroCount: newZero,
@@ -760,7 +738,7 @@ function App() {
         } else {
           showToast("데이터가 저장되었습니다.", "success");
         }
-        log("upload", "inventory", `${newEntry.date} 실사 데이터 업로드 (${Object.keys(newEntry.items||{}).length}개 SKU)`);
+        log("upload", "sales", `${newEntry.date} 판매 데이터 업로드 (${Object.keys(newEntry.items||{}).length}개 SKU)`);
       } catch(e) {
         setSyncStatus("error");
         showToast("저장 중 오류: "+e.message, "error");
@@ -778,11 +756,11 @@ function App() {
         } else {
           showToast("데이터가 삭제되었습니다.", "success");
         }
-        log("delete", "inventory", `${id} 실사 데이터 삭제`);
+        log("delete", "sales", `${id} 판매 데이터 삭제`);
       } catch(e) {
         setSyncStatus("error");
         showToast("삭제 중 오류: "+e.message, "error");
-        log("delete_error", "inventory", `${id} 삭제 실패`);
+        log("delete_error", "sales", `${id} 삭제 실패`);
       }
     }
   };
@@ -805,6 +783,13 @@ function App() {
     if (storeId && window.db) {
       await DB.saveConfig(storeId, { foodSubOverrides: v });
       log("update", "config", `푸드 서브카테고리 수동 지정 변경`);
+    }
+  };
+  const saveFoodSubConfig = async (v) => {
+    setFoodSubConfig(v); LS.set("foodSubConfig", v);
+    if (storeId && window.db) {
+      await DB.saveConfig(storeId, { foodSubConfig: v });
+      log("update", "config", `푸드 서브카테고리 설정 변경`);
     }
   };
   const saveManualRecords = async (v) => {
@@ -841,7 +826,7 @@ function App() {
 
   const tabs = [
     { id:"dashboard", icon:"🏠", label:"홈" },
-    { id:"upload",    icon:"📁", label:"실사" },
+    { id:"upload",    icon:"📁", label:"판매" },
     { id:"history",   icon:"📊", label:"통계" },
   ];
 
@@ -877,7 +862,7 @@ function App() {
               boxShadow:"0 2px 8px rgba(0,112,74,0.30)" }}>☕</div>
             <div>
               <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:1.8, textTransform:"uppercase" }}>Starbucks</div>
-              <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1.1 }}>재고 통계</div>
+              <div style={{ fontSize:14, fontWeight:800, color:T.brand, lineHeight:1.1 }}>판매 통계</div>
             </div>
           </div>
           <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
@@ -939,7 +924,7 @@ function App() {
                 boxShadow:"0 3px 10px rgba(0,112,74,0.30)" }}>☕</div>
               <div>
                 <div style={{ fontSize:10, fontWeight:700, color:T.t3, letterSpacing:2, textTransform:"uppercase" }}>Starbucks</div>
-                <div style={{ fontSize:14, fontWeight:800, color:T.brand }}>재고 통계</div>
+                <div style={{ fontSize:14, fontWeight:800, color:T.brand }}>판매 통계</div>
               </div>
             </div>
           </div>
@@ -1157,6 +1142,8 @@ function App() {
             skuAliases={skuAliases}
             foodSubOverrides={foodSubOverrides}
             onSaveFoodSubOverrides={saveFoodSubOverrides}
+            foodSubConfig={foodSubConfig}
+            onSaveFoodSubConfig={saveFoodSubConfig}
           />
         )}
       </div>
@@ -1202,7 +1189,7 @@ function App() {
             <div style={{ padding:"40px 20px", textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:8 }}>📭</div>
               <div style={{ fontSize:14, fontWeight:600, color:T.t2, fontFamily:F }}>아직 활동 기록이 없어요</div>
-              <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>실사 업로드, 데이터 삭제 등의 활동이 여기 기록돼요</div>
+              <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>판매 데이터 업로드, 삭제 등의 활동이 여기 기록돼요</div>
             </div>
           ) : activityLogs.map((lg, i, arr) => {
             const icon = ACTION_ICON[lg.action] || "📝";
@@ -1332,14 +1319,8 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   const dow = getDow(today);
   const [expandedAlert, setExpandedAlert] = useState(null); // "today" | "tmr" | "zero" | null
 
-  // 유통기한 임박 항목 (D-3 이하)
-  const expiring = useMemo(() => {
-    if (!latestUpload) return [];
-    return Object.values(latestUpload.items||{})
-      .flatMap(item => item.batches.map(b => ({ ...item, ...b })))
-      .filter(b => b.dday !== null && b.dday !== undefined && b.dday <= 3 && b.actual > 0)
-      .sort((a,b) => (a.dday||99) - (b.dday||99));
-  }, [latestUpload]);
+  // 판매 데이터에는 유통기한 정보 없음 — expiring은 항상 빈 배열
+  const expiring = [];
 
   // ── 발주 추천 엔진 ──
   // 폐기율 = (입고 - 판매) / 입고 → 버퍼 = 1 / (1 - 목표폐기율)
@@ -1368,7 +1349,7 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
         if (!skuDowMap[sku]) skuDowMap[sku] = { name:item.name, cat:item.cat, dows:{} };
         const dow = h.dow ?? new Date(h.date+"T00:00:00").getDay();
         if (!skuDowMap[sku].dows[dow]) skuDowMap[sku].dows[dow] = [];
-        skuDowMap[sku].dows[dow].push(item.sold || 0);
+        skuDowMap[sku].dows[dow].push(item.qty || 0);
       });
     });
 
@@ -1390,19 +1371,16 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       const predicted2d = pred1 + pred2;        // 도착까지 2일 총 소모량
 
       const buffered = Math.ceil(predicted2d * orderBuffer);
-      const current = item.actualSum || 0;
-      const recommend = Math.max(0, buffered - current);
       const dispName = (skuAliases||{})[sku] || item.name;
 
       if (predicted2d > 0) {
         results.push({
           sku, name:dispName, cat:item.cat,
-          current,
           pred1:Math.round(pred1*10)/10,
           pred2:Math.round(pred2*10)/10,
           predicted2d:Math.round(predicted2d*10)/10,
-          buffered, recommend,
-          urgency: current === 0 ? 2 : (recommend > 0 ? 1 : 0)
+          buffered, recommend:buffered,
+          urgency: buffered >= 5 ? 2 : (buffered >= 2 ? 1 : 0)
         });
       }
     });
@@ -1423,8 +1401,12 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 
   // 총 SKU 수
   const totalSku = latestUpload ? Object.keys(latestUpload.items||{}).length : 0;
-  // 재고 0인 SKU
-  const zeroStock = latestUpload ? Object.values(latestUpload.items||{}).filter(i=>i.actualSum===0).length : 0;
+  // 판매 0건 SKU (해당일 판매 없는 품목)
+  const zeroStock = latestUpload ? Object.values(latestUpload.items||{}).filter(i=>(i.qty||0)===0).length : 0;
+  // 당일 총 판매수량
+  const totalQtyDay = latestUpload ? Math.round(Object.values(latestUpload.items||{}).reduce((s,i)=>s+(i.qty||0),0)) : 0;
+  // 당일 총 매출
+  const totalSalesDay = latestUpload ? Math.round(Object.values(latestUpload.items||{}).reduce((s,i)=>s+(i.sales||0),0)) : 0;
 
   return (
     <div style={{ padding:window.innerWidth>=768?"24px 28px":"14px" }} className="fi">
@@ -1448,9 +1430,9 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
             {[
               { v:totalSku, l:"총 SKU" },
-              { v:expiring.length, l:"유통임박" },
-              { v:zeroStock, l:"재고없음" },
-              { v:needOrderCount, l:"발주필요" },
+              { v:totalQtyDay, l:"판매수량" },
+              { v:totalSalesDay.toLocaleString(), l:"매출(원)" },
+              { v:needOrderCount, l:"발주참고" },
             ].map(s => (
               <div key={s.l} style={{
                 background:"rgba(255,255,255,0.14)", borderRadius:12,
@@ -1486,13 +1468,7 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 
       {/* ── 긴급 경고 배너 (클릭 시 상세 목록 펼침) ── */}
       {latestUpload && (()=>{
-        const ddayToday = expiring.filter(e=>e.dday===0);
-        const ddayTmr   = expiring.filter(e=>e.dday===1);
-        const zeroItems = Object.values(latestUpload.items||{}).filter(i=>i.actualSum===0);
         const alerts = [];
-        if (ddayToday.length > 0) alerts.push({ id:"today", icon:"🚨", msg:`오늘 만료 ${ddayToday.length}개 — 즉시 확인 필요`, color:T.red, dim:"rgba(255,59,48,0.08)", border:"rgba(255,59,48,0.20)", items:ddayToday });
-        if (ddayTmr.length > 0) alerts.push({ id:"tmr", icon:"⚠️", msg:`내일 만료 ${ddayTmr.length}개 — 금일 중 소진 권장`, color:T.amber, dim:"rgba(255,149,0,0.08)", border:"rgba(255,149,0,0.20)", items:ddayTmr });
-        if (zeroItems.length >= 3) alerts.push({ id:"zero", icon:"📦", msg:`재고 없음 ${zeroItems.length}개 — 발주 확인`, color:"#007AFF", dim:"rgba(0,122,255,0.08)", border:"rgba(0,122,255,0.20)", items:zeroItems.map(i=>({name:i.name,sku:i.sku,cat:i.cat,actual:0})) });
         if (alerts.length === 0) return null;
         return (
           <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:6 }}>
@@ -1556,74 +1532,30 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       {/* 업로드 없음 안내 */}
       {!latestUpload && (
         <Card style={{ marginBottom:16 }}>
-          <EmptyState emoji="📁" text="실사 데이터가 없어요"
-            sub="실사 탭에서 엑셀 파일을 업로드해보세요"/>
+          <EmptyState emoji="📁" text="판매 데이터가 없어요"
+            sub="판매 탭에서 일일 판매 엑셀을 업로드해보세요"/>
           <div style={{ padding:"0 16px 16px" }}>
-            <GreenBtn full onClick={() => setTab("upload")}>📁 실사 업로드하기</GreenBtn>
+            <GreenBtn full onClick={() => setTab("upload")}>📁 판매 데이터 업로드</GreenBtn>
           </div>
         </Card>
       )}
 
 
-            {/* 유통기한 임박 */}
-      {expiring.length > 0 && (
-        <div style={{ marginBottom:16 }}>
-          <SH title="⚠ 유통기한 임박" sub={expiring.length+"개"}/>
-          <Card>
-            {expiring.slice(0,6).map((item, i, arr) => {
-              const dday = item.dday;
-              const color = dday === 0 ? T.red : dday <= 1 ? T.red : dday <= 3 ? T.amber : T.t3;
-              const dim   = dday === 0 ? T.rDim : dday <= 1 ? T.rDim : T.aDim;
-              const dispNm   = (skuAliases||{})[item.sku] || item.name;
-              const dispName = (skuAliases||{})[item.sku] || item.name;
-              return (
-                <div key={item.sku+"_"+i} style={{
-                  padding:"12px 16px", display:"flex", alignItems:"center", gap:12,
-                  borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
-                  <div style={{ width:40, height:40, borderRadius:10, background:dim,
-                    display:"flex", flexDirection:"column", alignItems:"center",
-                    justifyContent:"center", flexShrink:0 }}>
-                    <div style={{ fontSize:13, fontWeight:900, color, lineHeight:1 }}>
-                      {dday === 0 ? "D-day" : "D-"+dday}
-                    </div>
-                    <button onClick={()=>setTab("history")} style={{
-                      fontSize:10, color:T.brand, background:T.brandDim,
-                      border:"1px solid "+T.brandBorder, borderRadius:6,
-                      padding:"2px 8px", cursor:"pointer", fontFamily:F, flexShrink:0 }}>
-                      통계 →
-                    </button>
-                  </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:14, fontWeight:600, color:T.t1, fontFamily:F,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {dispName}
-                    </div>
-                    <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
-                      재고 {item.actual}개 · {item.expDate ? fmtDate(item.expDate) + " 만료" : ""}
-                    </div>
-                  </div>
-                  <Pill label={dday===0?"오늘마감":dday<=1?"내일마감":"D-"+dday}
-                    color={color} dim={dim}/>
-                </div>
-              );
-            })}
-          </Card>
-        </div>
-      )}
+            {/* 유통기한 — 판매 데이터에는 유통기한 정보 없으므로 비활성 */}
 
       {/* ── 발주 추천 ── */}
       {latestUpload && orderRecommend.length > 0 && (
         <div style={{ marginBottom:16 }}>
-          <SH title="📋 발주 추천"
+          <SH title="📋 수요 예측"
             sub={needOrderCount+"개 품목"}
             action={
               <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                 <button onClick={()=>{
                   const needs = orderRecommend.filter(r=>r.recommend>0);
                   downloadCSV(
-                    `발주추천_${orderDate}.csv`,
-                    ["품목","카테고리","현재재고",day1Label+"예상",day2Label+"예상","2일합계","추천발주량"],
-                    needs.map(r=>[r.name,r.cat,r.current,r.pred1,r.pred2,r.predicted2d,r.recommend])
+                    `수요예측_${orderDate}.csv`,
+                    ["품목","카테고리",day1Label+"예상",day2Label+"예상","2일합계","발주참고량"],
+                    needs.map(r=>[r.name,r.cat,r.pred1,r.pred2,r.predicted2d,r.recommend])
                   );
                 }} style={{
                   padding:"5px 10px", borderRadius:8, border:"1px solid "+T.b1,
@@ -1681,9 +1613,9 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 
           <Card>
             {/* 헤더 */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 46px 46px 46px 64px",
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 52px 52px 52px 64px",
               padding:"8px 14px", background:T.card2, gap:2 }}>
-              {["품목","재고",day1Label,day2Label,"추천량"].map(h=>(
+              {["품목",day1Label,day2Label,"2일합계","참고량"].map(h=>(
                 <div key={h} style={{ fontSize:10, fontWeight:600, color:T.t3, fontFamily:F,
                   textAlign:h==="품목"?"left":"center" }}>{h}</div>
               ))}
@@ -1691,10 +1623,10 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
             {/* 목록 */}
             {(showAllOrders ? orderRecommend.filter(r=>r.recommend>0) : orderRecommend.filter(r=>r.recommend>0).slice(0,8))
               .map((r, i, arr) => {
-              const urgColor = r.current===0 ? T.red : r.recommend>=r.predicted2d ? T.amber : T.brand;
+              const urgColor = r.recommend >= 5 ? T.red : r.recommend >= 3 ? T.amber : T.brand;
               return (
                 <div key={r.sku} style={{
-                  display:"grid", gridTemplateColumns:"1fr 46px 46px 46px 64px",
+                  display:"grid", gridTemplateColumns:"1fr 52px 52px 52px 64px",
                   padding:"10px 14px", gap:2, alignItems:"center",
                   borderBottom:i<arr.length-1?"1px solid "+T.b0:"none" }}>
                   <div style={{ minWidth:0 }}>
@@ -1702,10 +1634,9 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.name}</div>
                     <div style={{ fontSize:10, color:T.t3, fontFamily:F }}>{r.cat}</div>
                   </div>
-                  <div style={{ textAlign:"center", fontSize:13, fontWeight:600, fontFamily:F,
-                    color:r.current===0?T.red:T.t2 }}>{r.current}</div>
                   <div style={{ textAlign:"center", fontSize:11, color:T.t3, fontFamily:F }}>{r.pred1}</div>
                   <div style={{ textAlign:"center", fontSize:11, color:T.t3, fontFamily:F }}>{r.pred2}</div>
+                  <div style={{ textAlign:"center", fontSize:11, color:T.t2, fontFamily:F, fontWeight:600 }}>{r.predicted2d}</div>
                   <div style={{ textAlign:"center" }}>
                     <span style={{ fontSize:14, fontWeight:800, color:urgColor, fontFamily:F,
                       background:urgColor+"15", padding:"3px 10px", borderRadius:8 }}>
@@ -1717,7 +1648,7 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
             })}
             {orderRecommend.filter(r=>r.recommend>0).length === 0 && (
               <div style={{ padding:20, textAlign:"center", fontSize:13, color:T.t3, fontFamily:F }}>
-                현재 재고로 충분해요 👍
+                판매 데이터가 부족해요 📊
               </div>
             )}
             {/* 더보기 / 접기 */}
@@ -1735,7 +1666,7 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
 
           {/* 안내 문구 */}
           <div style={{ fontSize:10, color:T.t4, fontFamily:F, marginTop:6, lineHeight:1.5 }}>
-            * {isOrderToday?"오늘":orderDate.slice(5).replace("-","/")} 발주 → {isOrderToday?"모레":DOW_KR[orderDay2Dow]+"요일"} 도착 · {DOW_KR[orderDay1Dow]}+{DOW_KR[orderDay2Dow]} 2일 소모량 반영 · 전사 적정 폐기율 5.6% 기준 · 최근 4주 요일별 평균
+            * {isOrderToday?"오늘":orderDate.slice(5).replace("-","/")} 발주 → {isOrderToday?"모레":DOW_KR[orderDay2Dow]+"요일"} 도착 · {DOW_KR[orderDay1Dow]}+{DOW_KR[orderDay2Dow]} 2일 판매량 기반 · 버퍼 포함 · 최근 4주 요일별 평균
           </div>
         </div>
       )}
@@ -1743,17 +1674,17 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       {/* 데이터 부족 시 안내 */}
       {latestUpload && uploadHistory.length < 3 && uploadHistory.length > 0 && (
         <Card style={{ marginBottom:16, padding:"14px 16px" }}>
-          <div style={{ fontSize:13, fontWeight:600, color:T.t2, fontFamily:F }}>📋 발주 추천</div>
+          <div style={{ fontSize:13, fontWeight:600, color:T.t2, fontFamily:F }}>📋 수요 예측</div>
           <div style={{ fontSize:12, color:T.t3, fontFamily:F, marginTop:4 }}>
-            실사 데이터가 3일 이상 쌓이면 발주 추천이 시작돼요 ({uploadHistory.length}/3)
+            판매 데이터가 3일 이상 쌓이면 수요 예측이 시작돼요 ({uploadHistory.length}/3)
           </div>
         </Card>
       )}
 
-      {/* 최근 실사 요약 */}
+      {/* 최근 판매 요약 */}
       {latestUpload && (
         <div style={{ marginBottom:16 }}>
-          <SH title="최근 실사 현황" sub={fmtDate(latestUpload.date)+" ("+DOW_KR[latestUpload.dow]+"요일)"}
+          <SH title="최근 판매 현황" sub={fmtDate(latestUpload.date)+" ("+DOW_KR[latestUpload.dow]+"요일)"}
             action={
               <button onClick={() => setTab("upload")} style={{
                 padding:"5px 12px", borderRadius:8, border:"none",
@@ -1763,9 +1694,9 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
             {[
               { label:"총 품목", value:totalSku+"개", color:T.brand, dim:T.brandDim },
-              { label:"재고 없음", value:zeroStock+"개", color:T.red, dim:T.rDim },
-              { label:"내일 입고", value:Object.values(latestUpload.items||{}).filter(i=>i.tmrIn>0).length+"개", color:T.blue, dim:T.bDim },
-              { label:"당일 판매", value:Math.round(Object.values(latestUpload.items||{}).reduce((s,i)=>s+i.sold,0))+"개", color:T.amber, dim:T.aDim },
+              { label:"미판매", value:zeroStock+"개", color:T.red, dim:T.rDim },
+              { label:"당일 판매", value:totalQtyDay+"개", color:T.amber, dim:T.aDim },
+              { label:"당일 매출", value:totalSalesDay.toLocaleString()+"원", color:T.blue, dim:T.bDim },
             ].map(stat => (
               <div key={stat.label} style={{ background:stat.dim, borderRadius:14,
                 padding:"14px 16px", border:"1px solid "+stat.color+"22" }}>
@@ -1784,7 +1715,7 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
       {/* 바로가기 버튼 */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         {[
-          { icon:"📁", label:"실사 업로드", tab:"upload",  color:T.brand },
+          { icon:"📁", label:"판매 업로드", tab:"upload",  color:T.brand },
           { icon:"📊", label:"통계 보기",   tab:"history", color:"#7C3AED" },
         ].map(btn => (
           <button key={btn.tab} onClick={() => setTab(btn.tab)} style={{
@@ -1806,9 +1737,9 @@ function DashboardTab({ latestUpload, uploadHistory, manualRecords, manualItems,
   );
 }
 
-/* ─── 실사 업로드 탭 ─────────────────────────────── */
+/* ─── 업로드 탭 ──────────────────────────────────── */
 function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, onSaveAliases }) {
-  const [uploadMode, setUploadMode] = useState("inventory"); // "inventory" | "bev"
+  const [uploadMode, setUploadMode] = useState("sales"); // "sales" | "bev"
   const [dragging, setDragging] = useState(false);
   const [pending,  setPending]  = useState([]);
   const [bevPending, setBevPending] = useState([]);
@@ -1829,7 +1760,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
       try {
         const buf = await file.arrayBuffer();
         const guessDate = extractDateFromFilename(file.name);
-        const data = parseInventoryExcel(buf, guessDate);
+        const data = parseSalesExcel(buf, guessDate);
         newItems.push({ id:Date.now()+Math.random(), filename:file.name, data, customDate:guessDate, expanded:false });
       } catch(e) {
         setError('"'+file.name+'" 파싱 오류: '+e.message);
@@ -1971,7 +1902,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
       {/* ── 업로드 모드 세그먼트 컨트롤 ── */}
       <div style={{ display:"flex", background:T.card2, borderRadius:12, padding:3,
         marginBottom:16, border:"1px solid "+T.b0 }}>
-        {[["inventory","📋 재고 실사"],["bev","🧃 음료 판매"]].map(([id,label])=>(
+        {[["sales","📋 일일 판매"],["bev","🧃 음료 판매"]].map(([id,label])=>(
           <button key={id} onClick={()=>{ setUploadMode(id); setError(""); }}
             style={{ flex:1, padding:"8px 0", borderRadius:10, border:"none",
               cursor:"pointer", fontFamily:F, fontSize:13, fontWeight:uploadMode===id?700:400,
@@ -1984,11 +1915,11 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
         ))}
       </div>
 
-      {/* ── 재고 실사 업로드 ── */}
-      {uploadMode==="inventory" && (
+      {/* ── 일일 판매 데이터 업로드 ── */}
+      {uploadMode==="sales" && (
       <div>
-      <SH title="📋 재고 실사 업로드"
-        sub="실사 엑셀 파일 업로드 → 날짜 확인 → 저장"/>
+      <SH title="📋 일일 판매 데이터 업로드"
+        sub="품목별 일일판매 엑셀 업로드 → 날짜 확인 → 저장"/>
 
       {/* 드롭존 */}
       <div
@@ -2004,7 +1935,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
           onChange={e=>{ parseFiles(Array.from(e.target.files)); e.target.value=""; }}/>
         <div style={{ fontSize:34, marginBottom:8 }}>📊</div>
         <div style={{ fontSize:14, fontWeight:700, color:T.t1, fontFamily:F, marginBottom:2 }}>
-          실사 엑셀 파일을 올려주세요
+          일일 판매 엑셀 파일을 올려주세요
         </div>
         <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
           여러 파일 동시 업로드 가능 · .xlsx / .xls
@@ -2068,7 +1999,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
                     {fmtDate(h.date)} ({DOW_KR[h.dow]}요일)
                   </div>
                   <div style={{ fontSize:12, color:T.t3, fontFamily:F }}>
-                    {Object.keys(h.items||{}).length}개 SKU · 판매합계 {Math.round(Object.values(h.items||{}).reduce((s,i)=>s+i.sold,0))}
+                    {Object.keys(h.items||{}).length}개 품목 · 판매 {Math.round(Object.values(h.items||{}).reduce((s,i)=>s+(i.qty||0),0))}개
                   </div>
                 </div>
                 <button onClick={() => deleteHistoryEntry(uploadHistory[uploadHistory.length-1-i].date)} disabled={saving}
@@ -2083,7 +2014,7 @@ function UploadTab({ uploadHistory, onSave, bevHistory, onSaveBev, skuAliases, o
         </div>
       )}
       </div>
-      )} {/* inventory mode end */}
+      )} {/* sales mode end */}
 
       {/* ── 음료 판매 업로드 ── */}
       {uploadMode==="bev" && (
@@ -2249,7 +2180,7 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:13, fontWeight:700, color:T.t1, fontFamily:F,
             overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.filename}</div>
-          <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>{skuCount}개 SKU · {DOW_KR[item.data.dow]}요일</div>
+          <div style={{ fontSize:11, color:T.t3, fontFamily:F }}>{skuCount}개 품목 · {DOW_KR[item.data.dow]}요일</div>
         </div>
         <button onClick={()=>onRemove(item.id)} style={{
           padding:"4px 8px", borderRadius:6, border:"1px solid "+T.b1,
@@ -2293,29 +2224,28 @@ function PendingFileCard({ item, skuAliases, onUpdateDate, onSave, onRemove, onT
             ))}
           </div>
           <div style={{ maxHeight:220, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+            <div style={{ display:"grid", gridTemplateColumns:"2fr 0.6fr 1fr 0.8fr",
               padding:"7px 14px", background:T.brandDim, gap:4 }}>
-              {["품목명","재고","판매","내일","모레","유통"].map(h => (
+              {["품목명","수량","매출액","할인"].map(h => (
                 <div key={h} style={{ fontSize:10, fontWeight:700, color:T.brand, fontFamily:F, textAlign:"center" }}>{h}</div>
               ))}
             </div>
             {filteredItems.map((it, idx) => {
-              const minDday = it.batches.reduce((m,b) => b.dday!==null&&b.dday<m ? b.dday : m, 99);
-              const expiryColor = minDday<=1?T.red:minDday<=3?T.amber:T.t3;
               const dispName = skuAliases[it.sku] || it.name;
               return (
-                <div key={it.sku} style={{ display:"grid", gridTemplateColumns:"1.8fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr",
+                <div key={idx} style={{ display:"grid", gridTemplateColumns:"2fr 0.6fr 1fr 0.8fr",
                   padding:"8px 14px", gap:4, alignItems:"center",
                   background:idx%2===0?T.card2:T.card, borderTop:"1px solid "+T.b0 }}>
                   <div style={{ fontSize:12, fontWeight:600, color:T.t1, fontFamily:F,
                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{dispName}</div>
                   <div style={{ textAlign:"center", fontSize:13, fontWeight:700,
-                    color:it.actualSum===0?T.red:T.t1, fontFamily:F }}>{it.actualSum}</div>
-                  <div style={{ textAlign:"center", fontSize:12, color:T.amber, fontFamily:F }}>{it.sold||"-"}</div>
-                  <div style={{ textAlign:"center", fontSize:12, color:T.blue, fontFamily:F }}>{it.tmrIn||"-"}</div>
-                  <div style={{ textAlign:"center", fontSize:12, color:T.t3, fontFamily:F }}>{it.d2In||"-"}</div>
-                  <div style={{ textAlign:"center", fontSize:11, fontWeight:700,
-                    color:expiryColor, fontFamily:F }}>{minDday<=3&&minDday!==99?"D-"+minDday:"-"}</div>
+                    color:it.qty===0?T.t4:T.t1, fontFamily:F }}>{it.qty||"-"}</div>
+                  <div style={{ textAlign:"center", fontSize:12, color:T.brand, fontFamily:F, fontWeight:600 }}>
+                    {it.sales>0?(it.sales>=10000?Math.round(it.sales/10000)+"만":it.sales.toLocaleString()):"-"}
+                  </div>
+                  <div style={{ textAlign:"center", fontSize:11, color:it.discount>0?T.amber:T.t4, fontFamily:F }}>
+                    {it.discount>0?it.discount.toLocaleString():"-"}
+                  </div>
                 </div>
               );
             })}
@@ -2730,7 +2660,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       <div style={{padding:"12px 14px 0"}}>
         <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
           marginBottom:20,border:"1px solid "+T.b0}}>
-          {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+          {[["sales","📦 판매 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
             <button key={id} onClick={()=>onSwitchMode&&onSwitchMode(id)}
               style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
                 fontFamily:F,fontSize:13,fontWeight:id==="bev"?700:400,
@@ -2744,7 +2674,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
         </div>
       </div>
       <div style={{padding:"0 14px 40px"}}>
-        <EmptyState emoji="🧃" text="음료 판매 데이터가 없어요" sub="실사 탭 → 음료 판매 탭에서 POS 리포트를 업로드하면 통계를 볼 수 있어요"/>
+        <EmptyState emoji="🧃" text="음료 판매 데이터가 없어요" sub="판매 탭 → 음료 판매 탭에서 POS 리포트를 업로드하면 통계를 볼 수 있어요"/>
       </div>
     </div>
   );
@@ -2754,7 +2684,7 @@ function BevStatView({ bevHistory, onSwitchMode }) {
       {/* 세그먼트 컨트롤 */}
       <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
         marginBottom:14,border:"1px solid "+T.b0}}>
-        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+        {[["sales","📦 판매 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
           <button key={id} onClick={()=>onSwitchMode&&onSwitchMode(id)}
             style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
               fontFamily:F,fontSize:13,fontWeight:id==="bev"?700:400,
@@ -3012,9 +2942,26 @@ function BevStatView({ bevHistory, onSwitchMode }) {
 }
 
 
-function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides={}, onSaveFoodSubOverrides }) {
-  const getResolvedFoodSub = (sku, name) => foodSubOverrides[sku] || getFoodSub(name);
-  const [statMode, setStatMode] = React.useState("inventory"); // "inventory" | "bev"
+function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides={}, onSaveFoodSubOverrides, foodSubConfig=null, onSaveFoodSubConfig }) {
+  // 기본 카테고리 or 사용자 설정 카테고리
+  const DEFAULT_SUB_CONFIG = [
+    {name:"케이크",   keywords:["케이크","롤케익","롤케이크","파운드","치즈케이크","치즈케익","타르트"]},
+    {name:"샌드위치", keywords:["샌드위치","샌드","랩","버거","베이글","바게트","치아바타"]},
+    {name:"상온빵",   keywords:["파이","크루아상","스콘","머핀","빵","롤","번","크림빵","소시지빵","도넛","바나나","마들렌","휘낭시에","카스텔라","부쉐","크로플"]},
+    {name:"디저트",   keywords:["마카롱","쿠키","브라우니","트뤼플","와플","아이스크림","요거트","푸딩"]},
+    {name:"간편식",   keywords:["샐러드","수프","죽","라면","삼각","주먹밥"]},
+  ];
+  const activeSubs = foodSubConfig || DEFAULT_SUB_CONFIG;
+  const subNames = React.useMemo(() => [...activeSubs.map(s=>s.name), "기타 푸드"], [activeSubs]);
+  const getConfiguredFoodSub = React.useCallback((itemName) => {
+    const lower = itemName.toLowerCase();
+    for (const {name, keywords} of activeSubs) {
+      if (keywords.some(k => lower.includes(k))) return name;
+    }
+    return "기타 푸드";
+  }, [activeSubs]);
+  const getResolvedFoodSub = (sku, name) => foodSubOverrides[sku] || getConfiguredFoodSub(name);
+  const [statMode, setStatMode] = React.useState("sales"); // "sales" | "bev"
   const DOW = ["일","월","화","수","목","금","토"];
   const rnd = (v,d=1) => Math.round(v*Math.pow(10,d))/Math.pow(10,d);
   const today = new Date().toISOString().slice(0,10);
@@ -3051,10 +2998,12 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
   const [showCustom, setShowCustom] = React.useState(false);
   const [catFilter,  setCatFilter]  = React.useState("전체");
   const [foodSubFilter, setFoodSubFilter] = React.useState("전체");
-  // Food가 선택되지 않으면 서브필터 자동 해제
+  const [showSubConfig, setShowSubConfig] = React.useState(false);
+  // Food가 선택되지 않거나 카테고리가 삭제되면 서브필터 자동 해제
   React.useEffect(() => {
     if (catFilter !== "[20] Food" && foodSubFilter !== "전체") setFoodSubFilter("전체");
-  }, [catFilter]);
+    if (foodSubFilter !== "전체" && !subNames.includes(foodSubFilter)) setFoodSubFilter("전체");
+  }, [catFilter, subNames]);
   const [viewMode,   setViewMode]   = React.useState("overview"); // overview | heatmap | matrix | drill
   const [drillSku,   setDrillSku]   = React.useState(null);
   const [sortKey,    setSortKey]    = React.useState("totalSold");
@@ -3074,61 +3023,43 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
       .sort((a,b)=>a.date.localeCompare(b.date)),
     [uploadHistory, rangeFrom, rangeTo]);
 
-  const allCats = React.useMemo(() => {
-    const s=new Set(); uploadHistory.forEach(h=>Object.values(h.items||{}).forEach(i=>s.add(i.cat)));
-    return [...s].sort();
-  }, [uploadHistory]);
-
-  // ── 자동 누락 감지 ──
-  const autoSkipSet = React.useMemo(() => {
-    const sk=new Set();
-    const sorted=[...uploadHistory].sort((a,b)=>a.date.localeCompare(b.date));
-    for(let i=1;i<sorted.length;i++){
-      const c=sorted[i],p=sorted[i-1];
-      Object.keys(c.items||{}).forEach(sku=>{
-        const ci=c.items[sku],pi=p.items?.[sku];
-        if(ci&&pi&&ci.sold===0&&Math.abs(ci.actualSum-pi.actualSum)===0&&pi.sold>0)
-          sk.add(`${c.date}__${sku}`);
-      });
-    }
-    return sk;
-  }, [uploadHistory]);
+  // 판매 데이터는 모두 Food이므로 카테고리 필터 불필요
+  const allCats = React.useMemo(() => [], []);
 
   // ── 품목별 통계 계산 ──
   const skuStats = React.useMemo(() => {
     const map={};
     periodHist.forEach(h=>{
       Object.entries(h.items||{}).forEach(([sku,item])=>{
-        if(autoSkipSet.has(`${h.date}__${sku}`)) return;
-        if(catFilter!=="전체"&&item.cat!==catFilter) return;
         // Food 서브카테고리 필터
-        if(catFilter==="[20] Food" && foodSubFilter!=="전체") {
+        if(foodSubFilter!=="전체") {
           const name = skuAliases[sku]||item.name;
           if(getResolvedFoodSub(sku, name)!==foodSubFilter) return;
         }
         if(!map[sku]) map[sku]={
-          name:skuAliases[sku]||item.name, cat:item.cat, foodSub:getResolvedFoodSub(sku, skuAliases[sku]||item.name),
-          days:[], soldArr:[], zeroArr:[], inArr:[], spark:[]
+          name:skuAliases[sku]||item.name, cat:item.cat||"[20] Food", foodSub:getResolvedFoodSub(sku, skuAliases[sku]||item.name),
+          days:[], qtyArr:[], salesArr:[], discountArr:[], spark:[]
         };
         const s=map[sku];
         s.days.push({date:h.date,dow:h.dow});
-        s.soldArr.push(item.sold||0);
-        s.zeroArr.push(item.actualSum===0?1:0);
-        s.inArr.push(item.dayIn||0);
-        s.spark.push({date:h.date,sold:item.sold||0,dow:h.dow});
+        s.qtyArr.push(item.qty||0);
+        s.salesArr.push(item.sales||0);
+        s.discountArr.push(item.discount||0);
+        s.spark.push({date:h.date,sold:item.qty||0,dow:h.dow});
       });
     });
     return Object.entries(map).map(([sku,s])=>{
-      const totalSold=rnd(s.soldArr.reduce((a,b)=>a+b,0),0);
-      const avgSold=s.soldArr.length?rnd(totalSold/s.soldArr.length,1):0;
-      const zeroRate=s.zeroArr.length?rnd(s.zeroArr.reduce((a,b)=>a+b,0)/s.zeroArr.length*100,0):0;
-      const totalIn=rnd(s.inArr.reduce((a,b)=>a+b,0),0);
-      const wasteRate=totalIn>0?rnd(Math.max(0,totalIn-totalSold)/totalIn*100,1):null;
-      // 요일별 평균 (판매 0인 날도 포함하여 정확한 평균 산출)
+      const totalQty=rnd(s.qtyArr.reduce((a,b)=>a+b,0),0);
+      const avgQty=s.qtyArr.length?rnd(totalQty/s.qtyArr.length,1):0;
+      const totalSales=rnd(s.salesArr.reduce((a,b)=>a+b,0),0);
+      const avgSales=s.salesArr.length?rnd(totalSales/s.salesArr.length,0):0;
+      const totalDiscount=rnd(s.discountArr.reduce((a,b)=>a+b,0),0);
+      const discountRate=totalSales+totalDiscount>0?rnd(totalDiscount/(totalSales+totalDiscount)*100,1):0;
+      // 요일별 평균
       const dowMap={};
       s.days.forEach((d,i)=>{
         if(!dowMap[d.dow]) dowMap[d.dow]=[];
-        dowMap[d.dow].push(s.soldArr[i]||0);
+        dowMap[d.dow].push(s.qtyArr[i]||0);
       });
       const dowAvg={};
       [0,1,2,3,4,5,6].forEach(d=>{
@@ -3137,47 +3068,43 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
       const wdAvg=rnd(([1,2,3,4,5].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>s+v/(a.length||1),0),1)||null;
       const weAvg=rnd(([0,6].flatMap(d=>dowMap[d]||[])).reduce((s,v,_,a)=>s+v/(a.length||1),0),1)||null;
       const weDiff=(wdAvg&&weAvg)?Math.round(((weAvg-wdAvg)/wdAvg)*100):null;
-      return {sku,name:s.name,cat:s.cat,foodSub:s.foodSub,totalSold,avgSold,zeroRate,totalIn,wasteRate,dowAvg,wdAvg,weAvg,weDiff,spark:s.spark,days:s.days.length};
+      // 호환성: totalSold = totalQty (정렬/테이블에서 공통 사용)
+      return {sku,name:s.name,cat:s.cat,foodSub:s.foodSub,totalSold:totalQty,totalQty,avgQty,totalSales,avgSales,totalDiscount,discountRate,dowAvg,wdAvg,weAvg,weDiff,spark:s.spark,days:s.days.length};
     });
-  }, [periodHist, catFilter, foodSubFilter, autoSkipSet, skuAliases, foodSubOverrides]);
+  }, [periodHist, foodSubFilter, skuAliases, foodSubOverrides]);
 
   // ── 기간 KPI ──
   const kpi = React.useMemo(()=>{
     if(!periodHist.length) return null;
-    const totalSold=rnd(periodHist.reduce((s,h)=>
-      s+Object.entries(h.items||{}).reduce((ss,[sku,i])=>
-        autoSkipSet.has(`${h.date}__${sku}`)?ss:ss+(i.sold||0),0),0),0);
-    const dayAvg=rnd(totalSold/(periodHist.length||1),0);
-    const zeroEvents=periodHist.reduce((s,h)=>
-      s+Object.entries(h.items||{}).filter(([sku,i])=>i.actualSum===0&&!autoSkipSet.has(`${h.date}__${sku}`)).length,0);
-    const latest=[...uploadHistory].sort((a,b)=>b.date.localeCompare(a.date))[0];
-    const todayZero=latest?Object.values(latest.items||{}).filter(i=>i.actualSum===0).length:0;
-    const todayExpiry=latest?Object.values(latest.items||{}).filter(i=>(i.batches||[]).some(b=>b.dday!==null&&b.dday<=3&&b.actual>0)).length:0;
-    return {totalSold,dayAvg,zeroEvents,todayZero,todayExpiry,days:periodHist.length};
-  },[periodHist,autoSkipSet,uploadHistory]);
+    const totalQty=rnd(periodHist.reduce((s,h)=>
+      s+Object.values(h.items||{}).reduce((ss,i)=>ss+(i.qty||0),0),0),0);
+    const totalSales=rnd(periodHist.reduce((s,h)=>
+      s+Object.values(h.items||{}).reduce((ss,i)=>ss+(i.sales||0),0),0),0);
+    const totalDiscount=rnd(periodHist.reduce((s,h)=>
+      s+Object.values(h.items||{}).reduce((ss,i)=>ss+(i.discount||0),0),0),0);
+    const dayAvgQty=rnd(totalQty/(periodHist.length||1),0);
+    const dayAvgSales=rnd(totalSales/(periodHist.length||1),0);
+    const skuCount=new Set(periodHist.flatMap(h=>Object.keys(h.items||{}))).size;
+    return {totalQty,totalSales,totalDiscount,dayAvgQty,dayAvgSales,skuCount,days:periodHist.length};
+  },[periodHist]);
 
   // ── 일별 총 판매 ──
   const dailySales=React.useMemo(()=>periodHist.map(h=>({
     date:h.date,dow:h.dow,
-    sold:rnd(Object.entries(h.items||{}).reduce((s,[sku,i])=>
-      autoSkipSet.has(`${h.date}__${sku}`)?s:s+(i.sold||0),0),0)
-  })),[periodHist,autoSkipSet]);
+    sold:rnd(Object.values(h.items||{}).reduce((s,i)=>s+(i.qty||0),0),0),
+    sales:rnd(Object.values(h.items||{}).reduce((s,i)=>s+(i.sales||0),0),0)
+  })),[periodHist]);
 
   // ── 필터/정렬 테이블 ──
   const tableData=React.useMemo(()=>{
     let rows=[...skuStats];
     if(debouncedSearch) rows=rows.filter(s=>(s.name||"").toLowerCase().includes(debouncedSearch.toLowerCase()));
-    // Food 서브카테고리 그룹 정렬 순서
-    const foodSubOrder = ["샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"];
-    // 기본 정렬: 카테고리 그룹(Bev→Food→원재료) → (Food 안에서는 서브카테고리 그룹) → totalSold 내림차순
+    // 서브카테고리 그룹 정렬 순서
+    const foodSubOrder = subNames;
+    // 기본 정렬: 서브카테고리 그룹 → totalSold 내림차순
     if(sortKey==="totalSold"&&!sortAsc) {
-      const catOrder=["[10] Bev","[20] Food","[50] 원재료"];
       rows.sort((a,b)=>{
-        const ci=catOrder.indexOf(a.cat), cj=catOrder.indexOf(b.cat);
-        const co=(ci===-1?99:ci)-(cj===-1?99:cj);
-        if(co!==0) return co;
-        // Food이고 서브필터가 "전체"일 때 서브카테고리별로 그룹
-        if(a.cat==="[20] Food" && b.cat==="[20] Food") {
+        if(foodSubFilter==="전체") {
           const si=foodSubOrder.indexOf(a.foodSub||"기타 푸드");
           const sj=foodSubOrder.indexOf(b.foodSub||"기타 푸드");
           const so=(si===-1?99:si)-(sj===-1?99:sj);
@@ -3258,7 +3185,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
     if(!rows.length||!dates.length) return <div style={{padding:20,textAlign:"center",color:T.t3,fontFamily:F}}>데이터 없음</div>;
     const soldMap={};
     periodHist.forEach(h=>Object.entries(h.items||{}).forEach(([sku,item])=>{
-      soldMap[`${sku}__${h.date}`]=item.sold||0;
+      soldMap[`${sku}__${h.date}`]=item.qty||0;
     }));
     const maxSold=Math.max(...rows.flatMap(r=>dates.map(d=>soldMap[`${r.sku}__${d}`]||0)),1);
     const getColor=(v,max)=>{
@@ -3331,18 +3258,19 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
     );
   };
 
-  // ── 소진율-폐기율 매트릭스 ──
+  // ── 판매-할인율 매트릭스 ──
   const MatrixView=()=>{
-    const rows=skuStats.filter(s=>s.days>=3&&(s.wasteRate!==null||s.zeroRate>0));
+    const rows=skuStats.filter(s=>s.days>=3&&s.totalQty>0);
     if(!rows.length) return <div style={{padding:20,textAlign:"center",color:T.t3,fontFamily:F}}>데이터 부족 (3일 이상 필요)</div>;
-    // 4분면: X=소진율, Y=폐기율
+    // 4분면: X=일평균 판매, Y=할인율
+    const medianQty=rows.map(r=>r.avgQty).sort((a,b)=>a-b)[Math.floor(rows.length/2)]||1;
     const q={A:[],B:[],C:[],D:[]};
     rows.forEach(r=>{
-      const hi_zero=r.zeroRate>15, hi_waste=r.wasteRate!==null&&r.wasteRate>8;
-      if(hi_zero&&hi_waste)  q.A.push(r); // 둘다 높음 → 발주 사이클 문제
-      else if(hi_zero)       q.B.push(r); // 소진 높음 → 발주 늘려야
-      else if(hi_waste)      q.C.push(r); // 폐기 높음 → 발주 줄여야
-      else                   q.D.push(r); // 양호
+      const hi_qty=r.avgQty>=medianQty, hi_disc=r.discountRate>5;
+      if(hi_qty&&hi_disc)    q.A.push(r); // 판매 많고 할인 높음 → 할인 의존
+      else if(hi_qty)         q.D.push(r); // 판매 많고 할인 낮음 → 우수
+      else if(hi_disc)        q.C.push(r); // 판매 적고 할인 높음 → 비효율
+      else                    q.B.push(r); // 판매 적고 할인 낮음 → 저조
     });
     const QuadCard=({title,items,color,dim,icon,desc})=>(
       <div style={{background:dim,border:"1px solid "+color+"44",borderRadius:12,padding:"12px 14px"}}>
@@ -3364,7 +3292,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                 {item.name.length>16?item.name.slice(0,15)+"…":item.name}
               </span>
               <span style={{fontSize:11,color,fontFamily:F,flexShrink:0,marginLeft:8}}>
-                소진{item.zeroRate}% / 폐기{item.wasteRate??"-"}%
+                평균{item.avgQty}개 / 할인{item.discountRate}%
               </span>
             </div>
           ))
@@ -3375,18 +3303,18 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
     return(
       <div>
         <div style={{fontSize:12,color:T.t3,fontFamily:F,marginBottom:12,lineHeight:1.6}}>
-          소진율(재고=0 비율)과 폐기율(입고 대비 판매 손실)로 품목을 분류해요.
+          판매량(중앙값 기준)과 할인율(5% 기준)로 품목을 분류해요.
           <strong style={{color:T.t1}}> 클릭하면 상세 추이를 볼 수 있어요.</strong>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <QuadCard title="발주 불규칙" items={q.A} color="#AF52DE" dim="rgba(175,82,222,0.07)"
-            icon="⚠️" desc="소진↑ 폐기↑"/>
-          <QuadCard title="발주 부족" items={q.B} color={T.red} dim={T.rDim}
-            icon="📉" desc="소진↑ 폐기 양호"/>
-          <QuadCard title="발주 과잉" items={q.C} color={T.amber} dim={T.aDim}
-            icon="📦" desc="소진 양호 폐기↑"/>
-          <QuadCard title="양호" items={q.D} color={T.brand} dim={T.brandDim}
-            icon="✅" desc="소진·폐기 모두 양호"/>
+          <QuadCard title="할인 의존" items={q.A} color="#AF52DE" dim="rgba(175,82,222,0.07)"
+            icon="⚠️" desc="판매↑ 할인↑"/>
+          <QuadCard title="판매 저조" items={q.B} color={T.red} dim={T.rDim}
+            icon="📉" desc="판매↓ 할인↓"/>
+          <QuadCard title="비효율" items={q.C} color={T.amber} dim={T.aDim}
+            icon="📦" desc="판매↓ 할인↑"/>
+          <QuadCard title="우수" items={q.D} color={T.brand} dim={T.brandDim}
+            icon="✅" desc="판매↑ 할인↓"/>
         </div>
       </div>
     );
@@ -3400,7 +3328,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
     const sparkData=stat.spark.slice(-21);
     const maxSpark=Math.max(...sparkData.map(d=>d.sold),1);
     const isFood=stat.cat==="[20] Food";
-    const autoSub=getFoodSub(skuAliases[stat.sku]||stat.name);
+    const autoSub=getConfiguredFoodSub(skuAliases[stat.sku]||stat.name);
     const currentSub=stat.foodSub||"기타 푸드";
     const isOverridden=!!foodSubOverrides[stat.sku];
     return(
@@ -3439,7 +3367,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
             </div>
             {editingFoodSub&&(
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-                {["샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"].map(sub=>{
+                {subNames.map(sub=>{
                   const isActive=currentSub===sub;
                   const isAutoMatch=autoSub===sub;
                   return(
@@ -3467,11 +3395,11 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
         {/* KPI */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
           {[
-            {label:"기간 총 판매",value:stat.totalSold+"개",color:T.brand},
-            {label:"일 평균",value:stat.avgSold+"개",color:T.t2},
-            {label:"소진율",value:stat.zeroRate+"%",color:stat.zeroRate>20?T.red:T.t2},
-            {label:"폐기율",value:stat.wasteRate!==null?stat.wasteRate+"%":"-",
-              color:stat.wasteRate!==null&&stat.wasteRate>8?T.amber:T.t2},
+            {label:"기간 총 판매",value:stat.totalQty+"개",color:T.brand},
+            {label:"일 평균",value:stat.avgQty+"개",color:T.t2},
+            {label:"총 매출",value:stat.totalSales>=10000?Math.round(stat.totalSales/10000)+"만":stat.totalSales.toLocaleString(),color:T.amber},
+            {label:"할인율",value:stat.discountRate>0?stat.discountRate+"%":"-",
+              color:stat.discountRate>10?T.red:T.t2},
           ].map(k=>(
             <div key={k.label} style={{background:T.card,border:"1px solid "+T.b0,
               borderRadius:12,padding:"10px 12px",textAlign:"center"}}>
@@ -3561,7 +3489,7 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
     <div style={{padding:"40px 20px",textAlign:"center"}}>
       <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
         marginBottom:20,border:"1px solid "+T.b0}}>
-        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+        {[["sales","📦 판매 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
           <button key={id} onClick={()=>setStatMode(id)}
             style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
               fontFamily:F,fontSize:13,fontWeight:statMode===id?700:400,
@@ -3573,16 +3501,16 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
           </button>
         ))}
       </div>
-      <EmptyState emoji="📦" text="재고 실사 데이터가 없어요" sub="실사 탭에서 엑셀 파일을 업로드하면 통계를 볼 수 있어요"/>
+      <EmptyState emoji="📦" text="판매 데이터가 없어요" sub="판매 탭에서 일일 판매 엑셀을 업로드하면 통계를 볼 수 있어요"/>
     </div>
   );
 
   return(
     <div style={{padding:window.innerWidth>=768?"24px 28px":"12px"}}>
-      {/* ── 재고/음료 세그먼트 컨트롤 ── */}
+      {/* ── 푸드/음료 세그먼트 컨트롤 ── */}
       <div style={{display:"flex",background:T.card2,borderRadius:12,padding:3,
         marginBottom:14,border:"1px solid "+T.b0}}>
-        {[["inventory","📦 재고 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
+        {[["sales","📦 판매 통계"],["bev","🧃 음료 통계"]].map(([id,label])=>(
           <button key={id} onClick={()=>setStatMode(id)}
             style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",
               fontFamily:F,fontSize:13,fontWeight:statMode===id?700:400,
@@ -3623,26 +3551,9 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
             직접 설정
           </button>
         </div>
-        {/* 카테고리 */}
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginLeft:"auto"}}>
-          {["전체",...allCats].map(c=>(
-            <button key={c} onClick={()=>setCatFilter(c)} style={{
-              padding:"5px 10px",borderRadius:16,cursor:"pointer",fontFamily:F,fontSize:11,
-              border:"1px solid "+(catFilter===c?T.brand:T.b1),
-              background:catFilter===c?T.brandDim:T.card,
-              color:catFilter===c?T.brand:T.t2,fontWeight:catFilter===c?700:400}}>
-              {c.replace("[10] ","").replace("[20] ","").replace("[50] ","")}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Food 서브카테고리 필터 */}
-      {catFilter==="[20] Food" && (
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12,alignItems:"center",
-          padding:"8px 12px",borderRadius:10,background:T.card2,border:"1px solid "+T.b0}}>
-          <span style={{fontSize:11,color:T.t3,fontFamily:F,fontWeight:600,marginRight:6}}>🍽 Food 세부</span>
-          {["전체","샌드위치","케이크","상온빵","디저트","간편식","기타 푸드"].map(s=>(
+        {/* 서브카테고리 필터 */}
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginLeft:"auto",alignItems:"center"}}>
+          {["전체",...subNames].map(s=>(
             <button key={s} onClick={()=>setFoodSubFilter(s)} style={{
               padding:"4px 10px",borderRadius:14,cursor:"pointer",fontFamily:F,fontSize:11,
               border:"1px solid "+(foodSubFilter===s?T.amber:T.b1),
@@ -3651,8 +3562,73 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
               {s}
             </button>
           ))}
+          <button onClick={()=>setShowSubConfig(v=>!v)} style={{
+            padding:"4px 8px",borderRadius:14,cursor:"pointer",fontFamily:F,fontSize:11,
+            border:"1px solid "+(showSubConfig?T.amber:T.b1),
+            background:showSubConfig?T.aDim:T.card,color:showSubConfig?T.amber:T.t3}}
+            title="카테고리 설정">⚙️</button>
         </div>
-      )}
+      </div>
+
+      {/* Food 서브카테고리 설정 패널 */}
+      {showSubConfig && (()=>{
+        const cfg = [...activeSubs];
+        const update = (newCfg) => onSaveFoodSubConfig(newCfg);
+        const resetToDefault = () => { onSaveFoodSubConfig(null); setShowSubConfig(false); };
+        return(
+          <div style={{marginBottom:14,padding:"14px 16px",borderRadius:12,
+            background:T.card,border:"1px solid "+T.amber+"44",
+            boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:700,color:T.t1,fontFamily:F}}>🍽 서브카테고리 설정</div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={resetToDefault} style={{fontSize:11,padding:"4px 10px",borderRadius:6,
+                  border:"1px solid "+T.b1,background:T.card2,color:T.t3,fontFamily:F,cursor:"pointer"}}>
+                  기본값 복원
+                </button>
+                <button onClick={()=>setShowSubConfig(false)} style={{fontSize:14,background:"none",
+                  border:"none",cursor:"pointer",color:T.t3,padding:"2px 6px"}}>✕</button>
+              </div>
+            </div>
+            {cfg.map((sub, idx) => (
+              <div key={idx} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,
+                padding:"8px 10px",borderRadius:8,background:T.card2,border:"1px solid "+T.b0}}>
+                <span style={{fontSize:12,color:T.t3,fontWeight:700,minWidth:18,textAlign:"center"}}>{idx+1}</span>
+                <input value={sub.name}
+                  onChange={e=>{const n=[...cfg]; n[idx]={...n[idx],name:e.target.value}; update(n);}}
+                  placeholder="카테고리명"
+                  style={{flex:"0 0 80px",padding:"5px 8px",borderRadius:6,border:"1px solid "+T.b1,
+                    fontFamily:F,fontSize:12,fontWeight:600,color:T.t1,background:T.bg}}/>
+                <input value={sub.keywords.join(", ")}
+                  onChange={e=>{
+                    const kw = e.target.value.split(/[,，]\s*/).map(s=>s.trim()).filter(Boolean);
+                    const n=[...cfg]; n[idx]={...n[idx],keywords:kw}; update(n);
+                  }}
+                  placeholder="키워드 (쉼표로 구분)"
+                  style={{flex:1,padding:"5px 8px",borderRadius:6,border:"1px solid "+T.b1,
+                    fontFamily:F,fontSize:11,color:T.t2,background:T.bg}}/>
+                <button onClick={()=>{
+                    if(cfg.length<=1) return;
+                    const n=cfg.filter((_,i)=>i!==idx); update(n);
+                  }}
+                  style={{fontSize:14,background:"none",border:"none",cursor:cfg.length<=1?"not-allowed":"pointer",
+                    color:cfg.length<=1?T.t4:T.red,padding:"2px 6px",opacity:cfg.length<=1?0.4:1}}
+                  title="삭제">🗑</button>
+              </div>
+            ))}
+            <button onClick={()=>{
+                const n=[...cfg, {name:"새 카테고리", keywords:[]}]; update(n);
+              }}
+              style={{width:"100%",padding:"8px 0",borderRadius:8,cursor:"pointer",fontFamily:F,fontSize:12,
+                border:"1px dashed "+T.b1,background:"transparent",color:T.brand,fontWeight:600,marginTop:4}}>
+              + 카테고리 추가
+            </button>
+            <div style={{fontSize:10,color:T.t4,fontFamily:F,marginTop:8}}>
+              키워드: 품목명에 포함된 단어로 자동 분류됩니다. 쉼표로 구분해주세요. 어디에도 매칭되지 않으면 "기타 푸드"로 분류돼요.
+            </div>
+          </div>
+        );
+      })()}
 
       {showCustom&&(
         <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
@@ -3674,40 +3650,15 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
             {periodHist.length>0?` (${periodHist.length}일)`:` — 해당 기간 데이터 없음`}
           </div>
 
-          {/* ── Action Items ── */}
-          {kpi&&(kpi.todayZero>0||kpi.todayExpiry>0)&&(
-            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-              {kpi.todayZero>0&&(
-                <div style={{flex:1,minWidth:130,display:"flex",alignItems:"center",gap:8,
-                  padding:"10px 14px",borderRadius:12,background:T.rDim,border:"1px solid "+T.rBdr}}>
-                  <span style={{fontSize:18}}>🚨</span>
-                  <div style={{fontFamily:F}}>
-                    <div style={{fontSize:12,fontWeight:700,color:T.red}}>오늘 품절 {kpi.todayZero}개</div>
-                    <div style={{fontSize:10,color:T.t3}}>재고 0 품목</div>
-                  </div>
-                </div>
-              )}
-              {kpi.todayExpiry>0&&(
-                <div style={{flex:1,minWidth:130,display:"flex",alignItems:"center",gap:8,
-                  padding:"10px 14px",borderRadius:12,
-                  background:"rgba(192,64,0,0.07)",border:"1px solid rgba(192,64,0,0.2)"}}>
-                  <span style={{fontSize:18}}>⏰</span>
-                  <div style={{fontFamily:F}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#C04000"}}>유통임박 {kpi.todayExpiry}개</div>
-                    <div style={{fontSize:10,color:T.t3}}>D-3 이하</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Action Items — 판매 데이터 기반에서는 재고/유통기한 정보 없음 */}
 
           {/* ── KPI 카드 ── */}
           {kpi&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
               {[
-                {label:"기간 총 판매",value:kpi.totalSold+"개",color:T.brand},
-                {label:"일 평균 판매",value:kpi.dayAvg+"개",color:T.t2},
-                {label:"재고소진 횟수",value:kpi.zeroEvents+"회",color:kpi.zeroEvents>30?T.amber:T.t2},
+                {label:"기간 총 판매",value:kpi.totalQty+"개",color:T.brand},
+                {label:"일 평균",value:kpi.dayAvgQty+"개",color:T.t2},
+                {label:"기간 총 매출",value:kpi.totalSales>=10000?Math.round(kpi.totalSales/10000)+"만원":kpi.totalSales.toLocaleString()+"원",color:T.amber},
               ].map(c=>(
                 <div key={c.label} style={{background:T.card,border:"1px solid "+T.b0,
                   borderRadius:12,padding:"12px 14px",textAlign:"center"}}>
@@ -3793,13 +3744,12 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
             const merge=(hist)=>{
               const m={};
               hist.forEach(h=>Object.entries(h.items||{}).forEach(([sku,item])=>{
-                if(catFilter!=="전체"&&item.cat!==catFilter) return;
-                if(catFilter==="[20] Food" && foodSubFilter!=="전체") {
+                if(foodSubFilter!=="전체") {
                   const name = skuAliases[sku]||item.name;
                   if(getResolvedFoodSub(sku, name)!==foodSubFilter) return;
                 }
-                if(!m[sku]) m[sku]={name:skuAliases[sku]||item.name,cat:item.cat,sold:0,days:0};
-                m[sku].sold+=(item.sold||0); m[sku].days++;
+                if(!m[sku]) m[sku]={name:skuAliases[sku]||item.name,cat:item.cat||"[20] Food",qty:0,sales:0,days:0};
+                m[sku].qty+=(item.qty||0); m[sku].sales+=(item.sales||0); m[sku].days++;
               }));
               return m;
             };
@@ -3807,12 +3757,12 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
             const allSkus=[...new Set([...Object.keys(curMap),...Object.keys(prevMap)])];
 
             const rows=allSkus.map(sku=>{
-              const c=curMap[sku]||{name:(prevMap[sku]||{}).name||sku,cat:"",sold:0,days:0};
-              const p=prevMap[sku]||{sold:0,days:0};
-              const cAvg=c.days?rnd(c.sold/c.days,1):0;
-              const pAvg=p.days?rnd(p.sold/p.days,1):0;
+              const c=curMap[sku]||{name:(prevMap[sku]||{}).name||sku,cat:"",qty:0,sales:0,days:0};
+              const p=prevMap[sku]||{qty:0,sales:0,days:0};
+              const cAvg=c.days?rnd(c.qty/c.days,1):0;
+              const pAvg=p.days?rnd(p.qty/p.days,1):0;
               const diff=pAvg>0?rnd((cAvg-pAvg)/pAvg*100,0):cAvg>0?100:0;
-              return {sku,name:c.name,cat:c.cat,curSold:c.sold,prevSold:p.sold,cAvg,pAvg,diff};
+              return {sku,name:c.name,cat:c.cat,curQty:c.qty,prevQty:p.qty,cAvg,pAvg,diff};
             }).filter(r=>r.curSold>0||r.prevSold>0)
               .sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
 
@@ -3834,8 +3784,8 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                 {/* 요약 카드 */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"12px 16px"}}>
                   {[
-                    {l:prevLabel+" 총합",v:rows.reduce((s,r)=>s+r.prevSold,0),c:T.t3},
-                    {l:curLabel+" 총합",v:rows.reduce((s,r)=>s+r.curSold,0),c:T.brand},
+                    {l:prevLabel+" 총합",v:rows.reduce((s,r)=>s+r.prevQty,0),c:T.t3},
+                    {l:curLabel+" 총합",v:rows.reduce((s,r)=>s+r.curQty,0),c:T.brand},
                     {l:"증가 품목",v:rows.filter(r=>r.diff>0).length+"개",c:"#007AFF"},
                   ].map(s=>(
                     <div key={s.l} style={{background:T.card2,borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
@@ -3926,9 +3876,9 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                   <button onClick={()=>{
                     const DOW_NAMES=["일","월","화","수","목","금","토"];
                     downloadCSV(
-                      `재고통계_${rangeFrom}~${rangeTo}.csv`,
-                      ["품목","카테고리","서브카테고리","총판매","일평균","결품률(%)","폐기율(%)","월평균","화평균","수평균","목평균","금평균","토평균","일평균"],
-                      tableData.map(s=>[s.name,s.cat,s.cat==="[20] Food"?(s.foodSub||"기타 푸드"):"",s.totalSold,s.avgSold,s.zeroRate,s.wasteRate??0,
+                      `판매통계_${rangeFrom}~${rangeTo}.csv`,
+                      ["품목","서브카테고리","총수량","일평균","총매출","일평균매출","할인율(%)","월평균","화평균","수평균","목평균","금평균","토평균","일평균"],
+                      tableData.map(s=>[s.name,s.foodSub||"기타 푸드",s.totalQty,s.avgQty,s.totalSales,s.avgSales,s.discountRate,
                         ...[1,2,3,4,5,6,0].map(d=>s.dowAvg[d]??0)])
                     );
                   }} style={{fontSize:11,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.b1,
@@ -3942,53 +3892,28 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                   <thead>
                     <tr style={{background:T.brandDim}}>
                       <th style={{padding:"8px 10px",textAlign:"left",color:T.brand,fontWeight:700,minWidth:130}}>품목명</th>
-                      {catFilter==="전체"&&<th style={{padding:"8px 8px",textAlign:"center",color:T.t3,fontWeight:700,minWidth:55}}>카테고리</th>}
-                      <SortTh k="totalSold" label="총 판매" color={T.brand} minW={55}/>
-                      <SortTh k="avgSold"   label="일 평균" color={T.brand} minW={55}/>
-                      <SortTh k="wdAvg"     label="📅 평일" color={T.t2}   minW={50}/>
-                      <SortTh k="weAvg"     label="🌅 주말" color={T.amber} minW={50}/>
+                      <SortTh k="totalSold" label="총 수량" color={T.brand} minW={50}/>
+                      <SortTh k="avgQty"    label="일 평균" color={T.brand} minW={50}/>
+                      <SortTh k="totalSales" label="총 매출" color={T.amber} minW={60}/>
+                      <SortTh k="wdAvg"     label="📅 평일" color={T.t2}   minW={45}/>
+                      <SortTh k="weAvg"     label="🌅 주말" color={T.amber} minW={45}/>
                       <SortTh k="weDiff"    label="주말증감" color={T.amber} minW={55}/>
-                      <SortTh k="zeroRate"  label="소진율"  color={T.red}   minW={50}/>
-                      <SortTh k="wasteRate" label="폐기율"  color={T.amber} minW={50}/>
+                      <SortTh k="discountRate" label="할인율" color={T.red} minW={45}/>
                       <th style={{padding:"8px 8px",textAlign:"center",color:T.t3,fontWeight:700,minWidth:60}}>추이</th>
                     </tr>
                   </thead>
                   <tbody>
                     {tableData.map((s,i)=>{
                       const weColor=s.weDiff===null?T.t4:s.weDiff>=30?T.amber:s.weDiff<=-30?T.blue:T.t2;
-                      const zeroColor=s.zeroRate>30?T.red:s.zeroRate>15?T.amber:T.t3;
-                      const wasteColor=s.wasteRate!==null&&s.wasteRate>8?T.amber:T.t3;
-                      const showCatHeader=sortKey==="totalSold"&&!sortAsc&&catFilter==="전체"&&(i===0||tableData[i-1].cat!==s.cat);
-                      const catLabel=s.cat.replace("[10] ","").replace("[20] ","").replace("[50] ","");
-                      // Food 서브카테고리 그룹 헤더 (Food 필터 or 전체 + 서브필터가 "전체" + Food항목일 때)
-                      const isInFoodSection = s.cat==="[20] Food" && (catFilter==="[20] Food" || catFilter==="전체");
-                      const showSubHeader = sortKey==="totalSold" && !sortAsc && isInFoodSection && foodSubFilter==="전체" &&
-                        (i===0 || tableData[i-1].cat!==s.cat || tableData[i-1].foodSub!==s.foodSub);
+                      const discColor=s.discountRate>10?T.red:s.discountRate>5?T.amber:T.t3;
+                      // Food 서브카테고리 그룹 헤더
+                      const showSubHeader = sortKey==="totalSold" && !sortAsc && foodSubFilter==="전체" &&
+                        (i===0 || tableData[i-1].foodSub!==s.foodSub);
                       return(
                         <React.Fragment key={s.sku}>
-                          {showCatHeader&&(
+                          {showSubHeader&&(
                             <tr>
-                              <td colSpan="10" style={{padding:"6px 10px 3px",
-                                fontSize:10,fontWeight:800,color:T.brand,fontFamily:F,
-                                background:T.brandDim,
-                                borderTop:i===0?"none":"2px solid "+T.brandBorder,
-                                letterSpacing:0.5}}>
-                                {catLabel}
-                              </td>
-                            </tr>
-                          )}
-                          {showSubHeader&&!showCatHeader&&(
-                            <tr>
-                              <td colSpan="10" style={{padding:"4px 14px 2px",
-                                fontSize:10,fontWeight:700,color:T.amber,fontFamily:F,
-                                background:T.aDim,letterSpacing:0.3}}>
-                                🍽 {s.foodSub||"기타 푸드"}
-                              </td>
-                            </tr>
-                          )}
-                          {showSubHeader&&showCatHeader&&(
-                            <tr>
-                              <td colSpan="10" style={{padding:"4px 14px 2px",
+                              <td colSpan="9" style={{padding:"5px 14px 2px",
                                 fontSize:10,fontWeight:700,color:T.amber,fontFamily:F,
                                 background:T.aDim,letterSpacing:0.3}}>
                                 🍽 {s.foodSub||"기타 푸드"}
@@ -4005,19 +3930,14 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                                 {s.name}
                               </div>
                             </td>
-                          {catFilter==="전체"&&(
-                            <td style={{padding:"7px 6px",textAlign:"center"}}>
-                              <span style={{fontSize:9,color:T.t3,background:T.card3,
-                                borderRadius:4,padding:"1px 5px",whiteSpace:"nowrap"}}>
-                                {s.cat.replace("[10] ","").replace("[20] ","").replace("[50] ","")}
-                              </span>
-                            </td>
-                          )}
                           <td style={{padding:"7px 8px",textAlign:"center",color:T.brand,fontWeight:700}}>
-                            {s.totalSold>0?s.totalSold:<span style={{color:T.t4}}>-</span>}
+                            {s.totalQty>0?s.totalQty:<span style={{color:T.t4}}>-</span>}
                           </td>
                           <td style={{padding:"7px 8px",textAlign:"center",color:T.t2,fontWeight:600}}>
-                            {s.avgSold>0?s.avgSold:<span style={{color:T.t4}}>-</span>}
+                            {s.avgQty>0?s.avgQty:<span style={{color:T.t4}}>-</span>}
+                          </td>
+                          <td style={{padding:"7px 8px",textAlign:"center",color:T.amber,fontWeight:600,fontSize:10}}>
+                            {s.totalSales>0?(s.totalSales>=10000?Math.round(s.totalSales/10000)+"만":s.totalSales.toLocaleString()):<span style={{color:T.t4}}>-</span>}
                           </td>
                           <td style={{padding:"7px 8px",textAlign:"center",color:T.t2}}>
                             {s.wdAvg??<span style={{color:T.t4}}>-</span>}
@@ -4028,11 +3948,8 @@ function HistoryTab({ uploadHistory, bevHistory=[], skuAliases, foodSubOverrides
                           <td style={{padding:"7px 8px",textAlign:"center",color:weColor,fontWeight:700}}>
                             {s.weDiff!==null?(s.weDiff>0?"▲":"▼")+Math.abs(s.weDiff)+"%"+(s.weDiff>=30?" 🌅":""):<span style={{color:T.t4}}>-</span>}
                           </td>
-                          <td style={{padding:"7px 8px",textAlign:"center",color:zeroColor,fontWeight:600}}>
-                            {s.zeroRate>0?s.zeroRate+"%":<span style={{color:T.t4}}>-</span>}
-                          </td>
-                          <td style={{padding:"7px 8px",textAlign:"center",color:wasteColor,fontWeight:600}}>
-                            {s.wasteRate!==null?s.wasteRate+"%":<span style={{color:T.t4}}>-</span>}
+                          <td style={{padding:"7px 8px",textAlign:"center",color:discColor,fontWeight:600}}>
+                            {s.discountRate>0?s.discountRate+"%":<span style={{color:T.t4}}>-</span>}
                           </td>
                           <td style={{padding:"4px 8px",textAlign:"center"}}>
                             <Spark data={s.spark.slice(-7)}/>
